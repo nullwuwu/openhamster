@@ -77,7 +77,8 @@ class WalkForwardValidator:
         else:
             degradation_ratio = 0.0
         
-        is_robust = degradation_ratio >= self.robustness_threshold
+        # Robust 判定: test_sharpe > 0 且 衰减合理
+        is_robust = (test_result.sharpe > 0) and (degradation_ratio >= self.robustness_threshold)
         
         logger.info(
             f"✅ [WalkForward] Done: train_sharpe={train_result.sharpe:.2f}, "

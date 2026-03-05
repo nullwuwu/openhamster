@@ -59,10 +59,14 @@ class DualMAStrategy(Strategy):
         fast_period: int = 20,
         short_period: int = 50,
         use_long_only: bool = True,
+        use_regime_filter: bool = False,  # 是否启用 regime filter
+        regime_config: "RegimeConfig" = None,  # Regime 配置
     ):
         self.fast_period = fast_period
         self.short_period = short_period
         self.use_long_only = use_long_only
+        self.use_regime_filter = use_regime_filter
+        self.regime_config = regime_config
 
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
         """生成交易信号"""
@@ -77,6 +81,23 @@ class DualMAStrategy(Strategy):
         signals[fast_ma > slow_ma] = 1  # 做多
         signals[fast_ma < slow_ma] = -1 if not self.use_long_only else 0
         
+        # Regime filter: ranging 时强制空仓
+        if self.use_regime_filter:
+            from .regime import RegimeDetector
+            config = self.regime_config
+            detector = RegimeDetector(config)
+            
+            # 逐日判断 regime
+            for i in range(len(data)):
+                if i < 50:  # 需要足够历史
+                    continue
+                
+                window = data.iloc[:i+1]
+                regime = detector.detect(window)
+                
+                if regime.value == "ranging":
+                    signals.iloc[i] = 0  # 震荡市不交易
+        
         return signals
 
     def get_params(self) -> dict[str, Any]:
@@ -85,6 +106,7 @@ class DualMAStrategy(Strategy):
             "fast_period": self.fast_period,
             "short_period": self.short_period,
             "use_long_only": self.use_long_only,
+            "use_regime_filter": self.use_regime_filter,
         }
     
     def count_crossovers(self, data: pd.DataFrame) -> int:
