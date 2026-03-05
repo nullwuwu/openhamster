@@ -1,0 +1,34 @@
+hard_gates:
+  max_drawdown: 0.20
+  min_data_years: 3
+  required_assumptions:
+    - slippage
+    - commission
+    - tax
+    - dividend_withholding
+
+yellow_flags:
+  max_drawdown_warning_range: [0.15, 0.20]
+  suspiciously_high_cagr: 0.40
+  param_sensitivity_threshold: 0.50
+  first_live_deployment: true
+
+weights:
+  cagr: 0.35
+  max_dd: 0.35
+  sharpe: 0.20
+  turnover: 0.10
+  adjust_range: 0.10
+
+limits:
+  max_debate_rounds: 2
+  max_iterations: 3
+  on_max_reached: STOP_AND_NOTIFY_HUMAN
+
+# 交易成本假设 (BacktestEngine 使用)
+trading_costs:
+  slippage_bps: 5        # 滑点 (basis points, 5 = 0.05%)
+  commission_rate: 0.001 # 佣金率 (0.1%)
+  tax_rate: 0.001        # 印花税率 (0.1%, 美股为0)
+  dividend_withholding: 0.15 # 股息预扣税率 (15%)
+
