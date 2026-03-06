@@ -51,8 +51,11 @@ htmlcov/
 config/*.yaml
 !config/*.example.yaml
 
-# Data
-data/
+# Data (actual data files in project root, not source code)
+# Note: src/quant_trader/data/ contains source code, do NOT ignore
+/data/
+/raw/
+/cache/
 *.db
 *.sqlite
 
