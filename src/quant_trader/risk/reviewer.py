@@ -1,8 +1,8 @@
 from __future__ import annotations
 import logging
 
-from .models import BacktestResult, ReviewOutput, Verdict
-from .policy import policy
+from ..models import BacktestResult, ReviewOutput, Verdict
+from ..policy import policy
 
 logger = logging.getLogger("quant_trader.reviewer")
 

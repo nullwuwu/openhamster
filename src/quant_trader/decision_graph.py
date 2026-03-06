@@ -148,7 +148,7 @@ class BacktestOperator:
         # 如果有真实回测参数，调用 BacktestEngine
         if params.get("use_real_engine", False) or params.get("ticker"):
             try:
-                from .backtest_engine import BacktestEngine, DualMAStrategy
+                from .backtest.backtest_engine import BacktestEngine, DualMAStrategy
                 
                 ticker = params.get("ticker", "SPY")
                 fast_period = params.get("fast_period", 20)
@@ -297,7 +297,7 @@ class RiskGate:
         )
 
         # Use existing reviewer
-        from .reviewer import risk_gate_review
+        from .risk.reviewer import risk_gate_review
         review = risk_gate_review(result)
 
         logger.info(

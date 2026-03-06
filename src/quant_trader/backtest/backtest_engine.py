@@ -16,9 +16,9 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
-from .models import BacktestResult
-from .policy import policy
-from .data import DataProvider, YFinanceProvider, TwelveDataProvider
+from ..models import BacktestResult
+from ..policy import policy
+from ..data import DataProvider, YFinanceProvider, TwelveDataProvider
 
 logger = logging.getLogger("quant_trader.backtest")
 

@@ -5,7 +5,7 @@ import logging
 from mcp.server.fastmcp import FastMCP
 
 from .models import BacktestResult
-from .reviewer import risk_gate_review
+from .risk.reviewer import risk_gate_review
 from .decision_graph import DecisionGraph, create_graph
 
 logging.basicConfig(
