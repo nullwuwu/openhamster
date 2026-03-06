@@ -1,3 +1,6 @@
+# 策略与风控配置示例
+# 复制为 config/policy.yaml 并修改参数
+
 hard_gates:
   max_drawdown: 0.20
   min_data_years: 3
@@ -39,21 +42,21 @@ portfolio:
     - "9988.HK"  # 阿里巴巴
   default_capital: 1000000  # 每只股票默认资金
 
-# 长桥券商配置
+# 券商配置
 broker:
   type: longbridge
   mode: dry_run  # readonly / dry_run / live
   max_order_value: 5000  # 单笔最大下单金额 (HKD)
   require_confirm_live: true  # live 模式启动时需要确认
 
-# 通知配置
+# 通知配置 (敏感信息运行时注入)
 notifications:
   telegram:
-    enabled: true
-    chat_id: "8592052869"  # 你的 Telegram chat_id
+    enabled: false
+    chat_id: ""  # 你的 Telegram chat_id
   email:
     enabled: false
-    smtp_host: "smtp.gmail.com"
+    smtp_host: ""
     smtp_port: 587
     from_addr: ""
     to_addrs: []
@@ -64,4 +67,3 @@ trading_costs:
   commission_rate: 0.001 # 佣金率 (0.1%)
   tax_rate: 0.001        # 印花税率 (0.1%, 美股为0)
   dividend_withholding: 0.15 # 股息预扣税率 (15%)
-

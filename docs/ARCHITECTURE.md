@@ -186,6 +186,27 @@ client = MiniMaxClient(api_key="...")
 client.chat_json(user_prompt) → dict
 ```
 
+### 6. Data Providers (data/)
+
+可插拔数据源实现：
+
+| Provider | 支持市场 | 说明 |
+|----------|----------|------|
+| YFinanceProvider | 美股/港股 | 直接 HTTP API，绕过限流 |
+| TwelveDataProvider | 全球 | 需要 API Key |
+| AkShareProvider | 港股/A股 | 国内源，数据完整 |
+| StooqProvider | 港股/全球 | 国际源，稳定 |
+
+### 7. Broker (broker/)
+
+交易执行层：
+
+| Broker | 模式 | 说明 |
+|--------|------|------|
+| LongBridgeBroker | 实盘 | 港股实盘 |
+| FutuBroker | 实盘 | 港股实盘 |
+| PaperBroker | 模拟 | 模拟盘 |
+
 ---
 
 ## 数据流
@@ -250,7 +271,8 @@ trading_costs:     # 交易成本
 
 ## 扩展点
 
-1. **新增策略** → 在 `backtest_engine.py` 添加 Strategy 子类
-2. **新增数据源** → 修改 `BacktestEngine.load_data()`
-3. **新增 LLM** → 修改 `llm.py` 支持其他 API
-4. **新增风控规则** → 修改 `reviewer.py` 和 `policy.yaml`
+1. **新增策略** → 在 `strategy/` 添加 Strategy 子类
+2. **新增数据源** → 在 `data/` 添加 Provider 实现
+3. **新增 Broker** → 在 `broker/` 添加 Broker 实现
+4. **新增 LLM** → 修改 `llm.py` 支持其他 API
+5. **新增风控规则** → 修改 `risk/risk_manager.py` 和 `policy.yaml`

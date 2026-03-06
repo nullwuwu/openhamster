@@ -190,4 +190,54 @@ engine = BacktestEngine(data_provider=provider)
 
 ---
 
+## 10. 为什么选择 AKShare + Stooq 作为港股数据源
+
+**决策**: 使用 AKShare 为主数据源，Stooq 为备用
+
+**原因**:
+1. **AKShare 优势**:
+   - 数据完整 (736行 vs 735行)
+   - 提供丰富字段 (成交额/涨跌幅/换手率等)
+   - 免费，无需 API Key
+   - 国内数据源，数据质量较好
+
+2. **Stooq 备用**:
+   - 国际访问稳定
+   - 字段简洁，适合基础回测
+
+3. **原 yfinance 问题**:
+   - Python 包被限流 (YFRateLimitError)
+   - 解决方案：改用直接 HTTP API 调用
+
+**已知限制**:
+- AKShare 依赖国内数据源 (东方财富)，海外访问可能不稳定
+
+**时间**: 2026-03-06
+
+---
+
+## 11. 为什么实现 Paper Broker 模拟交易
+
+**决策**: 在实盘对接前先实现模拟交易层
+
+**原因**:
+1. **安全**: 实盘前充分验证策略
+2. **隔离**: 模拟账户与实盘账户分离
+3. **可追溯**: 完整的交易记录和绩效分析
+4. **平滑过渡**: 模拟结果可直接对接实盘
+
+**实现**:
+```python
+from quant_trader.paper import PaperBroker, PaperAccount
+
+account = PaperAccount(initial_capital=1000000)
+broker = PaperBroker(account)
+# 模拟买入
+broker.buy("2800.HK", quantity=1000, price=25.0)
+```
+
+**时间**: 2026-03-06
+
+---
+
 *按决策日期排序，持续更新...*

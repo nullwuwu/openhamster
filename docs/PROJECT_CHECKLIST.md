@@ -177,10 +177,10 @@ quant-project/
 | 必备内容 | 优先级 | 当前状态 |
 |----------|--------|----------|
 | 参数敏感性自动计算 | 🔴 **P0** | Risk Gate 黄线判断依赖此字段 |
-| 多数据源 | 🟡 P1 | 仅 yfinance (限流中) |
-| 更多策略 | 🟡 P1 | 仅 Dual MA |
-| 过拟合检测 | 🟡 P1 | 仅有参数敏感性字段 |
-| 交易执行 | 🟡 P1 | 暂无 |
+| 多数据源 | ✅ 已完成 | yfinance, akshare, stooq, twelve_data |
+| 更多策略 | ✅ 已完成 | DualMA, MeanReversion, ChannelBreakout, RegimeFilter |
+| 过拟合检测 | ✅ 已完成 | walk_forward.py 已实现 |
+| 交易执行 | ✅ 已完成 | longbridge, futu, paper broker |
 | 因子库 | 🟢 P2 | 暂无 |
 | 压力测试 | 🟢 P2 | 暂无 |
 | 监控系统 | 🟢 P2 | 暂无 |

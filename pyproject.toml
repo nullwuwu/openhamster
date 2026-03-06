@@ -2,14 +2,18 @@
 name = "quant-trader"
 version = "0.1.0"
 description = "Quantitative trading MCP server for OpenClaw"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "mcp",
     "pandas>=2.0",
     "numpy>=1.24",
     "pydantic>=2.0",
     "pyyaml>=6.0",
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+quant-trader = "quant_trader.main:main"

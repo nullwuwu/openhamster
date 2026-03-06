@@ -102,20 +102,23 @@ PMDecision:
 
 | 组件 | 状态 |
 |------|------|
-| BacktestEngine | ✅ 支持 Dual MA, DataProvider 抽象层 (TwelveData + YFinance fallback) |
+| BacktestEngine | ✅ 支持 Dual MA, Mean Reversion, Channel Breakout + DataProvider 抽象层 |
 | DecisionGraph | ✅ 6节点流程 + LLM 接入 |
 | Risk Gate | ✅ 硬规则 + 效用分 |
 | MCP Server | ✅ strategy_review, strategy_iterate |
-| 单测 | ✅ 7个测试全绿 |
+| 数据源 | ✅ yfinance, akshare, stooq, twelve_data |
+| Broker | ✅ longbridge, futu, paper trading |
+| 单测 | ✅ 20+ 测试覆盖核心模块 |
 
 ---
 
 ## 九、可改进点
 
-1. ~~数据源~~ — ✅ 已接入 DataProvider 抽象层
-2. **更多策略** — Momentum, Mean Reversion
-3. **参数敏感性** — 尚未实现自动计算 (P0)
-4. **实盘对接** — 暂无
+1. ~~数据源~~ — ✅ 已实现 AKShare, Stooq, TwelveData
+2. ~~更多策略~~ — ✅ 已实现 Dual MA, Mean Reversion, Channel Breakout
+3. ~~模拟交易~~ — ✅ 已实现 Paper Broker
+4. **参数敏感性** — 尚未实现自动计算 (P0)
+5. **实盘对接** — LongBridge/Futu 已实现，待配置
 
 ---
 
@@ -139,6 +142,19 @@ export MINIMAX_API_KEY="your-minimax-key"
 # 免费 tier: 每分钟 8 次请求
 export TWELVE_DATA_API_KEY="your-twelve-data-key"
 ```
+
+### 配置文件设置
+
+```bash
+# 复制示例配置
+cp config/policy.example.yaml config/policy.yaml
+cp config/paper_trading.example.yaml config/paper_trading.yaml
+
+# 编辑实际配置（包含敏感信息）
+vim config/policy.yaml
+```
+
+**注意**: `config/*.yaml` 已被 `.gitignore` 忽略，示例配置会被跟踪。
 
 ### 运行测试
 

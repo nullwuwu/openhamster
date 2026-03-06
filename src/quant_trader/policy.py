@@ -52,12 +52,32 @@ class TradingCosts:
 
 
 @dataclass(frozen=True)
+class NotificationConfig:
+    """通知配置"""
+    enabled: bool = False
+    chat_id: str = ""
+    # Email specific
+    smtp_host: str = ""
+    smtp_port: int = 587
+    from_addr: str = ""
+    to_addrs: list = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Notifications:
+    """通知配置"""
+    telegram: NotificationConfig = field(default_factory=NotificationConfig)
+    email: NotificationConfig = field(default_factory=NotificationConfig)
+
+
+@dataclass(frozen=True)
 class Policy:
     hard_gates: HardGates = field(default_factory=HardGates)
     yellow_flags: YellowFlags = field(default_factory=YellowFlags)
     weights: Weights = field(default_factory=Weights)
     limits: Limits = field(default_factory=Limits)
     trading_costs: TradingCosts = field(default_factory=TradingCosts)
+    notifications: Notifications = field(default_factory=Notifications)
 
 
 def load_policy(config_path=None) -> Policy:
@@ -81,6 +101,10 @@ def load_policy(config_path=None) -> Policy:
         weights=Weights(**raw.get("weights", {})),
         limits=Limits(**raw.get("limits", {})),
         trading_costs=TradingCosts(**raw.get("trading_costs", {})),
+        notifications=Notifications(
+            telegram=NotificationConfig(**raw.get("notifications", {}).get("telegram", {})),
+            email=NotificationConfig(**raw.get("notifications", {}).get("email", {})),
+        ),
     )
 
 
