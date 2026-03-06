@@ -1,6 +1,6 @@
 import pytest
 from quant_trader.models import BacktestResult, Verdict
-from quant_trader.reviewer import risk_gate_review
+from quant_trader.risk.reviewer import risk_gate_review
 
 FULL = ["slippage", "commission", "tax", "dividend_withholding"]
 

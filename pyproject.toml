@@ -13,7 +13,6 @@ dependencies = [
     "httpx>=0.27",
     "requests>=2.31",
     "yfinance>=0.2.40",
-    "pandas-datareader>=0.10",
     "akshare>=1.14",
 ]
 

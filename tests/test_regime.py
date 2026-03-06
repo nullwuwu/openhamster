@@ -5,7 +5,7 @@ import pytest
 import pandas as pd
 import numpy as np
 
-from src.quant_trader.regime import RegimeDetector, RegimeConfig, MarketRegime
+from quant_trader.strategy.regime import RegimeDetector, RegimeConfig, MarketRegime
 
 
 class TestRegimeDetector:

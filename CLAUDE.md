@@ -13,15 +13,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Install Dependencies
 ```bash
+# Requires Python 3.10+
 pip install uv
+uv venv --python 3.12 .venv
+source .venv/bin/activate
 uv pip install -e ".[dev]"
+```
+
+### Code Quality
+```bash
+# Lint
+ruff check src/
+
+# Type check
+mypy src/
+
+# Format
+ruff format src/
 ```
 
 ### Run Tests
 ```bash
 pytest tests/ -v
 # Single test
-pytest tests/test_backtester.py -v
+pytest tests/test_reviewer.py -v
+# Skip slow tests
+pytest tests/ -m "not slow"
 ```
 
 ### Run the System
@@ -86,9 +103,9 @@ The system has three interconnected components:
 
 | Module | File | Purpose |
 |--------|------|---------|
-| BacktestEngine | `backtest_engine.py` | Data fetching, backtest execution, metrics |
+| BacktestEngine | `backtest/backtest_engine.py` | Data fetching, backtest execution, metrics |
 | DecisionGraph | `decision_graph.py` | 6-node LLM decision flow |
-| Risk Gate | `reviewer.py` | Hard rule checks (GO/NO_GO/REVISE) |
+| Risk Gate | `risk/reviewer.py` | Hard rule checks (GO/NO_GO/REVISE) |
 | LLM Client | `llm.py` | MiniMax API wrapper |
 | Orchestrator | `orchestrator.py` | Daily trading coordination |
 | Scheduler | `scheduler.py` | APScheduler for daily execution |
@@ -127,8 +144,8 @@ All config is in `config/policy.yaml`:
 
 ## Strategies
 
-Located in `src/quant_trader/`:
-- `strategy/ma_cross_strategy.py` - MA crossover (Dual MA)
+Located in `src/quant_trader/strategy/`:
+- `ma_cross_strategy.py` - MA crossover (Dual MA)
 - `mean_reversion.py` - Mean reversion strategy
 - `channel_breakout.py` - Channel breakout strategy
 - `regime.py` - Market regime filter (trending/ranging)

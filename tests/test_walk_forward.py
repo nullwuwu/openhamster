@@ -2,9 +2,8 @@
 Walk-forward 验证测试
 """
 import pytest
-from src.quant_trader.walk_forward import WalkForwardValidator, run_walk_forward
-from src.quant_trader.backtest_engine import DualMAStrategy
-from src.quant_trader.models import WalkForwardResult
+from quant_trader.backtest.backtest_engine import DualMAStrategy
+from quant_trader.models import WalkForwardResult
 
 
 class TestWalkForwardValidation:
