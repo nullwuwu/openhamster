@@ -164,6 +164,7 @@ Located in `src/quant_trader/strategy/`:
 | TwelveDataProvider | Global | Requires API Key |
 | AkShareProvider | HK/CN | Primary for HK stocks |
 | StooqProvider | Global | Backup source |
+| DataSourceManager | - | Auto failover (akshare → yfinance → stooq) |
 
 ## Brokers (broker/)
 
@@ -172,3 +173,104 @@ Located in `src/quant_trader/strategy/`:
 | LongBridgeBroker | Live | HK stocks |
 | FutuBroker | Live | HK stocks |
 | PaperBroker | Sim | Paper trading |
+
+---
+
+## Agent Trading Modules (Phase 1-4)
+
+新建的智能交易模块，位于 `src/quant_trader/`:
+
+### Phase 0: 稳定性保障
+| Module | File | Purpose |
+|--------|------|---------|
+| DataSourceManager | `data/source_manager.py` | 数据源自动故障切换 |
+| OrderGuard | `order_guard.py` | 重复下单防护 |
+| Reconciler | `reconciler.py` | 持仓对账 |
+
+### Phase 1: 基础能力
+| Module | File | Purpose |
+|--------|------|---------|
+| AgentTrader | `agent_interface.py` | Agent 统一交易接口 |
+
+### Phase 2: 分析能力
+| Module | File | Purpose |
+|--------|------|---------|
+| SignalAnalyzer | `signal_analyzer.py` | 技术指标 + 信号生成 |
+
+### Phase 3: 智能化
+| Module | File | Purpose |
+|--------|------|---------|
+| MarketRegime | `market_regime.py` | 市场环境判断 (多指标投票) |
+| StrategySelector | `strategy_selector.py` | 根据环境选择策略 |
+| PositionSizer | `position_sizer.py` | 仓位计算 |
+
+### Phase 4: 风控
+| Module | File | Purpose |
+|--------|------|---------|
+| RiskManager | `risk_manager_new.py` | 交易前拦截 + 持仓监控 + 止损止盈 |
+
+### Agent 使用示例
+
+```python
+from quant_trader.agent_interface import get_agent_trader
+from quant_trader.signal_analyzer import get_signal_analyzer
+from quant_trader.market_regime import get_market_regime
+from quant_trader.strategy_selector import get_strategy_selector
+from quant_trader.position_sizer import get_position_sizer
+from quant_trader.risk_manager_new import get_risk_manager, RiskAction
+
+# 初始化
+trader = get_agent_trader()
+signal_analyzer = get_signal_analyzer()
+regime_analyzer = get_market_regime()
+strategy_selector = get_strategy_selector()
+position_sizer = get_position_sizer()
+risk_manager = get_risk_manager()
+
+# 每日开盘
+account = trader.get_account()
+risk_manager.reset_daily(day_start_assets=account['total_assets'])
+
+# 分析
+ohlcv = trader.get_ohlcv('2800.HK', days=90)
+regime = regime_analyzer.analyze(ohlcv)
+signal = signal_analyzer.analyze('2800.HK', ohlcv)
+
+# 策略选择
+strategies = strategy_selector.select(regime.regime, regime.indicators['volatility'])
+
+# 仓位计算
+position = position_sizer.calculate(
+    ticker='2800.HK',
+    price=trader.get_price('2800.HK'),
+    total_assets=account['total_assets'],
+    cash=account['cash'],
+    signal_confidence=signal.confidence,
+    market_regime=regime.regime,
+)
+
+# 风控检查
+check = risk_manager.pre_trade_check(
+    ticker='2800.HK',
+    shares=position.shares,
+    price=price,
+    total_assets=account['total_assets'],
+    cash=account['cash'],
+    current_positions={p['symbol']: p for p in trader.get_positions()},
+)
+
+if check.action == RiskAction.PASS:
+    result = trader.buy('2800.HK', position.shares, price)
+    risk_manager.register_position('2800.HK', position.shares, price, price)
+
+# 每日收盘
+for ticker, price in current_prices.items():
+    results = risk_manager.check_positions({ticker: price})
+    for r in results:
+        # 强制卖出
+        risk_manager.record_realized_pnl(pnl)
+        risk_manager.remove_position(ticker)
+
+# 报告
+report = trader.get_daily_report()
+```

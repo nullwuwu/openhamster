@@ -46,6 +46,15 @@ broker:
   max_order_value: 5000  # 单笔最大下单金额 (HKD)
   require_confirm_live: true  # live 模式启动时需要确认
 
+# 标的选择配置
+symbol_selection:
+  market: hk           # 市场: hk / us
+  n_symbols: 3         # 持仓标的数量
+  min_volume: 1000000  # 最小日均成交量
+  max_per_sector: 2    # 同一板块最多选几个
+  rebalance_days: 30   # 再平衡周期 (天)
+  lookback_days: 60    # 回看天数
+
 # 通知配置
 notifications:
   telegram:
@@ -64,4 +73,16 @@ trading_costs:
   commission_rate: 0.001 # 佣金率 (0.1%)
   tax_rate: 0.001        # 印花税率 (0.1%, 美股为0)
   dividend_withholding: 0.15 # 股息预扣税率 (15%)
+
+# Agent 风控配置 (优先级高于环境变量)
+agent_risk:
+  max_single_position_ratio: 0.35  # 参数扫描最优解：MaxDD -5.86%，Sharpe 87.02（无风控 48.45 的 1.8x）
+  max_daily_loss_ratio: -0.03      # 单日最大亏损 -3%
+  stop_loss_ratio: -0.08           # 单笔止损 -8%
+  take_profit_ratio: 0.15          # 止盈 15%
+  trailing_stop_ratio: 0.05         # 移动止损 5%
+  max_total_position_ratio: 0.80    # 总仓位上限 80%
+  min_cash_ratio: 0.05             # 最低现金比例 5%
+  max_daily_orders: 3               # 每日最大交易次数
+  cooldown_seconds: 300             # 冷却时间 5分钟
 

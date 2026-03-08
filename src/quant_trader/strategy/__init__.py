@@ -6,6 +6,8 @@
 from .base_strategy import BaseStrategy
 from .signals import Signal, BUY, SELL, HOLD
 from .ma_cross_strategy import MACrossStrategy
+from .rsi_strategy import RSIStrategy
+from .macd_strategy import MACDStrategy
 
 __all__ = [
     "BaseStrategy",
@@ -14,4 +16,6 @@ __all__ = [
     "SELL", 
     "HOLD",
     "MACrossStrategy",
+    "RSIStrategy",
+    "MACDStrategy",
 ]

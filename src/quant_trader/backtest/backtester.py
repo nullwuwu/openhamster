@@ -114,22 +114,35 @@ class Backtester:
                 # 构建上下文
                 avg_cost = self._position_cost / self._position if self._position > 0 else 0
                 context = {
-                    "position_qty": self._position,
+                    "ticker": self.symbol,
+                    "date": current_date,
+                    "price": current_price,
+                    "position": self._position,
                     "avg_cost": avg_cost,
                     "current_price": current_price,
                     "total_equity": self._cash + self._position * current_price,
+                    "total_assets": self._cash + self._position * current_price,
                     "cash": self._cash,
                     "max_drawdown_pct": max_drawdown,
+                    "current_positions": {
+                        self.symbol: {
+                            "shares": self._position,
+                            "price": avg_cost,
+                            "value": self._position * avg_cost,
+                        }
+                    } if self._position > 0 else {},
                 }
                 
                 original_signal = signal
-                signal = self.risk_manager.evaluate(signal, context)
+                signal, adjusted_shares = self.risk_manager.evaluate(signal, context)
                 
                 if original_signal != signal:
-                    logger.info(f"⚠️ 风控干预: {original_signal} -> {signal}")
+                    logger.info(f"⚠️ 风控干预: {original_signal} -> {signal}, adjusted_shares={adjusted_shares}")
+            else:
+                adjusted_shares = None
             
             # 执行交易
-            self._execute_trade(signal, current_price, current_date)
+            self._execute_trade(signal, current_price, current_date, adjusted_shares)
             
             # 记录净值
             portfolio_value = self._cash + self._position * current_price
@@ -173,13 +186,20 @@ class Backtester:
         self, 
         signal: Signal, 
         price: float, 
-        date: pd.Timestamp
+        date: pd.Timestamp,
+        adjusted_shares: int = None,
     ) -> None:
         """执行交易"""
+        # 统一使用字符串比较
+        signal_val = str(signal.value) if hasattr(signal, 'value') else str(signal)
+        
         # 买入
-        if signal == Signal.BUY and self._position == 0:
-            # 用全部现金买入
-            shares = int(self._cash / (price * (1 + self.commission)))
+        if signal_val == "BUY" and self._position == 0:  # BUY
+            # 用全部现金买入（或调整后的股数）
+            if adjusted_shares:
+                shares = adjusted_shares
+            else:
+                shares = int(self._cash / (price * (1 + self.commission)))
             if shares > 0:
                 cost = shares * price * (1 + self.commission)
                 self._cash -= cost
@@ -192,10 +212,9 @@ class Backtester:
                     'shares': shares,
                     'cost': cost,
                 })
-                logger.debug(f"🟢 买入 {shares} 股 @ {price:.2f}")
         
         # 卖出
-        elif signal == Signal.SELL and self._position > 0:
+        elif signal_val == "SELL" and self._position > 0:  # SELL
             proceeds = self._position * price * (1 - self.commission)
             self._cash += proceeds
             self._trades.append({
@@ -205,7 +224,6 @@ class Backtester:
                 'shares': self._position,
                 'proceeds': proceeds,
             })
-            logger.debug(f"🔴 卖出 {self._position} 股 @ {price:.2f}")
             self._position = 0
             self._position_cost = 0.0
     

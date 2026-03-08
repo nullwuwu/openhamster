@@ -8,9 +8,9 @@ from enum import Enum
 
 class Signal(Enum):
     """交易信号"""
-    BUY = 1
-    SELL = -1
-    HOLD = 0
+    BUY = "BUY"
+    SELL = "SELL"
+    HOLD = "HOLD"
     
     def __str__(self):
         return self.name

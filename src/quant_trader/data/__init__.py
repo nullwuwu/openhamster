@@ -8,6 +8,7 @@ from .yfinance_provider import YFinanceProvider
 from .twelve_data_provider import TwelveDataProvider
 from .akshare_provider import AKShareProvider
 from .stooq_provider import StooqProvider
+from .source_manager import DataSourceManager, get_source_manager
 
 __all__ = [
     "DataProvider",
@@ -15,6 +16,8 @@ __all__ = [
     "TwelveDataProvider",
     "AKShareProvider",
     "StooqProvider",
+    "DataSourceManager",
+    "get_source_manager",
     "get_provider",
 ]
 

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import List
 import pandas as pd
 
-from .optimizer import GridSearchOptimizer
+from .optimizer import GridSearchOptimizer, MultiStrategyOptimizer, STRATEGY_PARAMS
 from .backtester import Backtester
 
 logger = logging.getLogger("quant_trader.backtest")
@@ -47,6 +47,7 @@ class WalkForwardEngine:
         test_months: int = 3,
         step_months: int = 3,
         provider_name: str = "stooq",
+        strategy_name: str = "ma_cross",
     ):
         """
         初始化
@@ -57,12 +58,14 @@ class WalkForwardEngine:
             test_months: 测试集月数
             step_months: 滚动步长月数
             provider_name: 数据源
+            strategy_name: 策略名称 (ma_cross/rsi/macd)
         """
         self.symbol = symbol
         self.train_months = train_months
         self.test_months = test_months
         self.step_months = step_months
         self.provider_name = provider_name
+        self.strategy_name = strategy_name
     
     def run(self, start_date: str, end_date: str) -> WalkForwardResult:
         """
@@ -101,8 +104,8 @@ class WalkForwardEngine:
             
             logger.info(f"📊 窗口: 训练 {train_start_str}~{train_end_str}, 测试 {test_start_str}~{test_end_str}")
             
-            # 训练集找最优参数
-            optimizer = GridSearchOptimizer(
+            # 训练集找最优参数 (支持多策略)
+            optimizer = MultiStrategyOptimizer(
                 symbol=self.symbol,
                 start_date=train_start_str,
                 end_date=train_end_str,
@@ -110,25 +113,27 @@ class WalkForwardEngine:
             )
             
             try:
-                top_params = optimizer.search(top_n=1)
+                top_params = optimizer.search(
+                    strategy_names=[self.strategy_name],
+                    top_n=1,
+                )
                 
                 if top_params.empty:
                     logger.warning(f"⚠️ 窗口无有效参数，跳过")
                     train_start = test_start
                     continue
                 
-                best_short = int(top_params.iloc[0]["short_window"])
-                best_long = int(top_params.iloc[0]["long_window"])
+                # 获取最优策略和参数
+                row = top_params.iloc[0]
+                strategy_name = row["strategy"]
                 
-                logger.info(f"🔧 最优参数: MA({best_short}, {best_long})")
+                # 构建策略参数
+                strategy_params = self._extract_params(row, strategy_name)
+                
+                logger.info(f"🔧 最优策略: {strategy_name}, 参数: {strategy_params}")
                 
                 # 测试集验证
-                from ..strategy import MACrossStrategy
-                
-                strategy = MACrossStrategy(
-                    short_window=best_short,
-                    long_window=best_long,
-                )
+                strategy = STRATEGY_PARAMS[strategy_name]["class"](**strategy_params)
                 
                 backtester = Backtester(
                     strategy=strategy,
@@ -161,6 +166,24 @@ class WalkForwardEngine:
         
         # 汇总结果
         return self._aggregate_results(windows)
+    
+    def _extract_params(self, row: pd.Series, strategy_name: str) -> dict:
+        """从结果中提取策略参数"""
+        params = {}
+        
+        if strategy_name == "ma_cross":
+            params["short_window"] = int(row["short_window"])
+            params["long_window"] = int(row["long_window"])
+        elif strategy_name == "rsi":
+            params["period"] = int(row["period"])
+            params["oversold"] = int(row["oversold"])
+            params["overbought"] = int(row["overbought"])
+        elif strategy_name == "macd":
+            params["fast_period"] = int(row["fast_period"])
+            params["slow_period"] = int(row["slow_period"])
+            params["signal_period"] = int(row["signal_period"])
+        
+        return params
     
     def _add_months(self, date, months):
         """日期加月"""
