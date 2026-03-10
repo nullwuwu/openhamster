@@ -62,7 +62,7 @@ class TencentProvider(DataProvider):
             end: 结束日期 (YYYY-MM-DD)
             
         Returns:
-            DataFrame with columns: Date, Open, High, Low, Close, Volume
+            DataFrame with columns: open, high, low, close, volume
         """
         tencent_code = self._convert_code(ticker)
         
@@ -104,18 +104,20 @@ class TencentProvider(DataProvider):
                     low = float(item[4])
                     volume = float(item[5])
                     
-                    records.append({
-                        "Date": date,
-                        "Open": open_price,
-                        "High": high,
-                        "Low": low,
-                        "Close": close,
-                        "Volume": volume,
-                    })
+                    records.append(
+                        {
+                            "date": date,
+                            "open": open_price,
+                            "high": high,
+                            "low": low,
+                            "close": close,
+                            "volume": volume,
+                        }
+                    )
                 
                 df = pd.DataFrame(records)
-                df["Date"] = pd.to_datetime(df["Date"])
-                df = df.set_index("Date").sort_index()
+                df["date"] = pd.to_datetime(df["date"])
+                df = df.set_index("date").sort_index()
                 
                 # 过滤日期范围
                 start_dt = pd.to_datetime(start)

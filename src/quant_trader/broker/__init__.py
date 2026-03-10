@@ -39,7 +39,10 @@ def create_broker(config: dict) -> BaseBroker:
     
     if broker_type == "paper":
         return PaperBroker(
-            initial_capital=config.get("initial_capital", 1_000_000)
+            initial_capital=config.get("initial_capital", 1_000_000),
+            allow_short=config.get("allow_short", False),
+            cn_lot_size=config.get("cn_lot_size", 100),
+            cn_t_plus_one=config.get("cn_t_plus_one", True),
         )
     
     elif broker_type == "futu":

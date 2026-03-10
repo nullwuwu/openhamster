@@ -138,6 +138,9 @@ uv pip install -e ".[dev]"
 # MiniMax LLM (必需)
 export MINIMAX_API_KEY="your-minimax-key"
 
+# Tushare (A股主数据源)
+export TUSHARE_TOKEN="your-tushare-token"
+
 # Twelve Data (可选，数据源)
 # 免费 tier: 每分钟 8 次请求
 export TWELVE_DATA_API_KEY="your-twelve-data-key"

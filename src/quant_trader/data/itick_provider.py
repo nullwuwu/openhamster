@@ -98,7 +98,7 @@ class ITickProvider(DataProvider):
             end: 结束日期 (YYYY-MM-DD)
             
         Returns:
-            DataFrame with columns: Date, Open, High, Low, Close, Volume
+            DataFrame with columns: open, high, low, close, volume
         """
         ptype, region = self._convert_ticker(ticker)
         code = self._convert_code(ticker)
@@ -142,18 +142,20 @@ class ITickProvider(DataProvider):
                 # 转换为 DataFrame
                 records = []
                 for k in klines:
-                    records.append({
-                        "Date": k.get("t", ""),  # timestamp
-                        "Open": k.get("o", 0),
-                        "High": k.get("h", 0),
-                        "Low": k.get("l", 0),
-                        "Close": k.get("c", 0),
-                        "Volume": k.get("v", 0),
-                    })
+                    records.append(
+                        {
+                            "date": k.get("t", ""),
+                            "open": k.get("o", 0),
+                            "high": k.get("h", 0),
+                            "low": k.get("l", 0),
+                            "close": k.get("c", 0),
+                            "volume": k.get("v", 0),
+                        }
+                    )
                 
                 df = pd.DataFrame(records)
-                df["Date"] = pd.to_datetime(df["Date"])
-                df = df.set_index("Date").sort_index()
+                df["date"] = pd.to_datetime(df["date"])
+                df = df.set_index("date").sort_index()
                 
                 # 过滤日期范围
                 if start:

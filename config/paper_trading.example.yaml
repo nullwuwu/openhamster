@@ -7,11 +7,12 @@ symbol: "2800.HK"
 # 初始资金 (HKD)
 initial_capital: 1000000
 
-# 数据源 (akshare / stooq)
-provider: "stooq"
+# 数据源 (tushare / akshare / stooq)
+provider: "tushare"
 
 # 备用数据源
 fallback:
+  - "akshare"
   - "stooq"
 
 # 策略参数

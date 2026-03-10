@@ -34,6 +34,43 @@ scheduler:
   run_time: "15:30"
   timezone: "Asia/Hong_Kong"
 
+# 数据源配置
+data_source:
+  provider: "stooq"
+  fallback:
+    - "stooq"
+  cache_enabled: true
+  cache_path: "data/market_data_cache.db"
+
+# 策略配置（自由化）
+strategy:
+  mode: "auto"  # auto | manual
+  enabled:
+    - "ma_cross"
+    - "rsi"
+    - "macd"
+    - "mean_reversion"
+    - "channel_breakout"
+  manual_primary: "ma_cross"
+  default_params:
+    ma_cross:
+      short_window: 5
+      long_window: 20
+
+# 动态选股配置
+universe:
+  mode: "dynamic_cn"  # dynamic_cn | static
+  top_n: 20
+  min_list_days: 120
+  exclude_st: true
+  include_gem: true
+
+# 交易执行约束
+execution_rules:
+  allow_short: false
+  cn_lot_size: 100
+  cn_t_plus_one: true
+
 # 目标持仓列表
 portfolio:
   symbols:

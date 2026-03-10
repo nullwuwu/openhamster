@@ -11,7 +11,10 @@ from .stooq_provider import StooqProvider
 from .tencent_provider import TencentProvider
 from .itick_provider import ITickProvider
 from .alphavantage_provider import AlphaVantageProvider
-from .source_manager import DataSourceManager, get_source_manager
+from .tushare_provider import TushareProvider
+from .source_manager import DataSourceManager, get_source_manager, reset_source_manager
+from .symbols import detect_market, normalize_symbol, normalize_cn_symbol
+from .cache import OHLCVCache
 
 __all__ = [
     "DataProvider",
@@ -22,9 +25,15 @@ __all__ = [
     "TencentProvider",
     "ITickProvider",
     "AlphaVantageProvider",
+    "TushareProvider",
     "DataSourceManager",
     "get_source_manager",
+    "reset_source_manager",
     "get_provider",
+    "detect_market",
+    "normalize_symbol",
+    "normalize_cn_symbol",
+    "OHLCVCache",
 ]
 
 # Provider 注册表
@@ -36,10 +45,11 @@ _PROVIDERS = {
     "tencent": TencentProvider,
     "itick": ITickProvider,
     "alphavantage": AlphaVantageProvider,
+    "tushare": TushareProvider,
 }
 
 # 默认 provider
-DEFAULT_PROVIDER = "tencent"
+DEFAULT_PROVIDER = "akshare"
 
 
 def get_provider(name: str = None, **kwargs) -> DataProvider:

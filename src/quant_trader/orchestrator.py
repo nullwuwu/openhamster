@@ -5,19 +5,24 @@
 """
 import logging
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .strategy import BaseStrategy, MACrossStrategy
+import pandas as pd
+
+from .strategy import BaseStrategy, MACrossStrategy, get_strategy_factory, StrategyFactory
 from .strategy.signals import Signal
+from .strategy_selector import get_strategy_selector
+from .market_regime import get_market_regime
 from .broker import BaseBroker, create_broker
-from .data import get_provider
+from .data import get_provider, get_source_manager, reset_source_manager
 from .storage import Database, OrderRepository, PositionRepository, DailyNavRepository, init_db
 from .storage.models import DailyNav
 from .policy import load_policy
 from .notify import NotifierFactory
+from .universe_selector import AStockUniverseSelector, UniverseConfig
 
 logger = logging.getLogger("quant_trader.orchestrator")
 
@@ -68,11 +73,18 @@ class Orchestrator:
     def __init__(
         self,
         broker: BaseBroker,
-        strategy: BaseStrategy,
+        strategy: Optional[BaseStrategy],
         db: Database,
         symbols: List[str],
         provider_name: str = "stooq",
         notifier: Optional[Any] = None,
+        strategy_factory: Optional[StrategyFactory] = None,
+        strategy_mode: str = "manual",
+        manual_strategy: str = "ma_cross",
+        strategy_params: Optional[dict] = None,
+        universe_selector: Optional[AStockUniverseSelector] = None,
+        universe_mode: str = "static",
+        universe_top_n: int = 20,
     ):
         """
         初始化
@@ -91,6 +103,14 @@ class Orchestrator:
         self.symbols = symbols
         self.provider_name = provider_name
         self.notifier = notifier
+        self.strategy_factory = strategy_factory or get_strategy_factory()
+        self._use_injected_strategy = strategy is not None and strategy_factory is None
+        self.strategy_mode = strategy_mode
+        self.manual_strategy = manual_strategy
+        self.strategy_params = strategy_params or {}
+        self.universe_selector = universe_selector
+        self.universe_mode = universe_mode
+        self.universe_top_n = universe_top_n
         
         # 仓库
         self.order_repo = OrderRepository(db)
@@ -99,9 +119,13 @@ class Orchestrator:
         
         # 数据源
         self.provider = get_provider(provider_name)
-        
+        self.source_manager = get_source_manager()
+        self.strategy_selector = get_strategy_selector()
+        self.market_regime = get_market_regime()
+
         # 策略信号缓存
         self._signals: Dict[str, Signal] = {}
+        self._strategy_by_symbol: Dict[str, BaseStrategy] = {}
     
     def run_daily(self) -> DailyReport:
         """
@@ -113,6 +137,8 @@ class Orchestrator:
         start_time = datetime.now()
         self._runtime_seconds = 0  # 初始化
         self._report_steps = []  # 用于通知
+        self._signals = {}
+        self._strategy_by_symbol = {}
         report = DailyReport(date=start_time.strftime("%Y-%m-%d"))
         
         logger.info("=" * 50)
@@ -188,32 +214,46 @@ class Orchestrator:
     def _step_fetch_data(self) -> StepResult:
         """Step 1: 拉取行情数据"""
         logger.info("📊 Step 1: 拉取行情数据")
-        
-        from .data import get_source_manager
-        
-        # 使用 DataSourceManager 自动故障切换
-        provider = get_source_manager()
-        
+
+        # 动态选股（A股）
+        if self.universe_mode == "dynamic_cn" and self.universe_selector is not None:
+            try:
+                selected = self.universe_selector.select()
+                if selected:
+                    self.symbols = selected[: self.universe_top_n]
+                    logger.info(f"  🧠 动态选股完成: {len(self.symbols)} 只")
+            except Exception as exc:
+                logger.warning(f"  ⚠️ 动态选股失败，使用原始股票池: {exc}")
+
         success_count = 0
         failed_symbols = []
-        
+
         try:
             end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now().replace(year=datetime.now().year - 1)).strftime("%Y-%m-%d")
-            
+            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+
             for symbol in self.symbols:
                 try:
                     logger.info(f"  拉取 {symbol}...")
-                    df = provider.fetch_ohlcv(
-                        ticker=symbol,
-                        start=start_date,
-                        end=end_date,
-                    )
+                    try:
+                        df = self.provider.fetch_ohlcv(
+                            ticker=symbol,
+                            start=start_date,
+                            end=end_date,
+                        )
+                        if not isinstance(df, pd.DataFrame) and hasattr(self.provider, "get_bars"):
+                            df = self.provider.get_bars(symbol, start_date, end_date)
+                    except Exception:
+                        df = self.source_manager.fetch_ohlcv(
+                            ticker=symbol,
+                            start=start_date,
+                            end=end_date,
+                        )
                     if df is not None and not df.empty:
                         logger.info(f"    获取 {len(df)} 条数据")
                         success_count += 1
                     else:
-                        logger.warning(f"    无数据，跳过")
+                        logger.warning("    无数据，跳过")
                         failed_symbols.append(symbol)
                 except Exception as e:
                     logger.warning(f"    ⚠️ {symbol} 拉取失败: {e}")
@@ -246,45 +286,90 @@ class Orchestrator:
     def _step_generate_signals(self) -> StepResult:
         """Step 2: 运行策略生成信号"""
         logger.info("📈 Step 2: 运行策略生成信号")
-        
-        from .data import get_source_manager
-        
-        # 使用 DataSourceManager 自动故障切换
-        provider = get_source_manager()
-        
+
         success_count = 0
         failed_symbols = []
-        
+
         try:
             end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now().replace(month=datetime.now().month - 1)).strftime("%Y-%m-%d")
-            
+            start_date = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d")
+
             for symbol in self.symbols:
                 logger.info(f"  分析 {symbol}...")
-                
+
                 try:
                     # 拉取数据
-                    df = provider.fetch_ohlcv(
-                        ticker=symbol,
-                        start=start_date,
-                        end=end_date,
-                    )
+                    try:
+                        df = self.provider.fetch_ohlcv(
+                            ticker=symbol,
+                            start=start_date,
+                            end=end_date,
+                        )
+                        if not isinstance(df, pd.DataFrame) and hasattr(self.provider, "get_bars"):
+                            df = self.provider.get_bars(symbol, start_date, end_date)
+                    except Exception:
+                        df = self.source_manager.fetch_ohlcv(
+                            ticker=symbol,
+                            start=start_date,
+                            end=end_date,
+                        )
                     
                     if df is None or df.empty:
-                        logger.warning(f"    无数据，跳过")
+                        logger.warning("    无数据，跳过")
                         failed_symbols.append(symbol)
                         continue
-                    
-                    # 生成信号
-                    signal = self.strategy.generate_signal(df)
+
+                    if self._use_injected_strategy and self.strategy is not None:
+                        selected_name = getattr(self.strategy, "name", "injected")
+                        strategy = self.strategy
+                    else:
+                        selected_name = self.manual_strategy
+                        if self.strategy_mode == "auto":
+                            ohlcv = {
+                                "close": df["close"].tolist(),
+                                "high": df["high"].tolist(),
+                                "low": df["low"].tolist(),
+                                "volume": df["volume"].tolist(),
+                            }
+                            regime_result = self.market_regime.analyze(ohlcv)
+                            if regime_result is not None:
+                                recommendation = self.strategy_selector.select_primary(
+                                    market_regime=regime_result.regime,
+                                    volatility=float(regime_result.indicators.get("volatility", 0.02)),
+                                )
+                                selected_name = recommendation.strategy.value
+
+                        params = self.strategy_params.get(selected_name, {})
+                        if self.strategy_factory:
+                            strategy = self.strategy_factory.create(
+                                name=selected_name,
+                                mode="stream",
+                                params=params,
+                            )
+                        elif self.strategy:
+                            strategy = self.strategy
+                        else:
+                            strategy = MACrossStrategy(short_window=5, long_window=20)
+
+                    signal = strategy.generate_signal(df)
+                    self._strategy_by_symbol[symbol] = strategy
                     self._signals[symbol] = signal
-                    
+
                     emoji = "🟢" if signal == Signal.BUY else "🔴" if signal == Signal.SELL else "⚪"
-                    logger.info(f"    {emoji} {symbol}: {signal.value}")
+                    logger.info(f"    {emoji} {symbol}: {signal.value} [{selected_name}]")
                     success_count += 1
                 except Exception as e:
                     logger.warning(f"    ⚠️ {symbol} 分析失败: {e}")
                     failed_symbols.append(symbol)
+
+            # 动态池：不在池中的现有持仓，标记卖出
+            if self.universe_mode == "dynamic_cn":
+                current_positions = self.broker.get_positions()
+                current_symbols = {pos.get("symbol") for pos in current_positions if pos.get("symbol")}
+                removed = sorted(current_symbols - set(self.symbols))
+                for symbol in removed:
+                    self._signals[symbol] = Signal.SELL
+                    logger.info(f"    🧹 {symbol}: 不在最新股票池，标记 SELL")
             
             if success_count == 0:
                 return StepResult(
@@ -315,8 +400,6 @@ class Orchestrator:
         logger.info("🛡️ Step 3: 风控检查")
         
         try:
-            policy = load_policy()
-            
             # 检查账户资金
             account = self.broker.get_account()
             cash = account.get("cash", 0)
@@ -334,7 +417,7 @@ class Orchestrator:
                 # 简单检查：有买入信号时现金是否足够
                 buy_signals = [s for s in self._signals.values() if s == Signal.BUY]
                 if buy_signals and cash < 10000:
-                    logger.warning(f"  ⚠️ 现金不足")
+                    logger.warning("  ⚠️ 现金不足")
                     return StepResult(
                         step_name="Step 3: 风控检查",
                         status=StepStatus.FAILED,
@@ -372,12 +455,12 @@ class Orchestrator:
                 # 获取当前价格（使用最新价）
                 try:
                     end_date = datetime.now().strftime("%Y-%m-%d")
-                    df = self.provider.fetch_ohlcv(
+                    df = self.source_manager.fetch_ohlcv(
                         ticker=symbol,
-                        start_date=end_date,
+                        start=end_date,
                         end=end_date,
                     )
-                    if df.empty:
+                    if df is None or df.empty:
                         continue
                     price = float(df.iloc[-1]["close"])
                 except Exception as e:
@@ -385,14 +468,14 @@ class Orchestrator:
                     continue
                 
                 # 计算数量（简单按固定金额）
-                qty = 100  # 每次买 100 股
+                qty = 100
                 side = "BUY" if signal == Signal.BUY else "SELL"
                 
                 logger.info(f"  📌 {symbol}: {side} {qty} @ {price}")
                 
                 try:
                     order_id = self.broker.place_order(
-                        ticker=symbol,
+                        symbol=symbol,
                         side=side,
                         qty=qty,
                         price=price,
@@ -626,6 +709,17 @@ def create_orchestrator(
     """
     # 加载配置
     policy = load_policy()
+    if (
+        (not provider_name)
+        and hasattr(policy, "data_source")
+        and getattr(policy.data_source, "provider", None)
+    ):
+        provider_name = policy.data_source.provider
+    if hasattr(policy, "data_source"):
+        reset_source_manager(
+            enable_cache=bool(getattr(policy.data_source, "cache_enabled", True)),
+            cache_path=str(getattr(policy.data_source, "cache_path", "data/market_data_cache.db")),
+        )
     
     # 创建券商
     broker = create_broker(broker_config)
@@ -634,9 +728,21 @@ def create_orchestrator(
     if not broker.connect():
         logger.warning("⚠️ 券商连接失败，将以只读模式运行")
     
-    # 创建策略
-    strategy = MACrossStrategy(short_window=5, long_window=20)
-    
+    # 策略配置
+    strategy_mode = getattr(getattr(policy, "strategy", None), "mode", "manual")
+    manual_strategy = getattr(getattr(policy, "strategy", None), "manual_primary", "ma_cross")
+    strategy_params = getattr(getattr(policy, "strategy", None), "default_params", {}) or {}
+
+    strategy_factory = get_strategy_factory()
+    try:
+        fallback_strategy = strategy_factory.create(
+            name=manual_strategy,
+            mode="stream",
+            params=strategy_params.get(manual_strategy, {}),
+        )
+    except Exception:
+        fallback_strategy = MACrossStrategy(short_window=5, long_window=20)
+
     # 创建数据库
     db = Database("data/trading.db")
     init_db("data/trading.db")
@@ -647,12 +753,33 @@ def create_orchestrator(
         notifier = NotifierFactory.create({"channels": []})
     except Exception as e:
         logger.warning(f"通知器创建失败: {e}")
+
+    # 动态选股配置
+    universe_mode = getattr(getattr(policy, "universe", None), "mode", "static")
+    top_n = int(getattr(getattr(policy, "universe", None), "top_n", 20))
+    universe_selector = None
+    if universe_mode == "dynamic_cn":
+        universe_selector = AStockUniverseSelector(
+            config=UniverseConfig(
+                top_n=top_n,
+                min_list_days=int(getattr(policy.universe, "min_list_days", 120)),
+                exclude_st=bool(getattr(policy.universe, "exclude_st", True)),
+                include_gem=bool(getattr(policy.universe, "include_gem", True)),
+            )
+        )
     
     return Orchestrator(
         broker=broker,
-        strategy=strategy,
+        strategy=fallback_strategy,
         db=db,
         symbols=symbols,
         provider_name=provider_name,
         notifier=notifier,
+        strategy_factory=strategy_factory,
+        strategy_mode=strategy_mode,
+        manual_strategy=manual_strategy,
+        strategy_params=strategy_params,
+        universe_selector=universe_selector,
+        universe_mode=universe_mode,
+        universe_top_n=top_n,
     )

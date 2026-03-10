@@ -8,7 +8,13 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Type
 import pandas as pd
 
-from ..strategy import MACrossStrategy, RSIStrategy, MACDStrategy
+from ..strategy import (
+    MACrossStrategy,
+    RSIStrategy,
+    MACDStrategy,
+    MeanReversionStrategy,
+    ChannelBreakoutStrategy,
+)
 from ..strategy.base_strategy import BaseStrategy
 from ..data import get_provider
 
@@ -42,6 +48,26 @@ STRATEGY_PARAMS = {
             "signal_period": [6, 9, 12],
         },
         "validate": lambda p: p.get("fast_period", 0) < p.get("slow_period", 999),
+    },
+    "mean_reversion": {
+        "class": MeanReversionStrategy,
+        "params": {
+            "z_window": [10, 20, 30],
+            "entry_threshold": [1.5, 2.0, 2.5],
+            "exit_threshold": [0.3, 0.5, 0.8],
+            "use_short": [False],
+        },
+        "validate": lambda p: p.get("exit_threshold", 0) < p.get("entry_threshold", 0),
+    },
+    "channel_breakout": {
+        "class": ChannelBreakoutStrategy,
+        "params": {
+            "channel_window": [20, 30, 55],
+            "atr_window": [10, 14, 20],
+            "atr_k": [1.5, 2.0, 2.5],
+            "use_stop_loss": [True],
+        },
+        "validate": lambda p: p.get("channel_window", 0) > 0 and p.get("atr_window", 0) > 0,
     },
 }
 

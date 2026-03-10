@@ -16,10 +16,11 @@ logger = logging.getLogger("quant_trader.strategy_selector")
 
 class Strategy(Enum):
     """可选策略"""
-    DUAL_MA = "DUAL_MA"          # 双均线
-    RSI = "RSI"                  # RSI 策略
-    MACD = "MACD"                # MACD 策略
-    MEAN_REVERSION = "MEAN_REV"  # 均值回归
+    MA_CROSS = "ma_cross"                # 双均线
+    RSI = "rsi"                          # RSI 策略
+    MACD = "macd"                        # MACD 策略
+    MEAN_REVERSION = "mean_reversion"    # 均值回归
+    CHANNEL_BREAKOUT = "channel_breakout"  # 通道突破
 
 
 @dataclass
@@ -64,7 +65,7 @@ class StrategySelector:
         if market_regime == Regime.TRENDING_UP:
             # 上涨趋势: 追涨策略
             weights = {
-                Strategy.DUAL_MA: 0.3 if high_vol else 0.5,
+                Strategy.MA_CROSS: 0.3 if high_vol else 0.5,
                 Strategy.MACD: 0.2 if high_vol else 0.3,
                 Strategy.MEAN_REVERSION: 0.3 if high_vol else 0.1,
                 Strategy.RSI: 0.2,
@@ -75,7 +76,7 @@ class StrategySelector:
             weights = {
                 Strategy.RSI: 0.4,
                 Strategy.MEAN_REVERSION: 0.3 if high_vol else 0.2,
-                Strategy.DUAL_MA: 0.3 if high_vol else 0.2,
+                Strategy.MA_CROSS: 0.3 if high_vol else 0.2,
                 Strategy.MACD: 0.0,
             }
         
@@ -84,8 +85,9 @@ class StrategySelector:
             weights = {
                 Strategy.MEAN_REVERSION: 0.4 if high_vol else 0.3,
                 Strategy.RSI: 0.3,
-                Strategy.DUAL_MA: 0.2,
+                Strategy.MA_CROSS: 0.2,
                 Strategy.MACD: 0.1,
+                Strategy.CHANNEL_BREAKOUT: 0.1 if high_vol else 0.0,
             }
         
         # 构建返回
@@ -102,6 +104,20 @@ class StrategySelector:
                 ))
         
         return recommendations
+
+    def select_primary(
+        self,
+        market_regime: Regime,
+        volatility: float,
+    ) -> StrategyRecommendation:
+        recommendations = self.select(market_regime=market_regime, volatility=volatility)
+        if not recommendations:
+            return StrategyRecommendation(
+                strategy=Strategy.MA_CROSS,
+                weight=1.0,
+                reason="fallback",
+            )
+        return max(recommendations, key=lambda item: item.weight)
 
 
 # 全局实例

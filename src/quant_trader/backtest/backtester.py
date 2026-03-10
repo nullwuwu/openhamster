@@ -65,6 +65,7 @@ class Backtester:
         self._position_cost: float = 0.0  # 持仓成本
         self._equity_curve: list = []
         self._trades: list = []
+        self._deprecated_notice_logged = False
         
     def run(self) -> BacktestResult:
         """
@@ -74,6 +75,9 @@ class Backtester:
             BacktestResult: 回测结果
         """
         logger.info(f"🚀 开始回测: {self.symbol} ({self.start_date} ~ {self.end_date})")
+        if not self._deprecated_notice_logged:
+            logger.warning("⚠️ Backtester 正在兼容模式运行，建议使用 BacktestEngine")
+            self._deprecated_notice_logged = True
         
         # 1. 获取数据
         data = self._fetch_data()

@@ -4,9 +4,11 @@
 继承原有 PaperAccount 逻辑
 """
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict
 
 from .base_broker import BaseBroker
+from ..data.symbols import detect_market
 
 logger = logging.getLogger("quant_trader.broker")
 
@@ -16,7 +18,13 @@ class PaperBroker(BaseBroker):
     
     name = "paper"
     
-    def __init__(self, initial_capital: float = 1_000_000):
+    def __init__(
+        self,
+        initial_capital: float = 1_000_000,
+        allow_short: bool = False,
+        cn_lot_size: int = 100,
+        cn_t_plus_one: bool = True,
+    ):
         """
         初始化
         
@@ -24,6 +32,9 @@ class PaperBroker(BaseBroker):
             initial_capital: 初始资金
         """
         self.initial_capital = initial_capital
+        self.allow_short = allow_short
+        self.cn_lot_size = cn_lot_size
+        self.cn_t_plus_one = cn_t_plus_one
         self._cash = initial_capital
         self._positions: Dict[str, dict] = {}
         self._orders: Dict[str, dict] = {}
@@ -75,7 +86,15 @@ class PaperBroker(BaseBroker):
         """
         self._order_counter += 1
         order_id = f"PAPER_{self._order_counter}"
-        
+        market = detect_market(symbol)
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        if qty <= 0:
+            raise ValueError("qty must be positive")
+
+        if market == "cn" and qty % self.cn_lot_size != 0:
+            raise PermissionError(f"CN market requires lot size {self.cn_lot_size}, got {qty}")
+
         if price is None:
             # 市价单，使用模拟价格
             price = 0
@@ -107,22 +126,34 @@ class PaperBroker(BaseBroker):
                         "qty": new_qty,
                         "avg_cost": new_cost / new_qty,
                         "market_value": new_qty * price,
+                        "last_buy_date": today,
                     }
                 else:
                     self._positions[symbol] = {
                         "qty": qty,
                         "avg_cost": price,
                         "market_value": qty * price,
+                        "last_buy_date": today,
                     }
                 
                 logger.info(f"🟢 模拟买入 {symbol} x {qty} @ {price}")
         
         elif side == "SELL":
-            if symbol in self._positions and self._positions[symbol]["qty"] >= qty:
+            if symbol not in self._positions:
+                if self.allow_short:
+                    raise PermissionError("paper short selling is not implemented")
+                raise PermissionError(f"no position for {symbol}")
+
+            position = self._positions[symbol]
+            if market == "cn" and self.cn_t_plus_one:
+                if position.get("last_buy_date") == today:
+                    raise PermissionError(f"CN market T+1 restriction for {symbol}")
+
+            if position["qty"] >= qty:
                 proceeds = qty * price
                 self._cash += proceeds
                 
-                pos = self._positions[symbol]
+                pos = position
                 pos["qty"] -= qty
                 if pos["qty"] == 0:
                     del self._positions[symbol]

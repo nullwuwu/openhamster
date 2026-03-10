@@ -9,12 +9,13 @@ import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 from .models import BacktestResult, PMDecision, ReviewOutput, Verdict
 from .policy import policy
 from .llm import MiniMaxClient, create_minimax_client
+from .data import get_provider
+from .strategy import get_strategy_factory
 
 logger = logging.getLogger("quant_trader.decision_graph")
 
@@ -130,12 +131,15 @@ class BacktestOperator:
         Args:
             spec: StrategySpec from SpecPM
             backtest_params: Optional dict with keys:
-                - ticker: str (default "SPY")
-                - fast_period: int (default 20)
-                - short_period: int (default 50)
+                - ticker/symbol: str (default "SPY")
+                - strategy_name: str (default "ma_cross")
+                - strategy_params: dict (optional)
+                - market: str (cn/hk/us)
+                - provider_name: str (optional)
                 - start_date: str (default "2020-01-01")
                 - end_date: str (optional)
-                - param_sensitivity: float (default 0.0)  # TODO: P0 自动计算
+                - universe_mode: str (single/dynamic_cn)
+                - top_n: int (default 20)
                 - is_first_live: bool (default True)
                 
         Returns:
@@ -144,24 +148,40 @@ class BacktestOperator:
         logger.info("🔄 [BacktestOperator] Running backtest...")
 
         params = backtest_params or {}
-        
+
         # 如果有真实回测参数，调用 BacktestEngine
         if params.get("use_real_engine", False) or params.get("ticker"):
             try:
-                from .backtest.backtest_engine import BacktestEngine, DualMAStrategy
-                
-                ticker = params.get("ticker", "SPY")
-                fast_period = params.get("fast_period", 20)
-                short_period = params.get("short_period", 50)
+                from .backtest.backtest_engine import BacktestEngine
+
+                ticker = params.get("ticker", params.get("symbol", "SPY"))
+                strategy_name = params.get("strategy_name", "ma_cross")
+                strategy_params = params.get("strategy_params", {}) or {}
+                provider_name = params.get("provider_name")
                 start_date = params.get("start_date", "2020-01-01")
                 end_date = params.get("end_date", None)
-                
-                logger.info(f"📊 [BacktestOperator] Running real backtest: {ticker} {fast_period}/{short_period}")
-                
-                engine = BacktestEngine()
-                strategy = DualMAStrategy(fast_period=fast_period, short_period=short_period)
-                
-                # 不传 param_sensitivity，让 BacktestEngine 自动计算
+                market = params.get("market", "us")
+
+                # 兼容旧参数: fast_period/short_period
+                if strategy_name == "ma_cross":
+                    if "fast_period" in params:
+                        strategy_params.setdefault("short_window", params["fast_period"])
+                    if "short_period" in params:
+                        strategy_params.setdefault("long_window", params["short_period"])
+
+                strategy = get_strategy_factory().create(
+                    name=strategy_name,
+                    mode="vectorized",
+                    params=strategy_params,
+                )
+                provider = get_provider(provider_name) if provider_name else None
+                engine = BacktestEngine(data_provider=provider)
+
+                logger.info(
+                    f"📊 [BacktestOperator] Running real backtest: "
+                    f"ticker={ticker}, strategy={strategy_name}, market={market}, provider={provider_name or 'auto'}"
+                )
+
                 result = engine.run(
                     ticker=ticker,
                     strategy=strategy,
@@ -169,13 +189,13 @@ class BacktestOperator:
                     end_date=end_date,
                     is_first_live=params.get("is_first_live", True),
                 )
-                
+
                 logger.info(
                     f"✅ [BacktestOperator] Real backtest done: "
                     f"CAGR={result.cagr:.1%}, MaxDD={result.max_drawdown:.1%}, "
                     f"Sharpe={result.sharpe:.2f}"
                 )
-                
+
                 return BacktestData(
                     cagr=result.cagr,
                     max_drawdown=result.max_drawdown,
@@ -187,11 +207,15 @@ class BacktestOperator:
                     is_first_live=result.is_first_live,
                     raw_data={
                         "ticker": ticker,
-                        "fast_period": fast_period,
-                        "short_period": short_period,
+                        "strategy_name": strategy_name,
+                        "strategy_params": strategy_params,
+                        "market": market,
+                        "provider_name": provider_name or "auto",
+                        "universe_mode": params.get("universe_mode", "single"),
+                        "top_n": params.get("top_n", 20),
                     },
                 )
-                
+
             except Exception as e:
                 logger.error(f"⚠️ [BacktestEngine] Failed: {e}, using fallback")
                 # Fallback to params if engine fails

@@ -25,73 +25,104 @@ limits:
   max_iterations: 3
   on_max_reached: STOP_AND_NOTIFY_HUMAN
 
-# 调度器配置
+# 生产运行前请设置:
+# export TUSHARE_TOKEN="your-token"
+data_source:
+  provider: "tushare"
+  fallback:
+    - "akshare"
+    - "stooq"
+  cache_enabled: true
+  cache_path: "data/market_data_cache.db"
+
+strategy:
+  mode: "auto"  # auto | manual
+  enabled:
+    - "ma_cross"
+    - "rsi"
+    - "macd"
+    - "mean_reversion"
+    - "channel_breakout"
+  manual_primary: "ma_cross"
+  default_params:
+    ma_cross:
+      short_window: 10
+      long_window: 30
+    rsi:
+      period: 14
+      oversold: 30
+      overbought: 70
+    macd:
+      fast_period: 12
+      slow_period: 26
+      signal_period: 9
+    mean_reversion:
+      z_window: 20
+      entry_threshold: 2.0
+      exit_threshold: 0.5
+      use_short: false
+    channel_breakout:
+      channel_window: 20
+      atr_window: 14
+      atr_k: 2.0
+      use_stop_loss: true
+
+universe:
+  mode: "dynamic_cn"  # dynamic_cn | static
+  top_n: 20
+  min_list_days: 120
+  exclude_st: true
+  include_gem: true
+
+execution_rules:
+  allow_short: false
+  cn_lot_size: 100
+  cn_t_plus_one: true
+
 scheduler:
   enabled: true
-  run_time: "15:30"
-  timezone: "Asia/Hong_Kong"
+  run_time: "15:10"
+  timezone: "Asia/Shanghai"
 
-# 目标持仓列表
+# dynamic_cn 模式下，portfolio.symbols 仅作为回退池
 portfolio:
   symbols:
-    # 港股 (6只)
-    - "2800.HK"  # 恒生指数 ETF
-    - "0700.HK"  # 腾讯
-    - "9988.HK"  # 阿里巴巴
-    - "2318.HK"  # 平安保险
-    - "0669.HK"  # 创科实业
-    - "0005.HK"  # 汇丰控股
-    # 美股 (4只)
-    - "AAPL"     # 苹果
-    - "MSFT"     # 微软
-    - "NVDA"     # 英伟达
-    - "GOOGL"    # 谷歌
-  default_capital: 1000000  # 每只股票默认资金
+    - "000300.SH"  # 沪深300指数
+    - "510300.SH"  # 沪深300ETF
+    - "159915.SZ"  # 创业板ETF
+  default_capital: 1000000
 
-# 长桥券商配置
+# 当前模板默认只做模拟/研究，不接A股实盘券商
 broker:
-  type: longbridge
-  mode: dry_run  # readonly / dry_run / live
-  max_order_value: 5000  # 单笔最大下单金额 (HKD)
-  require_confirm_live: true  # live 模式启动时需要确认
+  type: paper
+  mode: dry_run
+  max_order_value: 500000
+  require_confirm_live: true
 
-# 标的选择配置
-symbol_selection:
-  market: hk           # 市场: hk / us
-  n_symbols: 3         # 持仓标的数量
-  min_volume: 1000000  # 最小日均成交量
-  max_per_sector: 2    # 同一板块最多选几个
-  rebalance_days: 30   # 再平衡周期 (天)
-  lookback_days: 60    # 回看天数
-
-# 通知配置
 notifications:
   telegram:
-    enabled: true
-    chat_id: "8592052869"  # 你的 Telegram chat_id
+    enabled: false
+    chat_id: ""
   email:
     enabled: false
-    smtp_host: "smtp.gmail.com"
+    smtp_host: ""
     smtp_port: 587
     from_addr: ""
     to_addrs: []
 
-# 交易成本假设 (BacktestEngine 使用)
 trading_costs:
-  slippage_bps: 5        # 滑点 (basis points, 5 = 0.05%)
-  commission_rate: 0.001 # 佣金率 (0.1%)
-  tax_rate: 0.001        # 印花税率 (0.1%, 美股为0)
-  dividend_withholding: 0.15 # 股息预扣税率 (15%)
+  slippage_bps: 5
+  commission_rate: 0.0003
+  tax_rate: 0.001
+  dividend_withholding: 0.0
 
-# Agent 风控配置 (优先级高于环境变量)
 agent_risk:
-  max_single_position_ratio: 0.35  # 参数扫描最优解：MaxDD -5.86%，Sharpe 87.02（无风控 48.45 的 1.8x）
-  max_daily_loss_ratio: -0.03      # 单日最大亏损 -3%
-  stop_loss_ratio: -0.08           # 单笔止损 -8%
-  take_profit_ratio: 0.15          # 止盈 15%
-  trailing_stop_ratio: 0.05         # 移动止损 5%
-  max_total_position_ratio: 0.80    # 总仓位上限 80%
-  min_cash_ratio: 0.05             # 最低现金比例 5%
-  max_daily_orders: 3               # 每日最大交易次数
-  cooldown_seconds: 300             # 冷却时间 5分钟
-
+  max_single_position_ratio: 0.10
+  max_daily_loss_ratio: -0.03
+  stop_loss_ratio: -0.08
+  take_profit_ratio: 0.15
+  trailing_stop_ratio: 0.05
+  max_total_position_ratio: 0.80
+  min_cash_ratio: 0.05
+  max_daily_orders: 30
+  cooldown_seconds: 60

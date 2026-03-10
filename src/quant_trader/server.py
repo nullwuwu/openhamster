@@ -71,6 +71,11 @@ def strategy_review_full(
     输入:
         user_input: 用户策略描述/想法
         backtest_params: JSON 字符串，回测参数（可选）
+            支持字段:
+            - market/provider_name
+            - symbol/ticker
+            - strategy_name/strategy_params
+            - universe_mode/top_n
     
     输出:
         PMDecision + 人话总结 + 完整执行上下文
@@ -111,6 +116,11 @@ def strategy_iterate(
     输入:
         user_input: 用户策略描述/想法
         backtest_params: JSON 字符串，初始回测参数（可选）
+            支持字段:
+            - market/provider_name
+            - symbol/ticker
+            - strategy_name/strategy_params
+            - universe_mode/top_n
     
     输出:
         PMDecision + 迭代历史 + 最终结论

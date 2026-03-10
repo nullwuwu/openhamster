@@ -95,6 +95,44 @@ class Portfolio:
 
 
 @dataclass(frozen=True)
+class DataSourceConfig:
+    """数据源配置"""
+    provider: str = "stooq"
+    fallback: list[str] = field(default_factory=lambda: ["stooq"])
+    cache_enabled: bool = True
+    cache_path: str = "data/market_data_cache.db"
+
+
+@dataclass(frozen=True)
+class StrategyConfig:
+    """策略配置"""
+    mode: str = "auto"  # auto | manual
+    enabled: list[str] = field(
+        default_factory=lambda: ["ma_cross", "rsi", "macd", "mean_reversion", "channel_breakout"]
+    )
+    manual_primary: str = "ma_cross"
+    default_params: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class UniverseConfig:
+    """动态选股配置"""
+    mode: str = "dynamic_cn"  # dynamic_cn | static
+    top_n: int = 20
+    min_list_days: int = 120
+    exclude_st: bool = True
+    include_gem: bool = True
+
+
+@dataclass(frozen=True)
+class ExecutionRules:
+    """交易执行约束"""
+    allow_short: bool = False
+    cn_lot_size: int = 100
+    cn_t_plus_one: bool = True
+
+
+@dataclass(frozen=True)
 class Policy:
     hard_gates: HardGates = field(default_factory=HardGates)
     yellow_flags: YellowFlags = field(default_factory=YellowFlags)
@@ -105,6 +143,10 @@ class Policy:
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     broker: BrokerConfig = field(default_factory=BrokerConfig)
     portfolio: Portfolio = field(default_factory=Portfolio)
+    data_source: DataSourceConfig = field(default_factory=DataSourceConfig)
+    strategy: StrategyConfig = field(default_factory=StrategyConfig)
+    universe: UniverseConfig = field(default_factory=UniverseConfig)
+    execution_rules: ExecutionRules = field(default_factory=ExecutionRules)
 
 
 def load_policy(config_path=None) -> Policy:
@@ -135,6 +177,10 @@ def load_policy(config_path=None) -> Policy:
         scheduler=SchedulerConfig(**raw.get("scheduler", {})),
         broker=BrokerConfig(**raw.get("broker", {})),
         portfolio=Portfolio(**raw.get("portfolio", {})),
+        data_source=DataSourceConfig(**raw.get("data_source", {})),
+        strategy=StrategyConfig(**raw.get("strategy", {})),
+        universe=UniverseConfig(**raw.get("universe", {})),
+        execution_rules=ExecutionRules(**raw.get("execution_rules", {})),
     )
 
 

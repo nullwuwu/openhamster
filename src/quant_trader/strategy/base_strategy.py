@@ -51,6 +51,25 @@ class BaseStrategy(ABC):
     def reset(self) -> None:
         """重置策略状态"""
         pass
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        """
+        向量化信号接口（默认由流式接口迭代适配）
+
+        Returns:
+            pd.Series: 1=BUY, -1=SELL, 0=HOLD
+        """
+        signals = []
+        self.reset()
+        for idx in range(len(data)):
+            signal = self.generate_signal(data.iloc[: idx + 1])
+            if signal == Signal.BUY:
+                signals.append(1)
+            elif signal == Signal.SELL:
+                signals.append(-1)
+            else:
+                signals.append(0)
+        return pd.Series(signals, index=data.index)
     
     def __repr__(self):
         return f"{self.__class__.__name__}()"

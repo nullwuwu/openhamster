@@ -46,7 +46,7 @@ class AlphaVantageProvider(DataProvider):
             end: 结束日期 (YYYY-MM-DD)
             
         Returns:
-            DataFrame with columns: Date, Open, High, Low, Close, Volume
+            DataFrame with columns: open, high, low, close, volume
         """
         if not self.api_key:
             raise ValueError("Alpha Vantage API key not set")
@@ -83,18 +83,20 @@ class AlphaVantageProvider(DataProvider):
                 # 转换为 DataFrame
                 records = []
                 for date_str, values in time_series.items():
-                    records.append({
-                        "Date": date_str,
-                        "Open": float(values["1. open"]),
-                        "High": float(values["2. high"]),
-                        "Low": float(values["3. low"]),
-                        "Close": float(values["4. close"]),
-                        "Volume": int(values["5. volume"]),
-                    })
+                    records.append(
+                        {
+                            "date": date_str,
+                            "open": float(values["1. open"]),
+                            "high": float(values["2. high"]),
+                            "low": float(values["3. low"]),
+                            "close": float(values["4. close"]),
+                            "volume": int(values["5. volume"]),
+                        }
+                    )
                 
                 df = pd.DataFrame(records)
-                df["Date"] = pd.to_datetime(df["Date"])
-                df = df.set_index("Date").sort_index()
+                df["date"] = pd.to_datetime(df["date"])
+                df = df.set_index("date").sort_index()
                 
                 # 过滤日期范围
                 if start:

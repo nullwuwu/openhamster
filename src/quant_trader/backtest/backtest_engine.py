@@ -18,7 +18,8 @@ import numpy as np
 
 from ..models import BacktestResult
 from ..policy import policy
-from ..data import DataProvider, YFinanceProvider, TwelveDataProvider
+from ..data import DataProvider, YFinanceProvider, TwelveDataProvider, get_provider
+from ..data.symbols import detect_market
 
 logger = logging.getLogger("quant_trader.backtest")
 
@@ -276,8 +277,17 @@ class BacktestEngine:
             self.data_provider = self._create_default_provider()
     
     def _create_default_provider(self) -> DataProvider:
-        """创建默认数据源（先尝试 TwelveData，失败则 fallback 到 yfinance）"""
-        # 优先尝试 Twelve Data
+        """创建默认数据源（优先 policy.data_source.provider）"""
+        configured_provider = getattr(getattr(policy, "data_source", None), "provider", "")
+        if configured_provider:
+            try:
+                provider = get_provider(configured_provider)
+                logger.info(f"✅ [BacktestEngine] Using configured provider: {configured_provider}")
+                return provider
+            except Exception as exc:
+                logger.warning(f"⚠️ [BacktestEngine] configured provider unavailable: {exc}")
+
+        # 回退优先尝试 Twelve Data
         try:
             provider = TwelveDataProvider()
             # 测试连接 (使用较新的日期范围，避免 free tier 限制)
@@ -309,7 +319,7 @@ class BacktestEngine:
             logger.error(f"❌ [BacktestEngine] Data fetch failed: {e}")
             
             # 如果当前不是 yfinance，尝试 fallback
-            if not isinstance(self.data_provider, YFinanceProvider):
+            if detect_market(ticker) != "cn" and not isinstance(self.data_provider, YFinanceProvider):
                 logger.warning("⚠️ [BacktestEngine] Falling back to YFinanceProvider")
                 self.data_provider = YFinanceProvider()
                 try:
@@ -333,17 +343,13 @@ class BacktestEngine:
             if col not in data.columns:
                 raise ValueError(f"Missing required column: {col}")
         
-        return data
-        
         if data.empty:
-            raise ValueError(f"No data for {ticker}")
-        
-        # Flatten columns if MultiIndex
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
-        
-        logger.info(f"✅ [BacktestEngine] Loaded {len(data)} rows")
-        return data
+            raise ValueError("No data returned")
+
+        if not isinstance(data.index, pd.DatetimeIndex):
+            data.index = pd.to_datetime(data.index)
+
+        return data[required].sort_index()
 
     def run(
         self,

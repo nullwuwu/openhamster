@@ -25,11 +25,6 @@ load_dotenv(_credentials_dir / "longbridge.env")
 load_dotenv(_credentials_dir / "alphavantage.env")
 load_dotenv(_credentials_dir / "itick.env")
 
-# 设置代理 (如果有)
-if not os.environ.get("HTTP_PROXY"):
-    os.environ["HTTP_PROXY"] = "http://127.0.0.1:7897"
-    os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7897"
-
 from quant_trader.orchestrator import create_orchestrator, DailyReport
 from quant_trader.policy import load_policy
 
@@ -198,7 +193,7 @@ def main():
     )
     parser.add_argument(
         "--provider",
-        default="stooq",
+        default=None,
         help="数据源 (默认: stooq)"
     )
     parser.add_argument(
@@ -227,7 +222,6 @@ def main():
     args = parser.parse_args()
     
     # 配置日志
-    import os
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "quant_trader.log")
@@ -264,6 +258,12 @@ def main():
             "max_order_value": getattr(policy.broker, "max_order_value", 5000),
             "require_confirm_live": getattr(policy.broker, "require_confirm_live", True),
         })
+    if hasattr(policy, "execution_rules"):
+        broker_config.update({
+            "allow_short": getattr(policy.execution_rules, "allow_short", False),
+            "cn_lot_size": getattr(policy.execution_rules, "cn_lot_size", 100),
+            "cn_t_plus_one": getattr(policy.execution_rules, "cn_t_plus_one", True),
+        })
     
     # 股票列表
     symbols = args.symbols
@@ -273,12 +273,17 @@ def main():
     # 调度配置
     run_time = args.run_time
     timezone = "Asia/Hong_Kong"
+    provider_name = args.provider or "stooq"
     
     if hasattr(policy, "scheduler"):
         if hasattr(policy.scheduler, "run_time"):
             run_time = policy.scheduler.run_time
         if hasattr(policy.scheduler, "timezone"):
             timezone = policy.scheduler.timezone
+    if hasattr(policy, "data_source") and getattr(policy.data_source, "provider", None):
+        provider_name = policy.data_source.provider
+    if args.provider:
+        provider_name = args.provider
     
     # 根据 env 调整模式
     if args.env == "sim":
@@ -292,7 +297,7 @@ def main():
     scheduler = TradingScheduler(
         broker_config=broker_config,
         symbols=symbols,
-        provider_name=args.provider,
+        provider_name=provider_name,
         run_time=run_time,
         timezone=timezone,
     )

@@ -150,8 +150,8 @@ class WalkForwardEngine:
                     train_end=train_end_str,
                     test_start=test_start_str,
                     test_end=test_end_str,
-                    best_short=best_short,
-                    best_long=best_long,
+                    best_short=int(strategy_params.get("short_window", 0)),
+                    best_long=int(strategy_params.get("long_window", 0)),
                     test_return=result.total_return,
                     test_max_drawdown=result.max_drawdown,
                     test_sharpe=result.sharpe_ratio,
@@ -182,6 +182,16 @@ class WalkForwardEngine:
             params["fast_period"] = int(row["fast_period"])
             params["slow_period"] = int(row["slow_period"])
             params["signal_period"] = int(row["signal_period"])
+        elif strategy_name == "mean_reversion":
+            params["z_window"] = int(row["z_window"])
+            params["entry_threshold"] = float(row["entry_threshold"])
+            params["exit_threshold"] = float(row["exit_threshold"])
+            params["use_short"] = bool(row["use_short"])
+        elif strategy_name == "channel_breakout":
+            params["channel_window"] = int(row["channel_window"])
+            params["atr_window"] = int(row["atr_window"])
+            params["atr_k"] = float(row["atr_k"])
+            params["use_stop_loss"] = bool(row["use_stop_loss"])
         
         return params
     
