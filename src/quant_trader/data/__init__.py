@@ -8,6 +8,9 @@ from .yfinance_provider import YFinanceProvider
 from .twelve_data_provider import TwelveDataProvider
 from .akshare_provider import AKShareProvider
 from .stooq_provider import StooqProvider
+from .tencent_provider import TencentProvider
+from .itick_provider import ITickProvider
+from .alphavantage_provider import AlphaVantageProvider
 from .source_manager import DataSourceManager, get_source_manager
 
 __all__ = [
@@ -16,6 +19,9 @@ __all__ = [
     "TwelveDataProvider",
     "AKShareProvider",
     "StooqProvider",
+    "TencentProvider",
+    "ITickProvider",
+    "AlphaVantageProvider",
     "DataSourceManager",
     "get_source_manager",
     "get_provider",
@@ -27,10 +33,13 @@ _PROVIDERS = {
     "twelve_data": TwelveDataProvider,
     "akshare": AKShareProvider,
     "stooq": StooqProvider,
+    "tencent": TencentProvider,
+    "itick": ITickProvider,
+    "alphavantage": AlphaVantageProvider,
 }
 
 # 默认 provider
-DEFAULT_PROVIDER = "akshare"
+DEFAULT_PROVIDER = "tencent"
 
 
 def get_provider(name: str = None, **kwargs) -> DataProvider:

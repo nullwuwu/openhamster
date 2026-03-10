@@ -63,8 +63,9 @@ class MACrossStrategy(BaseStrategy):
         if len(data) < self.long_window:
             return Signal.HOLD
         
-        # 计算均线
-        close = data['close']
+        # 兼容大小写列名
+        close_col = 'Close' if 'Close' in data.columns else 'close'
+        close = data[close_col]
         
         # 短期均线
         short_ma = close.rolling(window=self.short_window).mean()
@@ -106,7 +107,9 @@ class MACrossStrategy(BaseStrategy):
         Returns:
             DataFrame with MA columns
         """
-        close = data['close']
+        # 兼容大小写列名
+        close_col = 'Close' if 'Close' in data.columns else 'close'
+        close = data[close_col]
         return pd.DataFrame({
             'close': close,
             'ma_short': close.rolling(window=self.short_window).mean(),

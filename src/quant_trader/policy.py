@@ -71,6 +71,30 @@ class Notifications:
 
 
 @dataclass(frozen=True)
+class SchedulerConfig:
+    """调度器配置"""
+    enabled: bool = True
+    run_time: str = "15:30"
+    timezone: str = "Asia/Hong_Kong"
+
+
+@dataclass(frozen=True)
+class BrokerConfig:
+    """券商配置"""
+    type: str = "longbridge"
+    mode: str = "dry_run"
+    max_order_value: int = 5000
+    require_confirm_live: bool = True
+
+
+@dataclass(frozen=True)
+class Portfolio:
+    """持仓配置"""
+    symbols: list = field(default_factory=lambda: ["2800.HK"])
+    default_capital: int = 1000000
+
+
+@dataclass(frozen=True)
 class Policy:
     hard_gates: HardGates = field(default_factory=HardGates)
     yellow_flags: YellowFlags = field(default_factory=YellowFlags)
@@ -78,6 +102,9 @@ class Policy:
     limits: Limits = field(default_factory=Limits)
     trading_costs: TradingCosts = field(default_factory=TradingCosts)
     notifications: Notifications = field(default_factory=Notifications)
+    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    broker: BrokerConfig = field(default_factory=BrokerConfig)
+    portfolio: Portfolio = field(default_factory=Portfolio)
 
 
 def load_policy(config_path=None) -> Policy:
@@ -105,6 +132,9 @@ def load_policy(config_path=None) -> Policy:
             telegram=NotificationConfig(**raw.get("notifications", {}).get("telegram", {})),
             email=NotificationConfig(**raw.get("notifications", {}).get("email", {})),
         ),
+        scheduler=SchedulerConfig(**raw.get("scheduler", {})),
+        broker=BrokerConfig(**raw.get("broker", {})),
+        portfolio=Portfolio(**raw.get("portfolio", {})),
     )
 
 

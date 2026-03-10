@@ -5,11 +5,15 @@
 """
 from __future__ import annotations
 import logging
+import os
 from typing import Optional
 
 import pandas as pd
 
 from .base import DataProvider
+from .tencent_provider import TencentProvider
+from .itick_provider import ITickProvider
+from .alphavantage_provider import AlphaVantageProvider
 from .akshare_provider import AKShareProvider
 from .yfinance_provider import YFinanceProvider
 from .stooq_provider import StooqProvider
@@ -22,13 +26,18 @@ class DataSourceManager:
     数据源管理器
     
     按优先级自动切换数据源:
-    1. AkShare - 主要数据源
-    2. YFinance - 备用
-    3. Stooq - 最后备用
+    1. Tencent - 腾讯财经 (港股)
+    2. AlphaVantage - 美股
+    3. iTick - 综合数据源 (港股/美股/期货) - 待完善
+    4. AkShare - 备用
+    5. YFinance - 备用
+    6. Stooq - 最后备用
     """
     
     # 优先级配置
     PROVIDER_PRIORITY = [
+        "tencent",
+        "alphavantage",
         "akshare",
         "yfinance", 
         "stooq",
@@ -43,7 +52,11 @@ class DataSourceManager:
         """初始化所有 provider"""
         for name in self.PROVIDER_PRIORITY:
             try:
-                if name == "akshare":
+                if name == "tencent":
+                    self._providers[name] = TencentProvider()
+                elif name == "alphavantage":
+                    self._providers[name] = AlphaVantageProvider()
+                elif name == "akshare":
                     self._providers[name] = AKShareProvider()
                 elif name == "yfinance":
                     self._providers[name] = YFinanceProvider()
@@ -52,6 +65,39 @@ class DataSourceManager:
                 logger.info(f"✅ Initialized provider: {name}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to init {name}: {e}")
+    
+    def _is_us_stock(self, ticker: str) -> bool:
+        """判断是否为美股"""
+        # 美股代码: AAPL, MSFT, GOOGL 等（不含 .HK 后缀）
+        return "." not in ticker and ticker.isupper() and len(ticker) <= 5
+    
+    def _fetch_us_stock(self, ticker: str, start: str, end: Optional[str] = None) -> Optional[pd.DataFrame]:
+        """使用 yfinance 获取美股数据"""
+        import yfinance as yf
+        
+        try:
+            df = yf.download(ticker, start, end, progress=False)
+            if df is not None and not df.empty:
+                # 整理格式 - yfinance 返回 MultiIndex 列需要处理
+                df = df.reset_index()
+                if 'Date' in df.columns:
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    df = df.set_index('Date')
+                # 处理列名 (可能是 MultiIndex)
+                new_cols = []
+                for c in df.columns:
+                    if isinstance(c, tuple):
+                        new_cols.append(c[0])
+                    else:
+                        new_cols.append(c)
+                df.columns = new_cols
+                # 首字母大写
+                df.columns = [c.capitalize() if isinstance(c, str) else c for c in df.columns]
+                logger.info(f"✅ yfinance succeeded for {ticker} ({len(df)} rows)")
+                return df
+        except Exception as e:
+            logger.warning(f"⚠️ yfinance failed for {ticker}: {e}")
+        return None
     
     def fetch_ohlcv(
         self,
@@ -70,6 +116,13 @@ class DataSourceManager:
         Returns:
             pd.DataFrame or None (所有 provider 都失败)
         """
+        # 美股专用处理
+        if self._is_us_stock(ticker):
+            logger.info(f"📥 Fetching US stock {ticker} via yfinance...")
+            df = self._fetch_us_stock(ticker, start, end)
+            if df is not None:
+                return df
+        
         last_error = None
         
         for provider_name in self.PROVIDER_PRIORITY:

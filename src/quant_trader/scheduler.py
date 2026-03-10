@@ -5,6 +5,7 @@
 """
 import argparse
 import logging
+import os
 import signal
 import sys
 from datetime import datetime
@@ -13,9 +14,21 @@ from typing import Optional
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from dotenv import load_dotenv
 
 # 添加 src 到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# 加载券商凭证
+_credentials_dir = Path(__file__).parent.parent.parent / ".credentials"
+load_dotenv(_credentials_dir / "longbridge.env")
+load_dotenv(_credentials_dir / "alphavantage.env")
+load_dotenv(_credentials_dir / "itick.env")
+
+# 设置代理 (如果有)
+if not os.environ.get("HTTP_PROXY"):
+    os.environ["HTTP_PROXY"] = "http://127.0.0.1:7897"
+    os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7897"
 
 from quant_trader.orchestrator import create_orchestrator, DailyReport
 from quant_trader.policy import load_policy
@@ -243,13 +256,13 @@ def main():
         "mode": args.mode,
     }
     
-    # 从配置覆盖
+    # 从配置覆盖 (policy.broker 是 dataclass)
     if hasattr(policy, "broker"):
         broker_config.update({
-            "type": policy.broker.get("type", args.broker_type),
-            "mode": policy.broker.get("mode", args.mode),
-            "max_order_value": policy.broker.get("max_order_value", 5000),
-            "require_confirm_live": policy.broker.get("require_confirm_live", True),
+            "type": getattr(policy.broker, "type", args.broker_type),
+            "mode": getattr(policy.broker, "mode", args.mode),
+            "max_order_value": getattr(policy.broker, "max_order_value", 5000),
+            "require_confirm_live": getattr(policy.broker, "require_confirm_live", True),
         })
     
     # 股票列表

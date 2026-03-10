@@ -189,23 +189,49 @@ class Orchestrator:
         """Step 1: 拉取行情数据"""
         logger.info("📊 Step 1: 拉取行情数据")
         
+        from .data import get_source_manager
+        
+        # 使用 DataSourceManager 自动故障切换
+        provider = get_source_manager()
+        
+        success_count = 0
+        failed_symbols = []
+        
         try:
             end_date = datetime.now().strftime("%Y-%m-%d")
             start_date = (datetime.now().replace(year=datetime.now().year - 1)).strftime("%Y-%m-%d")
             
             for symbol in self.symbols:
-                logger.info(f"  拉取 {symbol}...")
-                df = self.provider.fetch_ohlcv(
-                    ticker=symbol,
-                    start=start_date,
-                    end=end_date,
-                )
-                logger.info(f"    获取 {len(df)} 条数据")
+                try:
+                    logger.info(f"  拉取 {symbol}...")
+                    df = provider.fetch_ohlcv(
+                        ticker=symbol,
+                        start=start_date,
+                        end=end_date,
+                    )
+                    if df is not None and not df.empty:
+                        logger.info(f"    获取 {len(df)} 条数据")
+                        success_count += 1
+                    else:
+                        logger.warning(f"    无数据，跳过")
+                        failed_symbols.append(symbol)
+                except Exception as e:
+                    logger.warning(f"    ⚠️ {symbol} 拉取失败: {e}")
+                    failed_symbols.append(symbol)
             
+            if success_count == 0:
+                return StepResult(
+                    step_name="Step 1: 拉取行情数据",
+                    status=StepStatus.FAILED,
+                    message=f"所有股票拉取失败: {failed_symbols}",
+                )
+            
+            status = StepStatus.SUCCESS if not failed_symbols else StepStatus.CONTINUE
+            msg = f"成功 {success_count} 只{f', 失败 {len(failed_symbols)} 只: {failed_symbols}' if failed_symbols else ''}"
             return StepResult(
                 step_name="Step 1: 拉取行情数据",
-                status=StepStatus.SUCCESS,
-                message=f"成功拉取 {len(self.symbols)} 只股票数据",
+                status=status,
+                message=msg,
             )
             
         except Exception as e:
@@ -221,6 +247,14 @@ class Orchestrator:
         """Step 2: 运行策略生成信号"""
         logger.info("📈 Step 2: 运行策略生成信号")
         
+        from .data import get_source_manager
+        
+        # 使用 DataSourceManager 自动故障切换
+        provider = get_source_manager()
+        
+        success_count = 0
+        failed_symbols = []
+        
         try:
             end_date = datetime.now().strftime("%Y-%m-%d")
             start_date = (datetime.now().replace(month=datetime.now().month - 1)).strftime("%Y-%m-%d")
@@ -228,28 +262,43 @@ class Orchestrator:
             for symbol in self.symbols:
                 logger.info(f"  分析 {symbol}...")
                 
-                # 拉取数据
-                df = self.provider.fetch_ohlcv(
-                    ticker=symbol,
-                    start=start_date,
-                    end=end_date,
-                )
-                
-                if df.empty:
-                    logger.warning(f"    无数据，跳过")
-                    continue
-                
-                # 生成信号
-                signal = self.strategy.generate_signal(df)
-                self._signals[symbol] = signal
-                
-                emoji = "🟢" if signal == Signal.BUY else "🔴" if signal == Signal.SELL else "⚪"
-                logger.info(f"    {emoji} {symbol}: {signal.value}")
+                try:
+                    # 拉取数据
+                    df = provider.fetch_ohlcv(
+                        ticker=symbol,
+                        start=start_date,
+                        end=end_date,
+                    )
+                    
+                    if df is None or df.empty:
+                        logger.warning(f"    无数据，跳过")
+                        failed_symbols.append(symbol)
+                        continue
+                    
+                    # 生成信号
+                    signal = self.strategy.generate_signal(df)
+                    self._signals[symbol] = signal
+                    
+                    emoji = "🟢" if signal == Signal.BUY else "🔴" if signal == Signal.SELL else "⚪"
+                    logger.info(f"    {emoji} {symbol}: {signal.value}")
+                    success_count += 1
+                except Exception as e:
+                    logger.warning(f"    ⚠️ {symbol} 分析失败: {e}")
+                    failed_symbols.append(symbol)
             
+            if success_count == 0:
+                return StepResult(
+                    step_name="Step 2: 运行策略生成信号",
+                    status=StepStatus.FAILED,
+                    message=f"所有股票分析失败: {failed_symbols}",
+                )
+            
+            status = StepStatus.SUCCESS if not failed_symbols else StepStatus.CONTINUE
+            msg = f"生成 {success_count} 个信号{f', 失败 {len(failed_symbols)} 只: {failed_symbols}' if failed_symbols else ''}"
             return StepResult(
                 step_name="Step 2: 运行策略生成信号",
-                status=StepStatus.SUCCESS,
-                message=f"生成 {len(self._signals)} 个信号",
+                status=status,
+                message=msg,
             )
             
         except Exception as e:
