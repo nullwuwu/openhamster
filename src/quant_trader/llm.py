@@ -7,10 +7,11 @@ Set MINIMAX_API_KEY environment variable to use.
 from __future__ import annotations
 import json
 import logging
-import os
 from typing import Any
 
 import httpx
+
+from .config import get_settings
 
 logger = logging.getLogger("quant_trader.llm")
 
@@ -21,9 +22,10 @@ class MiniMaxClient:
     BASE_URL = "https://api.minimaxi.com/anthropic/v1"
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or os.environ.get("MINIMAX_API_KEY", "")
+        settings = get_settings()
+        self.api_key = api_key or settings.integrations.minimax_api_key
         if not self.api_key:
-            raise ValueError("MINIMAX_API_KEY not set")
+            raise ValueError("MINIMAX_API_KEY not set (env or config.integrations.minimax_api_key)")
         self.client = httpx.Client(timeout=60.0)
 
     def chat(

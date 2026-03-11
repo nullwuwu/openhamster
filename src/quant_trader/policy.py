@@ -3,6 +3,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 import yaml
 
+from .config import get_settings
 
 @dataclass(frozen=True)
 class HardGates:
@@ -100,7 +101,7 @@ class DataSourceConfig:
     provider: str = "stooq"
     fallback: list[str] = field(default_factory=lambda: ["stooq"])
     cache_enabled: bool = True
-    cache_path: str = "data/market_data_cache.db"
+    cache_path: str = "var/cache/market_data_cache.db"
 
 
 @dataclass(frozen=True)
@@ -149,14 +150,40 @@ class Policy:
     execution_rules: ExecutionRules = field(default_factory=ExecutionRules)
 
 
+def _policy_from_settings() -> Policy:
+    settings = get_settings()
+    return Policy(
+        hard_gates=HardGates(**settings.hard_gates.model_dump()),
+        yellow_flags=YellowFlags(**settings.yellow_flags.model_dump()),
+        weights=Weights(**settings.weights.model_dump()),
+        limits=Limits(**settings.limits.model_dump()),
+        trading_costs=TradingCosts(**settings.trading_costs.model_dump()),
+        notifications=Notifications(
+            telegram=NotificationConfig(**settings.notifications.telegram.model_dump()),
+            email=NotificationConfig(**settings.notifications.email.model_dump()),
+        ),
+        scheduler=SchedulerConfig(**settings.scheduler.model_dump()),
+        broker=BrokerConfig(**settings.broker.model_dump()),
+        portfolio=Portfolio(**settings.portfolio.model_dump()),
+        data_source=DataSourceConfig(
+            provider=settings.data_source.provider,
+            fallback=settings.data_source.fallback,
+            cache_enabled=settings.data_source.cache_enabled,
+            cache_path=settings.storage.market_cache_path,
+        ),
+        strategy=StrategyConfig(**settings.strategy.model_dump()),
+        universe=UniverseConfig(**settings.universe.model_dump()),
+        execution_rules=ExecutionRules(**settings.execution_rules.model_dump()),
+    )
+
+
 def load_policy(config_path=None) -> Policy:
     if config_path is None:
-        config_path = (
-            Path(__file__).parent.parent.parent / "config" / "policy.yaml"
-        )
+        return _policy_from_settings()
+
     config_path = Path(config_path)
     if not config_path.exists():
-        return Policy()
+        return _policy_from_settings()
 
     with open(config_path) as f:
         raw = yaml.safe_load(f)

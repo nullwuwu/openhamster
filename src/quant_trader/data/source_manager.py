@@ -19,6 +19,7 @@ from .akshare_provider import AKShareProvider
 from .yfinance_provider import YFinanceProvider
 from .stooq_provider import StooqProvider
 from .tushare_provider import TushareProvider
+from ..config import get_settings
 
 logger = logging.getLogger("quant_trader.data.source_manager")
 
@@ -42,10 +43,12 @@ class DataSourceManager:
     def __init__(
         self,
         enable_cache: bool = True,
-        cache_path: str = "data/market_data_cache.db",
+        cache_path: str | None = None,
     ):
+        settings = get_settings()
+        resolved_cache_path = cache_path or settings.storage.market_cache_path
         self.enable_cache = enable_cache
-        self.cache = OHLCVCache(cache_path) if enable_cache else None
+        self.cache = OHLCVCache(resolved_cache_path) if enable_cache else None
         self._providers: dict[str, DataProvider] = {}
 
     def _build_provider(self, name: str) -> DataProvider:
@@ -167,7 +170,7 @@ def get_source_manager() -> DataSourceManager:
     return _source_manager
 
 
-def reset_source_manager(enable_cache: bool = True, cache_path: str = "data/market_data_cache.db") -> DataSourceManager:
+def reset_source_manager(enable_cache: bool = True, cache_path: str | None = None) -> DataSourceManager:
     global _source_manager
     _source_manager = DataSourceManager(enable_cache=enable_cache, cache_path=cache_path)
     return _source_manager

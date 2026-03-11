@@ -17,6 +17,7 @@ from .executor import PaperExecutor
 from ..strategy.signals import Signal
 from ..notify import BaseNotifier, build_daily_report
 from ..risk import RiskManager
+from ..config import get_settings
 
 logger = logging.getLogger("quant_trader.paper")
 
@@ -28,7 +29,7 @@ class PaperTradingService:
         self,
         strategy: BaseStrategy,
         symbol: str = "2800.HK",
-        db_path: str = "data/paper_trading.db",
+        db_path: str | None = None,
         initial_capital: float = 1_000_000,
         provider_name: str = "akshare",
         notifier: Optional[Union[BaseNotifier, List[BaseNotifier]]] = None,
@@ -48,7 +49,8 @@ class PaperTradingService:
         """
         self.strategy = strategy
         self.symbol = symbol
-        self.db_path = db_path
+        settings = get_settings()
+        self.db_path = db_path or settings.storage.paper_db_path
         self.initial_capital = initial_capital
         self.provider_name = provider_name
         self.notifier = notifier

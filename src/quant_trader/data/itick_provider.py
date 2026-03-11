@@ -4,7 +4,6 @@ iTick 数据源
 提供港股、美股、期货等数据
 """
 import logging
-import os
 from datetime import datetime
 from typing import Optional
 
@@ -12,12 +11,12 @@ import pandas as pd
 import requests
 
 from .base import DataProvider
+from ..config import get_settings
 
 logger = logging.getLogger("quant_trader.data.itick")
 
 # iTick API 配置
 ITICK_BASE_URL = "https://api.itick.org"
-ITICK_TOKEN = os.environ.get("ITICK_TOKEN", "")
 
 
 class ITickProvider(DataProvider):
@@ -58,7 +57,8 @@ class ITickProvider(DataProvider):
     }
     
     def __init__(self, token: str = None, max_retries: int = 3):
-        self.token = token or ITICK_TOKEN
+        settings = get_settings()
+        self.token = token or settings.integrations.itick_token
         self.max_retries = max_retries
         self.session = requests.Session()
         self.session.headers.update({

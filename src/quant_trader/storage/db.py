@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import Account, Position, Order, DailyNav
+from ..config import get_settings
 
 logger = logging.getLogger("quant_trader.storage")
 
@@ -14,8 +15,9 @@ logger = logging.getLogger("quant_trader.storage")
 class Database:
     """SQLite 数据库"""
     
-    def __init__(self, db_path: str = "data/paper_trading.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None):
+        settings = get_settings()
+        self.db_path = db_path or settings.storage.paper_db_path
         self._conn: Optional[sqlite3.Connection] = None
     
     @property
@@ -67,7 +69,7 @@ class Database:
         return cursor.fetchall()
 
 
-def init_db(db_path: str = "data/paper_trading.db") -> Database:
+def init_db(db_path: str | None = None) -> Database:
     """
     初始化数据库
     

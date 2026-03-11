@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from quant_trader.strategy import MACrossStrategy
 from quant_trader.paper import PaperTradingService
 from quant_trader.storage import init_db
+from quant_trader.config import get_settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,10 +27,11 @@ logger = logging.getLogger()
 
 
 def main():
+    settings = get_settings()
     parser = argparse.ArgumentParser(description="手动运行模拟盘")
     parser.add_argument("--symbol", default="2800.HK", help="股票代码")
     parser.add_argument("--capital", type=float, default=1_000_000, help="初始资金")
-    parser.add_argument("--db-path", default="data/paper_trading.db", help="数据库路径")
+    parser.add_argument("--db-path", default=settings.storage.paper_db_path, help="数据库路径")
     parser.add_argument("--provider", default="stooq", help="数据源")
     parser.add_argument("--short", type=int, default=5, help="短期均线")
     parser.add_argument("--long", type=int, default=20, help="长期均线")

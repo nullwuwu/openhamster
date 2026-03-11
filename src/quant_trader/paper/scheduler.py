@@ -16,14 +16,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from quant_trader.strategy import MACrossStrategy
 from quant_trader.paper.service import PaperTradingService
+from quant_trader.config import get_settings
 
 logger = logging.getLogger("quant_trader.scheduler")
 
+_settings = get_settings()
+
 # 默认配置
-DEFAULT_SYMBOL = "2800.HK"
-DEFAULT_INITIAL_CAPITAL = 1_000_000
-DEFAULT_DB_PATH = "data/paper_trading.db"
-DEFAULT_SCHEDULE_TIME = "18:00"  # 每天 18:00 执行
+DEFAULT_SYMBOL = _settings.portfolio.symbols[0] if _settings.portfolio.symbols else "2800.HK"
+DEFAULT_INITIAL_CAPITAL = float(_settings.portfolio.default_capital)
+DEFAULT_DB_PATH = _settings.storage.paper_db_path
+DEFAULT_SCHEDULE_TIME = _settings.scheduler.run_time
 
 
 class Scheduler:

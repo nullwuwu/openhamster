@@ -8,6 +8,8 @@ from . import paper
 from . import risk
 from . import storage
 from . import strategy
+from . import api
+from . import config
 
 __all__ = [
     "backtest",
@@ -18,4 +20,6 @@ __all__ = [
     "risk",
     "storage",
     "strategy",
+    "api",
+    "config",
 ]

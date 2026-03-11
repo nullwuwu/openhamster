@@ -50,6 +50,8 @@ htmlcov/
 # Config - ignore actual configs, keep examples
 config/*.yaml
 !config/*.example.yaml
+!config/base.yaml
+!config/local.yaml
 
 # Data (actual data files in project root, not source code)
 # Note: src/quant_trader/data/ contains source code, do NOT ignore
@@ -63,7 +65,16 @@ config/*.yaml
 *.log
 logs/
 *.log.*
+var/logs/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Frontend
+apps/web/node_modules/
+apps/web/dist/
+
+# Runtime artifacts (new layout)
+var/db/
+var/cache/

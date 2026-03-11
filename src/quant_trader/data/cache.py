@@ -9,12 +9,15 @@ from typing import Callable
 
 import pandas as pd
 
+from ..config import get_settings
+
 
 class OHLCVCache:
     """基于 SQLite 的 K 线缓存"""
 
-    def __init__(self, db_path: str = "data/market_data_cache.db"):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | None = None):
+        settings = get_settings()
+        self.db_path = Path(db_path or settings.storage.market_cache_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 

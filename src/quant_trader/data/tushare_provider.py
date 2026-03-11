@@ -4,7 +4,6 @@ Tushare 数据源（A股）
 from __future__ import annotations
 
 import logging
-import os
 import time
 from datetime import datetime
 from typing import Optional
@@ -13,6 +12,7 @@ import pandas as pd
 
 from .base import DataProvider
 from .symbols import normalize_cn_symbol
+from ..config import get_settings
 
 logger = logging.getLogger("quant_trader.data.tushare")
 
@@ -23,7 +23,8 @@ class TushareProvider(DataProvider):
     name = "tushare"
 
     def __init__(self, token: Optional[str] = None, max_retries: int = 3):
-        self.token = token or os.environ.get("TUSHARE_TOKEN", "")
+        settings = get_settings()
+        self.token = token or settings.integrations.tushare_token
         self.max_retries = max_retries
         if not self.token:
             raise ValueError("Tushare token required. Set TUSHARE_TOKEN env var.")

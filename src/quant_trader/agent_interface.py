@@ -5,58 +5,33 @@ Agent 交易接口层
 """
 from __future__ import annotations
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from pathlib import Path
 
 from .broker.paper_broker import PaperBroker
 from .data.source_manager import DataSourceManager
 from .order_guard import OrderGuard
 from .reconciler import Reconciler
 from .notify import NotifierFactory
-from .policy import load_policy
+from .config import get_settings
 
 logger = logging.getLogger("quant_trader.agent_interface")
 
 
 class RiskConfig:
     """
-    风控配置 - 从 policy.yaml 读取，环境变量 override
+    风控配置
     """
     
     def __init__(self):
-        # 加载 policy.yaml
-        try:
-            policy = load_policy()
-            agent_risk = policy.get("agent_risk", {})
-        except Exception:
-            agent_risk = {}
-        
-        # 环境变量 override
-        self.max_position_ratio = float(
-            os.environ.get("MAX_POSITION_RATIO", 
-                          agent_risk.get("max_position_ratio", 0.10))
-        )
-        self.max_daily_loss = float(
-            os.environ.get("MAX_DAILY_LOSS",
-                          agent_risk.get("max_daily_loss", -0.015))
-        )
-        self.stop_loss = float(
-            os.environ.get("STOP_LOSS",
-                          agent_risk.get("stop_loss", -0.02))
-        )
-        self.max_daily_orders = int(
-            os.environ.get("MAX_DAILY_ORDERS",
-                          agent_risk.get("max_daily_orders", 3))
-        )
-        self.cooldown_seconds = int(
-            os.environ.get("COOLDOWN_SECONDS",
-                          agent_risk.get("cooldown_seconds", 300))
-        )
-        
-        # 时区配置
-        tz_str = os.environ.get("TIMEZONE", agent_risk.get("timezone", "Asia/Hong_Kong"))
+        settings = get_settings()
+        self.max_position_ratio = 0.10
+        self.max_daily_loss = -0.015
+        self.stop_loss = -0.02
+        self.max_daily_orders = 3
+        self.cooldown_seconds = 300
+
+        tz_str = settings.timezone
         self.timezone = self._parse_timezone(tz_str)
     
     def _parse_timezone(self, tz_str: str):

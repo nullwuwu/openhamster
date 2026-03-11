@@ -14,19 +14,13 @@ from typing import Optional
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
-from dotenv import load_dotenv
 
 # 添加 src 到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# 加载券商凭证
-_credentials_dir = Path(__file__).parent.parent.parent / ".credentials"
-load_dotenv(_credentials_dir / "longbridge.env")
-load_dotenv(_credentials_dir / "alphavantage.env")
-load_dotenv(_credentials_dir / "itick.env")
-
 from quant_trader.orchestrator import create_orchestrator, DailyReport
 from quant_trader.policy import load_policy
+from quant_trader.config import get_settings
 
 logger = logging.getLogger("quant_trader.scheduler")
 
@@ -163,6 +157,7 @@ class TradingScheduler:
 
 def main():
     """CLI 入口"""
+    settings = get_settings()
     parser = argparse.ArgumentParser(description="交易调度器")
     
     # 运行模式
@@ -215,16 +210,15 @@ def main():
     )
     parser.add_argument(
         "--config",
-        default="config/policy.yaml",
+        default=None,
         help="配置文件路径"
     )
     
     args = parser.parse_args()
     
     # 配置日志
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "quant_trader.log")
+    log_file = settings.storage.log_path
+    os.makedirs(str(Path(log_file).parent), exist_ok=True)
     
     # 同时输出到控制台和文件
     file_handler = logging.FileHandler(log_file)
@@ -272,8 +266,8 @@ def main():
     
     # 调度配置
     run_time = args.run_time
-    timezone = "Asia/Hong_Kong"
-    provider_name = args.provider or "stooq"
+    timezone = settings.timezone
+    provider_name = args.provider or settings.data_source.provider
     
     if hasattr(policy, "scheduler"):
         if hasattr(policy.scheduler, "run_time"):

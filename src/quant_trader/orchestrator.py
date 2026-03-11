@@ -23,6 +23,7 @@ from .storage.models import DailyNav
 from .policy import load_policy
 from .notify import NotifierFactory
 from .universe_selector import AStockUniverseSelector, UniverseConfig
+from .config import get_settings
 
 logger = logging.getLogger("quant_trader.orchestrator")
 
@@ -716,9 +717,10 @@ def create_orchestrator(
     ):
         provider_name = policy.data_source.provider
     if hasattr(policy, "data_source"):
+        settings = get_settings()
         reset_source_manager(
             enable_cache=bool(getattr(policy.data_source, "cache_enabled", True)),
-            cache_path=str(getattr(policy.data_source, "cache_path", "data/market_data_cache.db")),
+            cache_path=str(getattr(policy.data_source, "cache_path", settings.storage.market_cache_path)),
         )
     
     # 创建券商
@@ -743,9 +745,11 @@ def create_orchestrator(
     except Exception:
         fallback_strategy = MACrossStrategy(short_window=5, long_window=20)
 
+    settings = get_settings()
+
     # 创建数据库
-    db = Database("data/trading.db")
-    init_db("data/trading.db")
+    db = Database(settings.storage.runtime_db_path)
+    init_db(settings.storage.runtime_db_path)
     
     # 创建通知器（可选）
     notifier = None

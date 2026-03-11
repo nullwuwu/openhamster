@@ -15,6 +15,7 @@ from .tushare_provider import TushareProvider
 from .source_manager import DataSourceManager, get_source_manager, reset_source_manager
 from .symbols import detect_market, normalize_symbol, normalize_cn_symbol
 from .cache import OHLCVCache
+from ..config import get_settings
 
 __all__ = [
     "DataProvider",
@@ -49,7 +50,7 @@ _PROVIDERS = {
 }
 
 # 默认 provider
-DEFAULT_PROVIDER = "akshare"
+DEFAULT_PROVIDER = get_settings().data_source.provider
 
 
 def get_provider(name: str = None, **kwargs) -> DataProvider:

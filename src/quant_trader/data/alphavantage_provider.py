@@ -4,7 +4,6 @@ Alpha Vantage 数据源
 提供美股数据
 """
 import logging
-import os
 from datetime import datetime
 from typing import Optional
 
@@ -12,6 +11,7 @@ import pandas as pd
 import requests
 
 from .base import DataProvider
+from ..config import get_settings
 
 logger = logging.getLogger("quant_trader.data.alphavantage")
 
@@ -27,7 +27,8 @@ class AlphaVantageProvider(DataProvider):
     name = "alphavantage"
     
     def __init__(self, api_key: str = None, max_retries: int = 3):
-        self.api_key = api_key or os.environ.get("ALPHAVANTAGE_API_KEY", "")
+        settings = get_settings()
+        self.api_key = api_key or settings.integrations.alphavantage_api_key
         self.max_retries = max_retries
         self.base_url = "https://www.alphavantage.co/query"
     

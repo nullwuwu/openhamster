@@ -20,7 +20,7 @@ class BrokerTradingService(PaperTradingService):
         self,
         strategy,
         symbol: str = "2800.HK",
-        db_path: str = "data/paper_trading.db",
+        db_path: str | None = None,
         initial_capital: float = 1_000_000,
         provider_name: str = "akshare",
         notifier=None,
