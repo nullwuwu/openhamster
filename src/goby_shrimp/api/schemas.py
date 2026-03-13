@@ -1,0 +1,317 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+from .models import EventType, ExperimentKind, ProposalStatus, RiskDecisionAction, RunStatus
+
+
+class BacktestRunCreate(BaseModel):
+    symbol: str = Field(default="000300.SH", min_length=1, max_length=32)
+    strategy_name: str = Field(default="ma_cross", min_length=1, max_length=64)
+    provider_name: str = Field(default="stooq", min_length=1, max_length=64)
+    start_date: str = "2020-01-01"
+    end_date: str | None = None
+    initial_capital: float = 100000
+    is_first_live: bool = False
+    strategy_params: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExperimentRunCreate(BaseModel):
+    symbol: str = Field(default="000300.SH", min_length=1, max_length=32)
+    strategy_name: str = Field(default="ma_cross", min_length=1, max_length=64)
+    provider_name: str = Field(default="stooq", min_length=1, max_length=64)
+    start_date: str = "2020-01-01"
+    end_date: str = "2025-01-01"
+    top_n: int = 10
+    train_months: int = 12
+    test_months: int = 3
+    step_months: int = 3
+
+
+class RunMetricSnapshotDTO(BaseModel):
+    cagr: float | None = None
+    max_drawdown: float | None = None
+    sharpe: float | None = None
+    annual_turnover: float | None = None
+    data_years: float | None = None
+    metadata_payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class BacktestRunDTO(BaseModel):
+    id: str
+    symbol: str
+    strategy_name: str
+    provider_name: str
+    status: RunStatus
+    request_payload: dict[str, Any]
+    response_payload: dict[str, Any] | None = None
+    error_message: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    updated_at: datetime
+    metrics: list[RunMetricSnapshotDTO] = Field(default_factory=list)
+
+
+class ExperimentRunDTO(BaseModel):
+    id: str
+    kind: ExperimentKind
+    symbol: str
+    strategy_name: str
+    provider_name: str
+    status: RunStatus
+    request_payload: dict[str, Any]
+    response_payload: dict[str, Any] | None = None
+    error_message: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    updated_at: datetime
+    metrics: list[RunMetricSnapshotDTO] = Field(default_factory=list)
+
+
+class StrategySnapshotDTO(BaseModel):
+    strategy_name: str
+    description: str
+    enabled: bool
+    default_params: dict[str, Any]
+    updated_at: datetime
+
+
+class PaperNavPointDTO(BaseModel):
+    trade_date: str
+    cash: float
+    position_value: float
+    total_equity: float
+
+
+class PaperOrderDTO(BaseModel):
+    id: int
+    symbol: str
+    side: str
+    quantity: int
+    price: float
+    amount: float
+    status: str
+    created_at: str
+
+
+class PaperPositionDTO(BaseModel):
+    id: int
+    symbol: str
+    quantity: int
+    avg_cost: float
+    market_value: float
+    updated_at: str
+
+
+class PaperTradingDTO(BaseModel):
+    nav: list[PaperNavPointDTO] = Field(default_factory=list)
+    orders: list[PaperOrderDTO] = Field(default_factory=list)
+    positions: list[PaperPositionDTO] = Field(default_factory=list)
+
+
+class CreatedRunResponse(BaseModel):
+    run_id: str
+    status: Literal["queued"]
+
+
+class EventRecordDTO(BaseModel):
+    id: str
+    event_id: str
+    event_type: EventType
+    market_scope: str
+    symbol_scope: str
+    published_at: datetime
+    source: str
+    title: str
+    body_ref: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    importance: float
+    sentiment_hint: float
+    metadata_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class DailyEventDigestDTO(BaseModel):
+    trade_date: str
+    market_scope: str
+    symbol_scope: str
+    macro_summary: str
+    event_scores: dict[str, Any] = Field(default_factory=dict)
+    digest_hash: str
+    event_ids: list[str] = Field(default_factory=list)
+
+
+class MacroPipelineStatusDTO(BaseModel):
+    provider: str
+    active_provider: str | None = None
+    provider_chain: list[str] = Field(default_factory=list)
+    status: str
+    message: str
+    degraded: bool
+    last_success_at: str | None = None
+    fallback_mode: str | None = None
+    fallback_event_count: int | None = None
+    using_last_known_context: bool = False
+    reliability_score: float | None = None
+    reliability_tier: str | None = None
+    freshness_hours: float | None = None
+    freshness_tier: str | None = None
+    health_score_30d: float | None = None
+    degraded_count_30d: int | None = None
+    fallback_count_30d: int | None = None
+    recovery_count_30d: int | None = None
+
+
+class MarketSnapshotDTO(BaseModel):
+    regime: str
+    confidence: float
+    summary: str
+    market_snapshot_hash: str
+    symbol: str
+    price_context: dict[str, Any] = Field(default_factory=dict)
+    event_lane_sources: dict[str, str] = Field(default_factory=dict)
+    macro_status: MacroPipelineStatusDTO
+    event_digest: DailyEventDigestDTO
+    event_stream_preview: list[EventRecordDTO] = Field(default_factory=list)
+
+
+class DebateReportDTO(BaseModel):
+    stance_for: list[str] = Field(default_factory=list)
+    stance_against: list[str] = Field(default_factory=list)
+    synthesis: str
+
+
+class EvidencePackDTO(BaseModel):
+    bottom_line_report: dict[str, Any] = Field(default_factory=dict)
+    deterministic_evidence: dict[str, Any] = Field(default_factory=dict)
+    governance_report: dict[str, Any] = Field(default_factory=dict)
+    quality_report: dict[str, Any] = Field(default_factory=dict)
+    llm_judgment_inputs: dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyProposalDTO(BaseModel):
+    id: str
+    run_id: str
+    title: str
+    symbol: str
+    market_scope: str
+    thesis: str
+    source_kind: str
+    provider_status: str
+    provider_model: str
+    provider_message: str
+    market_snapshot_hash: str
+    event_digest_hash: str
+    strategy_dsl: dict[str, Any] = Field(default_factory=dict)
+    debate_report: DebateReportDTO
+    evidence_pack: EvidencePackDTO
+    features_used: list[str] = Field(default_factory=list)
+    deterministic_score: float
+    llm_score: float
+    final_score: float
+    status: ProposalStatus
+    created_at: datetime
+    updated_at: datetime
+    promoted_at: datetime | None = None
+
+
+class RiskDecisionDTO(BaseModel):
+    id: str
+    decision_id: str
+    run_id: str
+    proposal_id: str
+    action: RiskDecisionAction
+    deterministic_score: float
+    llm_score: float
+    final_score: float
+    bottom_line_passed: bool
+    bottom_line_report: dict[str, Any] = Field(default_factory=dict)
+    llm_explanation: str
+    evidence_pack: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class AuditRecordDTO(BaseModel):
+    id: int
+    run_id: str
+    decision_id: str
+    event_type: str
+    entity_type: str
+    entity_id: str
+    strategy_dsl_hash: str
+    market_snapshot_hash: str
+    event_digest_hash: str
+    code_version: str
+    config_version: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ActiveStrategyDTO(BaseModel):
+    proposal: StrategyProposalDTO | None = None
+    latest_decision: RiskDecisionDTO | None = None
+    paper_trading: PaperTradingDTO
+    operational_acceptance: dict[str, Any] = Field(default_factory=dict)
+
+
+class CandidateStrategyDTO(BaseModel):
+    proposal: StrategyProposalDTO
+    latest_decision: RiskDecisionDTO | None = None
+
+
+class LLMStatusDTO(BaseModel):
+    provider: Literal["minimax", "mock"]
+    model: str
+    status: str
+    message: str
+    using_mock_fallback: bool
+    configured_providers: list[Literal["minimax", "mock"]] = Field(default_factory=list)
+
+
+class RuntimeLLMUpdate(BaseModel):
+    provider: Literal["minimax", "mock"]
+
+
+class PipelineRuntimeStatusDTO(BaseModel):
+    current_state: str
+    status_message: str
+    last_run_at: str | None = None
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+    consecutive_failures: int = 0
+    expected_next_run_at: str | None = None
+    last_duration_ms: int | None = None
+    last_trigger: str | None = None
+    degraded: bool = False
+    stalled: bool = False
+
+
+class CommandCenterDTO(BaseModel):
+    generated_at: datetime
+    timezone: str
+    llm_status: LLMStatusDTO
+    runtime_status: PipelineRuntimeStatusDTO
+    market_snapshot: MarketSnapshotDTO
+    active_strategy: ActiveStrategyDTO
+    candidate_count: int
+    latest_risk_decision: RiskDecisionDTO | None = None
+    latest_audit_events: list[AuditRecordDTO] = Field(default_factory=list)
+    latest_event_digest: DailyEventDigestDTO
+
+
+class AcceptanceReportDTO(BaseModel):
+    generated_at: datetime
+    window_days: int
+    status: str
+    strategy_title: str | None = None
+    key_findings: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    quality: dict[str, Any] = Field(default_factory=dict)
+    operations: dict[str, Any] = Field(default_factory=dict)
+    macro: dict[str, Any] = Field(default_factory=dict)
+    governance: dict[str, Any] = Field(default_factory=dict)

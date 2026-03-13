@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from quant_trader.strategy import MACrossStrategy, Signal
+from goby_shrimp.strategy import MACrossStrategy, Signal
 
 
 class TestMACrossStrategy:

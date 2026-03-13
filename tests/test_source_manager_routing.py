@@ -6,7 +6,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from quant_trader.data.source_manager import DataSourceManager
+from goby_shrimp.data.source_manager import DataSourceManager
 
 
 def _mock_df() -> pd.DataFrame:

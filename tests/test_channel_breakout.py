@@ -5,7 +5,7 @@ import pytest
 import pandas as pd
 import numpy as np
 
-from quant_trader.strategy.channel_breakout import ChannelBreakoutStrategy, create_channel_breakout_strategy
+from goby_shrimp.strategy.channel_breakout import ChannelBreakoutStrategy, create_channel_breakout_strategy
 
 
 class TestChannelBreakoutStrategy:

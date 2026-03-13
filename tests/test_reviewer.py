@@ -1,6 +1,6 @@
 import pytest
-from quant_trader.models import BacktestResult, Verdict
-from quant_trader.risk.reviewer import risk_gate_review
+from goby_shrimp.models import BacktestResult, Verdict
+from goby_shrimp.risk.reviewer import risk_gate_review
 
 FULL = ["slippage", "commission", "tax", "dividend_withholding"]
 
@@ -31,7 +31,7 @@ def test_short_data_no_go():
 
 
 def test_dd_near_redline_triggers_approve():
-    assert risk_gate_review(make(max_drawdown=0.17)).requires_human_approve
+    assert risk_gate_review(make(max_drawdown=0.13)).requires_human_approve
 
 
 def test_high_cagr_triggers_approve():

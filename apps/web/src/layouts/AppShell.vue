@@ -2,21 +2,21 @@
 import type { Component } from 'vue'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { BarChart3, FlaskConical, LayoutDashboard, LineChart, Menu, Target } from 'lucide-vue-next'
+import { Command, FileSearch, LibraryBig, Menu, Radar, ShieldCheck } from 'lucide-vue-next'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 
 import Button from '@/components/ui/Button.vue'
 import { getCurrentLocale, setAppLocale, type SupportedLocale } from '@/i18n'
 import { useUiStore } from '@/stores/ui'
 
-type NavKey = 'overview' | 'strategies' | 'backtests' | 'experiments' | 'trading'
+type NavKey = 'command' | 'candidates' | 'research' | 'paper' | 'audit'
 
 const navDefs: Array<{ path: string; key: NavKey; icon: Component }> = [
-  { path: '/overview', key: 'overview', icon: LayoutDashboard },
-  { path: '/strategies', key: 'strategies', icon: Target },
-  { path: '/backtests', key: 'backtests', icon: LineChart },
-  { path: '/experiments', key: 'experiments', icon: FlaskConical },
-  { path: '/trading', key: 'trading', icon: BarChart3 },
+  { path: '/command', key: 'command', icon: Command },
+  { path: '/candidates', key: 'candidates', icon: Radar },
+  { path: '/research', key: 'research', icon: LibraryBig },
+  { path: '/paper', key: 'paper', icon: ShieldCheck },
+  { path: '/audit', key: 'audit', icon: FileSearch },
 ]
 
 const { t } = useI18n()
@@ -33,7 +33,7 @@ const navItems = computed(() =>
 
 const routeTitle = computed(() => {
   const matched = navDefs.find((item) => route.path.startsWith(item.path))
-  return matched ? t(`shell.nav.${matched.key}`) : t('shell.nav.overview')
+  return matched ? t(`shell.nav.${matched.key}`) : t('shell.nav.command')
 })
 
 function switchLocale(next: SupportedLocale): void {
@@ -51,9 +51,10 @@ function switchLocale(next: SupportedLocale): void {
         :class="{ 'lg:w-20': !ui.sideOpen }"
       >
         <div class="mb-5 flex items-center justify-between">
-          <h1 class="text-lg font-semibold tracking-tight" :class="{ hidden: !ui.sideOpen }">
-            {{ t('shell.appTitle') }}
-          </h1>
+          <div :class="{ hidden: !ui.sideOpen }">
+            <h1 class="text-lg font-semibold tracking-tight">{{ t('shell.appTitle') }}</h1>
+            <p class="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">{{ t('shell.appTagline') }}</p>
+          </div>
           <Button variant="ghost" size="sm" class="h-8 w-8 p-0" @click="ui.toggleSidebar">
             <Menu class="h-4 w-4" />
           </Button>
@@ -75,7 +76,7 @@ function switchLocale(next: SupportedLocale): void {
         </nav>
       </aside>
 
-      <main class="flex-1 min-w-0">
+      <main class="min-w-0 flex-1">
         <header class="panel-glass mb-4 flex items-center justify-between rounded-2xl px-4 py-3">
           <div>
             <h2 class="text-sm uppercase tracking-[0.18em] text-slate-500">{{ t('shell.consoleTitle') }}</h2>
@@ -103,8 +104,8 @@ function switchLocale(next: SupportedLocale): void {
                 EN
               </Button>
             </div>
-            <RouterLink to="/backtests">
-              <Button size="sm">{{ t('shell.runBacktest') }}</Button>
+            <RouterLink to="/research">
+              <Button size="sm">{{ t('shell.reviewResearch') }}</Button>
             </RouterLink>
           </div>
         </header>

@@ -9,8 +9,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from quant_trader.strategy import RSIStrategy
-from quant_trader.strategy.signals import Signal
+from goby_shrimp.strategy import RSIStrategy
+from goby_shrimp.strategy.signals import Signal
 
 
 class TestRSIStrategy:

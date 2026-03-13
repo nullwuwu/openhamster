@@ -5,9 +5,9 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from quant_trader.api.db import Base
-from quant_trader.api import models  # noqa: F401
-from quant_trader.config import get_settings
+from goby_shrimp.api.db import Base
+from goby_shrimp.api import models  # noqa: F401
+from goby_shrimp.config import get_settings
 
 config = context.config
 

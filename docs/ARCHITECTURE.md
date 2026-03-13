@@ -1,323 +1,100 @@
-# quant-trader 系统架构
+# GobyShrimp 架构
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           OpenClaw Agent                                │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        MCP Server (server.py)                           │
-│  ┌──────────────────────┐  ┌──────────────────────┐                  │
-│  │  strategy_review     │  │  strategy_iterate    │                  │
-│  │  (单次评审)          │  │  (自动迭代)          │                  │
-│  └──────────────────────┘  └──────────────────────┘                  │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    DecisionGraph (decision_graph.py)                    │
-│                                                                         │
-│   ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐          │
-│   │ Spec PM │───▶│ Backtest │───▶│ Bull    │◀──▶│ Bear    │          │
-│   │         │    │Operator  │    │Analyst  │    │Reviewer │          │
-│   └─────────┘    └─────────┘    └─────────┘    └─────────┘          │
-│         │            │              │              │                    │
-│         │            │              │              │                    │
-│         │            ▼              │              │                    │
-│         │     ┌─────────┐           │              │                    │
-│         │     │Backtest │           │              │                    │
-│         │     │ Result  │───────────┼──────────────┘                    │
-│         │     └─────────┘           ▼                                   │
-│         │            │         ┌─────────┐                             │
-│         │            └────────▶│ Risk    │                             │
-│         │                      │ Gate    │                             │
-│         │                      └─────────┘                             │
-│         │                          │                                   │
-│         │                          ▼                                   │
-│         │                      ReviewOutput                            │
-│         │                          │                                   │
-│         └────────────────────────▶│ PM                                │
-│                                    │                                    │
-│                                    ▼                                    │
-│                               PMDecision                                │
-└─────────────────────────────────────────────────────────────────────────┘
-       │                                   │
-       ▼                                   ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        外部依赖                                          │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                     DataProvider (可插拔)                         │   │
-│  │  ┌──────────────────┐  ┌──────────────────┐                    │   │
-│  │  │ TwelveDataProvider│  │YFinanceProvider │                    │   │
-│  │  │ (默认, 有备)      │  │ (fallback)      │                    │   │
-│  │  └──────────────────┘  └──────────────────┘                    │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                              │                                          │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                    │
-│  │  MiniMax   │  │  policy    │  │  MCP       │                    │
-│  │  LLM       │  │  (配置)    │  │  Server    │                    │
-│  └─────────────┘  └─────────────┘  └─────────────┘                    │
-└─────────────────────────────────────────────────────────────────────────┘
-│  │  (数据)     │  │  LLM       │  │  (配置)    │                    │
-│  └─────────────┘  └─────────────┘  └─────────────┘                    │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+## 系统定位
+GobyShrimp 不是固定策略回测器，而是一个可审计的策略工厂。系统目标是让 LLM 参与市场感知与策略生成，同时把放行、执行、回滚与证据链固定为可追溯流程。
 
----
+## Agent 团队
+- `MarketAnalystAgent`
+  - 输入：价格量能、技术指标、宏观日摘要、宏观事件流预览
+  - 输出：`MarketSnapshot`
+- `StrategyAgent`
+  - 输入：`MarketSnapshot`、历史策略基线、候选池经验
+  - 输出：`StrategyProposal`
+  - 约束：只能输出 `StrategyDSL`，不能输出任意 Python 代码
+- `ResearchDebateAgent`
+  - 输入：策略提案与市场画像
+  - 输出：`DebateReport`
+- `RiskManagerAgent`
+  - 输入：证据包、底线校验、LLM 软评分上下文
+  - 输出：`reject / keep_candidate / promote_to_paper / pause_active / rollback_to_previous_stable`
+- `ExecutionAgent`
+  - 输入：已批准的风险决策
+  - 输出：回测、walk-forward、模拟盘切换与订单执行结果
+  - 约束：不使用 LLM，不拥有放行权
+- `AuditService`
+  - 输入：所有状态跃迁事件
+  - 输出：`AuditRecord`
+  - 约束：只记录，不做交易判断
 
-## 数据流：BacktestResult → DecisionGraph
+## 运行链路
+`proposal -> backtest -> walk-forward -> debate -> risk review -> promote`
 
-```
-BacktestEngine.run()
-       │
-       ▼
-BacktestResult
-{
-  cagr: float,
-  max_drawdown: float,
-  sharpe: float,
-  annual_turnover: float,
-  data_years: float,
-  assumptions: list[str],
-  param_sensitivity: float | None,  ← P0 待自动计算
-  is_first_live: bool
-}
-       │
-       ▼ (传入 backtest_params)
-DecisionGraph.run_full_flow()
-       │
-       ├──▶ BacktestOperator.execute() → BacktestData
-       │
-       ├──▶ BullAnalyst (LLM) → bull_points
-       │
-       ├──▶ BearReviewer (LLM) → bear_points
-       │
-       ├──▶ Debate (2轮)
-       │
-       ├──▶ RiskGate.execute() → ReviewOutput
-       │
-       └──▶ PortfolioManager (LLM) → PMDecision
-```
+后台周期调度已独立为运行模块：
+- `src/goby_shrimp/runtime/scheduler.py`
+- `app.py` 只负责在 lifespan 中启动和停止调度器
 
----
+系统也支持手动触发一次完整研究同步：
+- `POST /api/v1/runtime/sync`
 
-## LLM 节点说明
+系统采用 `单活跃策略 + 候选池` 模式：
+- 任一时刻只能有一个活跃模拟盘策略
+- 新提案先进入候选池
+- 只有通过底线、综合分和冷却期约束后，候选策略才能挑战当前活跃策略
+- `governance_report.lifecycle` 现在会同时给出治理 ETA：
+  - `eta_kind`
+  - `estimated_next_eligible_at`
 
-当前使用 **MiniMax M2.5** 模型：
+## 放行逻辑
+### 3 条不可覆盖底线
+- 数据完整性：默认要求至少 3 年可用日线样本
+- 最大回撤：任一核心结果 `MaxDD > 15%` 直接拒绝
+- 执行安全：仅允许 `long-only`、`no leverage`、`日级调仓`、现有执行层可表达规则
 
-| 节点 | Prompt | 输出 |
-|------|--------|------|
-| Bull Analyst | 看多论点模板 | `{"bull_points": [...], "strengths": [...]}` |
-| Bear Reviewer | 看空论点模板 | `{"bear_points": [...], "weaknesses": [...]}` |
-| PM | prompts/pm.md | `PMDecision` JSON |
+### 综合评分
+- `deterministic evidence score = 70%`
+- `llm judgment score = 30%`
+- `final_score >= 75` 才允许进入模拟盘
 
-**可扩展**：未来可接入其他 LLM（OpenAI, Claude, 本地模型）
+### 宏观输入位置
+- 辅助上下文层：进入 `MarketSnapshot`，帮助 LLM 感知市场
+- 软评分层：进入 `llm judgment score`
+- 不进入不可覆盖底线
 
----
+## 数据模型
+### 核心研究对象
+- `StrategyProposal`
+- `DebateReport`
+- `EvidencePack`
+- `RiskDecision`
+- `CandidateStrategy`
+- `ActiveStrategy`
 
-## 已知限制 / 坑
+## 策略插件
+- 内置基线策略由 `src/goby_shrimp/strategy/plugins.py` 统一声明
+- `StrategyRegistry` 从插件目录构建，不再在工厂文件内硬编码注册清单
+- `StrategyAgent` prompt 也直接读取同一份插件名列表，避免 prompt 与执行层漂移
 
-| # | 问题 | 状态 | 说明 |
-|---|------|------|------|
-| 1 | yfinance 限流 | ⚠️ | 高频请求会被限流，建议加缓存或换数据源 |
-| 2 | param_sensitivity 手填 | 🔴 P0 | Risk Gate 黄线判断依赖此字段，需自动计算 |
-| 3 | executeSell PnL 计算 | ✅ 已修复 | 早期版本仓位方向有 bug，已修复 |
+### 宏观事件双轨
+- `EventStream`
+  - 原始事件级记录
+  - 字段包括 `event_id`、`event_type`、`symbol_scope`、`published_at`、`source`、`title`、`body_ref`、`tags[]`、`importance`、`sentiment_hint`
+- `DailyEventDigest`
+  - 日级结构化摘要
+  - 字段包括 `trade_date`、`market_scope`、`symbol_scope`、`macro_summary`、`event_scores`
 
----
+## Dashboard IA
+- `/command`
+- `/candidates`
+- `/research`
+- `/paper`
+- `/audit`
 
-## 模块说明
-
-### 1. server.py (MCP Server)
-
-```python
-# 可用 Tools
-@mcp.tool()
-def strategy_review(cagr, max_drawdown, sharpe, ...)  # Risk Gate 单次检查
-
-@mcp.tool()  
-def strategy_review_full(user_input, backtest_params)  # 完整流程
-
-@mcp.tool()
-def strategy_iterate(user_input, backtest_params)     # 自动迭代
-
-@mcp.tool()
-def get_policy()  # 查看当前风控配置
-```
-
-### 2. DecisionGraph (6节点流程)
-
-| 节点 | 类 | 输入 | 输出 |
-|------|-----|------|------|
-| ① Spec PM | `SpecPM` | user_input | StrategySpec |
-| ② Backtest | `BacktestOperator` | spec | BacktestData |
-| ③ Bull | `BullAnalyst` | BacktestData | bull_points |
-| ④ Bear | `BearReviewer` | BacktestData + Bull | bear_points |
-| ⑤ Risk Gate | `RiskGate` | BacktestData | ReviewOutput |
-| ⑥ PM | `PortfolioManager` | 全部上下文 | PMDecision |
-
-### 3. BacktestEngine
-
-```python
-engine = BacktestEngine()
-result = engine.run(
-    ticker="SPY",
-    strategy=DualMAStrategy(fast=20, slow=50),
-    start_date="2020-01-01",
-    end_date="2025-01-01",
-)
-# → BacktestResult
-```
-
-### 4. Risk Gate (reviewer.py)
-
-硬规则检查，返回 GO/NO_GO/REVISE：
-
-```python
-risk_gate_review(backtest_result) → ReviewOutput
-```
-
-### 5. LLM Client (llm.py)
-
-MiniMax API 封装：
-
-```python
-client = MiniMaxClient(api_key="...")
-client.chat_json(user_prompt) → dict
-```
-
-### 6. Data Providers (data/)
-
-可插拔数据源实现：
-
-| Provider | 支持市场 | 说明 |
-|----------|----------|------|
-| YFinanceProvider | 美股/港股 | 直接 HTTP API，绕过限流 |
-| TwelveDataProvider | 全球 | 需要 API Key |
-| AkShareProvider | 港股/A股 | 国内源，数据完整 |
-| StooqProvider | 港股/全球 | 国际源，稳定 |
-
-### 7. Broker (broker/)
-
-交易执行层：
-
-| Broker | 模式 | 说明 |
-|--------|------|------|
-| LongBridgeBroker | 实盘 | 港股实盘 |
-| FutuBroker | 实盘 | 港股实盘 |
-| PaperBroker | 模拟 | 模拟盘 |
-
----
-
-## 数据流
-
-```
-1. 用户输入: "做一个动量策略"
-              │
-              ▼
-2. SpecPM 解析 → {name, description, target_cagr, ...}
-              │
-              ▼
-3. BacktestEngine 回测 → {cagr: 0.15, max_drawdown: 0.12, ...}
-              │
-              ▼
-4. Bull Analyst (LLM) → {bull_points: [...], strengths: [...]}
-              │
-              ▼
-5. Bear Reviewer (LLM) → {bear_points: [...], weaknesses: [...]}
-              │
-              ▼
-6. 辩论 (2轮) → DebateResult
-              │
-              ▼
-7. Risk Gate → {verdict: REVISE, hard_gates: [], yellow_flags: [...]}
-              │
-              ▼
-8. PM (LLM) → {verdict: GO, utility_score: 7.5, next_experiments: [...]}
-```
-
----
-
-## 配置文件
-
-### policy.yaml
-
-```yaml
-hard_gates:        # 硬红线
-  max_drawdown: 0.20
-  min_data_years: 3
-  required_assumptions: [slippage, commission, tax, dividend_withholding]
-
-yellow_flags:      # 黄线警告
-  max_drawdown_warning_range: [0.15, 0.20]
-  suspiciously_high_cagr: 0.40
-
-weights:           # 效用分权重
-  cagr: 0.35
-  max_dd: 0.35
-  sharpe: 0.20
-  turnover: 0.10
-
-limits:            # 流程限制
-  max_debate_rounds: 2
-  max_iterations: 3
-
-trading_costs:     # 交易成本
-  slippage_bps: 5
-  commission_rate: 0.001
-```
-
----
-
-## 扩展点
-
-1. **新增策略** → 在 `strategy/` 添加 Strategy 子类
-2. **新增数据源** → 在 `data/` 添加 Provider 实现
-3. **新增 Broker** → 在 `broker/` 添加 Broker 实现
-4. **新增 LLM** → 修改 `llm.py` 支持其他 API
-5. **新增风控规则** → 修改 `risk/risk_manager.py` 和 `policy.yaml`
-
----
-
-## Agent Trading System (自动交易)
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    quant-trader Agent (Heartbeat 4h)                    │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Phase 0: 稳定性                                                      │
-│    • DataSourceManager → 数据源故障切换                               │
-│    • OrderGuard → 重复下单防护                                       │
-│    • Reconciler → 持仓对账                                           │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Phase 1: 基础能力                                                   │
-│    • AgentTrader → 统一交易接口 (买入/卖出/持仓/汇报)                │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Phase 2: 分析能力                                                   │
-│    • SignalAnalyzer → MA/RSI/MACD 信号生成                          │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Phase 3: 智能化                                                     │
-│    • MarketRegime → 市场环境判断 (多指标投票)                        │
-│    • StrategySelector → 根据环境+波动率选策略                        │
-│    • PositionSizer → 仓位计算                                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Phase 4: 风控                                                       │
-│    • RiskManager → 7大规则 (止损/止盈/仓位/熔断)                    │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### 交易流程
-
-```
-每日 Heartbeat (4h)
-    │
-    ▼
-1. 获取数据 (DataSourceManager)
-2. 市场环境 (MarketRegime)
-3. 信号分析 (SignalAnalyzer)
-4. 策略选择 (StrategySelector)
-5. 仓位计算 (PositionSizer)
-6. 风控检查 (RiskManager)
-7. 执行交易 (AgentTrader)
-8. 发送汇报 (Telegram)
-```
+## 审计要求
+所有关键状态跃迁都必须带：
+- `run_id`
+- `decision_id`
+- `strategy_dsl_hash`
+- `market_snapshot_hash`
+- `event_digest_hash`
+- `code_version`
+- `config_version`

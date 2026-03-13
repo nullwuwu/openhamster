@@ -1,28 +1,14 @@
-# quant-trader local override
+# GobyShrimp local override
 # [Source 来源] developer machine override
-# [Purpose 用途] keep local-only behavior (paths, providers, debug-level tweaks)
+# [Purpose 用途] keep only local-only provider choices that differ from repository defaults
 
 # [Source 来源] local.yaml
-# [Purpose 用途] use local runtime files while keeping PostgreSQL-ready DATABASE_URL path
-storage:
-  runtime_db_path: var/db/trading.db
-  paper_db_path: var/db/paper_trading.db
-  market_cache_path: var/cache/market_data_cache.db
-  log_path: var/logs/quant_trader.log
-
-# [Source 来源] local.yaml
-# [Purpose 用途] local development defaults for faster iteration
+# [Purpose 用途] local development defaults for faster iteration and fewer external dependencies
 data_source:
   provider: stooq
   fallback:
     - akshare
     - yfinance
 
-scheduler:
-  enabled: true
-  run_time: "15:10"
-  timezone: Asia/Shanghai
-
-broker:
-  type: paper
-  mode: dry_run
+events:
+  expected_sync_interval_minutes: 5

@@ -4,8 +4,8 @@ SQLite -> PostgreSQL migration entrypoint (skeleton).
 
 Usage:
   python scripts/sqlite_to_postgres.py \
-      --source var/db/quant_trader.db \
-      --target postgresql+psycopg://user:pass@host:5432/quant_trader
+      --source var/db/goby_shrimp.db \
+      --target postgresql+psycopg://user:pass@host:5432/goby_shrimp
 """
 from __future__ import annotations
 

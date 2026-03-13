@@ -1,236 +1,142 @@
-# 智能交易 Agent 实施方案 v3.0 (已更新)
+# 实施状态
 
-## 一、项目现状分析
+## 当前完成度
+- 工程重构：约 `92%`
+- 产品可用度：约 `98%`
+- 可审计策略工厂目标达成度：约 `94%`
 
-### quant-trader 项目已具备的能力
+## 已完成
+- 仓库已收敛到单一主线：`API + Dashboard + MiniMax LLM Gateway + Macro pipeline + Backtest/Experiment + Audit`
+- 旧执行链路、旧通知链路、旧 paper 服务层和历史兼容残留已删除
+- 包名、CLI、文档和前端产品叙事已统一为 `GobyShrimp`
+- 配置边界已收敛：
+  - `.env / .env.local` 仅用于密钥与机器级敏感信息
+  - `config/base.yaml / config/local.yaml` 仅用于稳定系统默认行为
+  - runtime overrides 仅用于运行时切换的系统级开关
+- Dashboard 主信息架构已稳定：
+  - `/command`
+  - `/candidates`
+  - `/research`
+  - `/paper`
+  - `/audit`
+- Dashboard 关键页面已进入“决策台”形态：
+  - `/command` 已补评分拆解、治理原因、宏观通道状态、策略状态流、候选池分布概览
+  - `/candidates` 已补活跃策略对比、冷却期、阻断原因、候选状态流
+  - `/research` 已补 active comparison、治理阻断原因、参数/约束结构、质量基线结论、样本外窗口、池内排行榜与淘汰视图
+  - `/paper` 已补执行健康、风险姿态、治理上下文、恢复路径、宏观依赖状态与关键执行指标
+  - `/audit` 已补时间线、上下文 payload、主因提炼、治理阶段、下一步、恢复条件与质量复盘信息
+- `LLM Gateway` 已成为唯一 LLM 接入面，当前运行时 provider 仅支持：
+  - `minimax`
+  - `mock`
+- MiniMax 已完成真实调用验证，prompt 体系已模块化
+- 事件输入已收敛为宏观单通道：
+  - `FREDMacroProvider + WorldBank fallback`
+  - `EventStream`
+  - `DailyEventDigest`
+  - `MarketSnapshot`
+- 研究链主流程已成型：
+  - `macro sync`
+  - `market analyst`
+  - `strategy agent`
+  - `research debate`
+  - `risk manager soft-score`
+  - `deterministic evidence merge`
+  - `risk decision`
+  - `candidate / active materialization`
+- 风控治理已进入 `v1.5`：
+  - 晋级阈值
+  - 挑战最小优势
+  - 冷却期
+  - 模拟盘回撤触发 `pause / rollback`
+- 策略质量验证闭环已进入 `v1`：
+  - `quality_report` 进入 `evidence_pack`
+  - 显式展示样本外通过率、鲁棒性、是否可比较、是否可替换、是否可累积
+  - 显式展示池中排名、距队首分差、领跑/挑战者/尾部选择状态
+  - 显式展示淘汰视图，能直接看到被压下去或被拒绝提案的主因
+  - 历史 proposal / decision 读取时自动回填质量报告
+- 宏观多级降级与可靠性语义已显式化：
+  - `macro provider degraded / recovered`
+  - `macro provider fallback applied`
+  - reliability score / tier / provider chain
+  - runtime 状态对象
+  - command center 回显
+  - 审计记录
+  - 最近一次可用宏观上下文复用
+  - 多级 provider 链：`FRED -> World Bank -> 最近可用上下文`
+- 审计主线已落地：
+  - `StrategyProposal`
+  - `RiskDecision`
+  - `AuditRecord`
+  - `run_id / decision_id` 串联主要状态跃迁
+- 治理状态流已可见：
+  - 当前阶段 `phase`
+  - 下一步 `next_step`
+  - 恢复条件 `resume_conditions`
+- 策略质量验证已进一步加厚：
+  - 样本外窗口 `passed_windows / total_windows / stability_ratio`
+  - 池内比较 `percentile / median_score / median_gap / relative_to_active`
+  - 近期轨迹 `recent_comparable / recent_replaceable / comparable_ratio / stable_streak / trend`
+  - 30天窗口 `recent_30d_total / recent_30d_comparable`
+- 模拟盘运营验收已进入主界面和 API：
+  - `operational_acceptance.status`
+  - `live_days / fill_rate / drawdown`
+  - `failed_checks / pause_events_30d / rollback_events_30d / incident_free_days / operational_score`
+- 宏观健康语义已进一步加厚：
+  - `freshness_hours / freshness_tier`
+  - 动态可靠性分数按 provider 层级与数据鲜度共同调整
+  - `health_score_30d / degraded_count_30d / fallback_count_30d / recovery_count_30d`
+- 运行验收报告已落地：
+  - API: `/api/v1/ops/acceptance-report`
+  - 本地脚本: `python scripts/generate_acceptance_report.py`
+  - 当前覆盖质量、运营、宏观、治理四个视角
+- dashboard 已可观察持续运行状态：
+  - `runtime_status.current_state`
+  - `last_run_at / last_success_at / last_failure_at`
+  - `consecutive_failures`
+  - `expected_next_run_at`
+  - `last_trigger`
+- dashboard 已可观察策略治理 ETA：
+  - `governance_report.lifecycle.eta_kind`
+  - `governance_report.lifecycle.estimated_next_eligible_at`
+  - 可区分下一次研究窗口、冷却结束、待质量重评、待复核完成
+- 后端已补真实周期调度：
+  - lifespan 启动时立即同步一次
+  - 之后按 `events.expected_sync_interval_minutes` 周期继续研究与治理同步
+- 后端已补手动触发研究：
+  - API: `POST /api/v1/runtime/sync`
+  - dashboard: `Run Now`
+- 前端性能已完成首轮收口：
+  - Vite manual chunks
+  - `vendor-vue / vendor-query / vendor-echarts / vendor`
+  - 主入口 bundle 已显著缩小
+- 前端已完成手工拆包，主入口 bundle 已显著收敛
+- 当前测试与前端构建通过：
+  - `pytest tests -q -> 122 passed, 8 skipped`
+  - `npm run build --prefix apps/web -> passed`
 
-| 模块 | 功能 | 状态 | Agent 调用方式 |
-|------|------|------|----------------|
-| **执行引擎** | | | |
-| scheduler.py | 每日定时触发 (15:30 HKT) | ✅ | 不需要 |
-| orchestrator.py | 编排数据→策略→风控→执行→通知 | ✅ | 直接调用 |
-| **策略** | | | |
-| ma_cross_strategy.py | MA 交叉策略 | ✅ | 导入使用 |
-| macd_strategy.py | MACD 策略 | ✅ | 导入使用 |
-| rsi_strategy.py | RSI 策略 | ✅ | 导入使用 |
-| mean_reversion.py | 均值回归策略 | ✅ | 导入使用 |
-| channel_breakout.py | 通道突破策略 | ✅ | 导入使用 |
-| regime.py | 市场环境过滤器 | ✅ | 导入使用 |
-| **风控** | | | |
-| risk_manager.py | 基础风控 | ✅ | 导入使用 |
-| enhanced_risk_manager.py | 增强风控 | ✅ | 导入使用 |
-| **reviewer.py** | Risk Gate | ✅ | MCP 调用 |
-| **数据** | | | |
-| yfinance_provider.py | YFinance 数据源 | ✅ | 导入使用 |
-| akshare_provider.py | AkShare 数据源 (主要) | ✅ | 导入使用 |
-| stooq_provider.py | Stooq 数据源 (备用) | ✅ | 导入使用 |
-| **券商** | | | |
-| longbridge_broker.py | LongBridge 实盘 | ✅ | 导入使用 |
-| paper_broker.py | **模拟交易** | ✅ | 导入使用 |
-| futu_broker.py | 富途券商 | ✅ | 导入使用 |
-| **通知** | | | |
-| Telegram 通知 | 交易报告推送 | ✅ | 导入使用 |
-| **MCP Server** | | | |
-| strategy_review | 单次策略评审 | ✅ | MCP 调用 |
-| get_policy | 获取风控配置 | ✅ | MCP 调用 |
+## 已明确不做
+- 当前阶段不接新闻与公告输入
+- 当前阶段不进入自动实盘
+- 当前阶段不保留历史兼容层与旧配置叙事
 
----
+## 仍未完成
+- 更长周期的策略质量验证仍未完成：
+  - 当前已有窗口化样本外指标和池内横向比较
+  - 当前已有30天轨迹与近期稳定期统计
+  - 但还缺更长时间跨度的真实积累与稳定性统计
+- 模拟盘治理还可以再收紧：
+  - 当前已有暂停、回滚、恢复条件、运营验收与治理状态流
+  - 但还缺更严的长期运营验收统计
+- 宏观多源治理已成型，但还没到最终态：
+  - 当前是 `FRED -> World Bank -> 最近可用上下文`
+  - 当前已有 provider chain、reliability、freshness
+  - 后续仍建议补更成熟的源健康评分历史与优先级策略
+- Dashboard 仍有最后一轮产品化空间：
+  - `/paper` 与 `/audit` 还可以继续做深层 drill-down
+  - 多语言仍需随新增展示项持续补齐
 
-## 二、Agent 定位
-
-### 项目 = 执行引擎（自动跑代码）
-### Agent = 智能大脑（分析、决策、改进）
-
-| 层次 | 项目做的 | Agent 做的 |
-|------|---------|-----------|
-| 数据获取 | ✅ | 调用 + 故障切换 |
-| 策略运行 | ✅ | 调用 |
-| 风控检查 | ✅ | 调用 |
-| 交易执行 | ✅ | 调用 |
-| **分析决策** | ❌ | ✅ |
-| **主动汇报** | ❌ | ✅ |
-| **稳定性保障** | ❌ | ✅ |
-
----
-
-## 三、风控规则（已更新 v3.0）
-
-### 交易规则 (2026-03-08 参数扫描优化)
-
-| 规则 | 阈值 | 说明 |
-|------|------|------|
-| 单笔最大仓位 | **35%** | 单只股票不超过总资产 35% (参数扫描最优解) |
-| 单日最大亏损 | **-3%** | 当日亏损超过 3% 停止交易 |
-| 单笔止损 | **-8%** | 单笔持仓亏损 8% 强制止损 |
-| 止盈 | **+15%** | 盈利 15% 止盈 |
-| 移动止损 | **5%** | 从高点回撤 5% 强制平仓 |
-| 总仓位上限 | **80%** | 持仓不超过总资产 80% |
-| 最低现金 | **5%** | 始终保留 5% 现金 |
-| 单日最大交易次数 | **3 次** | 每天最多开平 3 次 |
-
-### 禁止规则
-
-- 不交易 ST 股票
-- 不交易新股 (上市 < 6个月)
-- 涨幅 > 3% 不追涨
-- 跌破 60 日均线不买入
-- 不在开盘前 15 分钟内交易
-
-### 风控检查流程
-
-```
-1. 检查单日亏损是否超限 → 超限则停止
-2. 检查持仓是否触发止损/止盈 → 触发则强制平仓
-3. 检查信号是否符合买入条件 → 不符合则跳过
-4. 检查仓位是否超限 → 超限则减仓
-```
-
----
-
-## 四、稳定性保障（Phase 0 - 已完成 ✅）
-
-### 4.1 数据源故障切换 ✅
-
-| 优先级 | 数据源 | 说明 |
-|--------|--------|------|
-| 1 | AkShare | 主要数据源，港股数据全 |
-| 2 | YFinance | 备用 (易被限流) |
-| 3 | Stooq | 最后备用 |
-
-### 4.2 对账机制 ✅
-
-| 检查项 | 频率 | 状态 |
-|--------|------|------|
-| 持仓数量 | 每次交易后 | ✅ |
-| 现金余额 | 每次交易后 | ✅ |
-| 每日收盘 | 强制对账 | ✅ |
-
-### 4.3 重复下单防护 ✅
-
-| 防护规则 | 设置 |
-|----------|------|
-| 同股票同方向冷却 | 5 分钟 |
-| 单日同股票交易次数 | 最多 2 次 |
-
----
-
-## 五、Agent 架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ quant-trader Agent │
-├─────────────────────────────────────────────────────────────┤
-│ 📊 数据层 │
-│ • DataSourceManager (故障切换) ✅ │
-│ • 获取市场数据 │
-│ │
-│ 🧠 分析层 │
-│ • SignalAnalyzer (技术指标 + 信号) ✅ │
-│ • MarketRegime (市场环境) ✅ │
-│ • StrategySelector (策略选择) ✅ │
-│ • PositionSizer (仓位计算) ✅ │
-│ │
-│ ⚖️ 风控层 │
-│ • RiskManager (7大规则 + 参数扫描) ✅ │
-│ • 仓位管理 ✅ │
-│ • 止损检查 ✅ │
-│ │
-│ 📝 执行层 │
-│ • OrderGuard (重复防护) ✅ │
-│ • Reconciler (对账) ✅ │
-│ • PaperBroker (模拟盘) ✅ │
-│ │
-│ 📢 汇报层 │
-│ • Telegram 通知 ✅ │
-│ • 每日报告 ✅ │
-│ • 异常报警 ✅ │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 六、实施计划
-
-### Phase 0: 稳定性保障 ✅ 已完成
-
-| 任务 | 状态 |
-|------|------|
-| 0.1 DataSourceManager (故障自动切换) | ✅ |
-| 0.2 Reconciler (对账) | ✅ |
-| 0.3 OrderGuard (重复下单防护) | ✅ |
-
-### Phase 1: 基础能力对接 ✅ 已完成
-
-| 任务 | 状态 |
-|------|------|
-| 1.1 Agent 读取持仓 | ✅ |
-| 1.2 Agent 获取市场数据 | ✅ |
-| 1.3 Agent 执行模拟交易 | ✅ |
-| 1.4 Agent 发送 Telegram 汇报 | ✅ |
-
-### Phase 2: 分析能力 ✅ 已完成
-
-| 任务 | 状态 |
-|------|------|
-| 2.1 技术指标计算 | ✅ |
-| 2.2 交易信号生成 | ✅ |
-| 2.3 风控阈值检查 | ✅ |
-
-### Phase 3: 智能化 ✅ 已完成
-
-| 任务 | 状态 |
-|------|------|
-| 3.1 市场环境判断 | ✅ |
-| 3.2 策略选择 | ✅ |
-| 3.3 仓位管理 | ✅ |
-
-### Phase 4: 风控集成 ✅ 已完成
-
-| 任务 | 状态 |
-|------|------|
-| 4.1 RiskManager 集成到回测 | ✅ |
-| 4.2 参数扫描优化 | ✅ |
-| 4.3 单元测试 | ✅ 8/8 通过 |
-
----
-
-## 七、回测效果 (2800.HK 2023-01-01~2026-01-01)
-
-### 参数扫描结果
-
-| 仓位上限 | 总收益 | MaxDD | Sharpe |
-|----------|--------|-------|--------|
-| 15% | 4.66% | -2.54% | 86.20 |
-| 25% | 7.79% | -4.21% | 86.63 |
-| **35%** | **10.91%** | **-5.86%** | **87.02** |
-| 50% | 15.57% | -8.29% | 87.43 |
-| 无上限 | 24.94% | -12.99% | 88.52 |
-| 无风控 | 23.08% | -18.37% | 48.45 |
-
-### 选中配置: 35%
-
-- MaxDD 从 -18.37% → -5.86% (**降低 68%**)
-- Sharpe 从 48.45 → 87.02 (**提升 80%**)
-- 收益: 10.91% (无风控的 47%)
-
----
-
-## 八、下一步
-
-### 待完成
-
-1. **实盘对接** - 配置 LongBridge API 进行真实交易
-2. **多标的回测** - 测试 0700.HK, 9988.HK
-3. **Agent 调度** - 配置 cron/heartbeat 定时执行
-4. **Telegram 通知** - 交易信号实时推送
-
-### 验收标准
-
-- [ ] 连续 3 个月正向收益 (模拟盘)
-- [ ] 无风控事故
-- [ ] 可解释的交易决策
-- [ ] 稳定性 99%+
-
----
-
-**当前阶段: Phase 4 风控完成，可进入实盘测试** 🚀
+## 下一步优先级
+1. 用连续运行样本验证验收报告的长期稳定性
+2. 继续加厚策略质量的时间跨度，而不是继续扩功能面
+3. 提升宏观 provider 健康评分的历史建模精度
+4. 补最后一轮 dashboard 细节与操作手册

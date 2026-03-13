@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from quant_trader.data.symbols import detect_market, normalize_cn_symbol, normalize_symbol
+from goby_shrimp.data.symbols import detect_market, normalize_cn_symbol, normalize_symbol
 
 
 def test_detect_market():

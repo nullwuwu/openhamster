@@ -1,12 +1,6 @@
-import os
-import sys
-
 import pandas as pd
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from quant_trader.strategy import get_strategy_factory
-from quant_trader.strategy.signals import Signal
+from goby_shrimp.strategy import get_strategy_factory, get_strategy_registry, strategy_plugin_names
+from goby_shrimp.strategy.signals import Signal
 
 
 def _mock_df(rows: int = 120) -> pd.DataFrame:
@@ -40,3 +34,10 @@ def test_factory_unknown_strategy():
         assert False, "should raise ValueError"
     except ValueError:
         assert True
+
+
+def test_registry_exposes_plugin_metadata():
+    definitions = get_strategy_registry().definitions()
+    assert definitions
+    assert any(item.description for item in definitions)
+    assert "ma_cross" in strategy_plugin_names()

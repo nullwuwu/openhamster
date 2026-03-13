@@ -1,10 +1,10 @@
-# quant-trader base configuration
+# GobyShrimp base configuration
 # [Source 来源] repository default baseline shared by all local environments
-# [Purpose 用途] centralize non-secret defaults and keep runtime behavior reproducible
+# [Purpose 用途] centralize non-secret defaults for the auditable strategy factory
 
 # [Source 来源] repository default
-# [Purpose 用途] identify runtime environment and global timezone
-app_name: quant-trader
+# [Purpose 用途] identify application name, environment, and timezone
+app_name: GobyShrimp
 env: local
 timezone: Asia/Shanghai
 
@@ -12,38 +12,23 @@ timezone: Asia/Shanghai
 # [Purpose 用途] runtime artifact locations and SQLAlchemy connection target
 storage:
   # [Source 来源] base.yaml, can be overridden by env DATABASE_URL
-  # [Purpose 用途] primary application database (SQLite now, PostgreSQL-ready)
-  database_url: sqlite:///var/db/quant_trader.db
+  # [Purpose 用途] primary application database, SQLite now and PostgreSQL-ready later
+  database_url: sqlite:///var/db/goby_shrimp.db
   # [Source 来源] base.yaml, can be overridden by env RUNTIME_DB_PATH
-  # [Purpose 用途] legacy trading db path used by existing orchestrator modules
+  # [Purpose 用途] local runtime database storing paper NAV, orders, and positions snapshots
   runtime_db_path: var/db/trading.db
   # [Source 来源] base.yaml, can be overridden by env PAPER_DB_PATH
-  # [Purpose 用途] legacy paper trading db path
+  # [Purpose 用途] legacy-compatible paper snapshot database path still read by the dashboard
   paper_db_path: var/db/paper_trading.db
   # [Source 来源] base.yaml, can be overridden by env MARKET_CACHE_PATH
-  # [Purpose 用途] market data cache sqlite file
+  # [Purpose 用途] local market data cache sqlite file
   market_cache_path: var/cache/market_data_cache.db
   # [Source 来源] base.yaml, can be overridden by env APP_LOG_PATH
-  # [Purpose 用途] backend default log file path
-  log_path: var/logs/quant_trader.log
+  # [Purpose 用途] backend application log path
+  log_path: var/logs/goby_shrimp.log
 
 # [Source 来源] repository default
-# [Purpose 用途] broker mode and execution constraints
-broker:
-  type: paper
-  mode: dry_run
-  max_order_value: 500000
-  require_confirm_live: true
-
-# [Source 来源] repository default
-# [Purpose 用途] scheduling runtime for daily strategy orchestration
-scheduler:
-  enabled: true
-  run_time: "15:10"
-  timezone: Asia/Shanghai
-
-# [Source 来源] repository default
-# [Purpose 用途] market data provider selection and cache control
+# [Purpose 用途] price and volume data provider selection
 data_source:
   provider: akshare
   fallback:
@@ -51,7 +36,23 @@ data_source:
   cache_enabled: true
 
 # [Source 来源] repository default
-# [Purpose 用途] strategy selection and default parameter templates
+# [Purpose 用途] macro event pipeline used as a low-frequency research background input
+events:
+  macro_provider: fred
+  fallback_mode: reuse_last_good
+  fallback_max_age_days: 14
+  expected_sync_interval_minutes: 60
+
+# [Source 来源] repository default
+# [Purpose 用途] default LLM provider and generation limits for agent outputs
+llm:
+  provider: minimax
+  model: MiniMax-M2.5
+  temperature: 0.3
+  max_output_tokens: 4096
+
+# [Source 来源] repository default
+# [Purpose 用途] strategy registry, human baseline strategies, and default parameters
 strategy:
   mode: auto
   enabled:
@@ -76,33 +77,20 @@ universe:
   include_gem: true
 
 # [Source 来源] repository default
-# [Purpose 用途] execution constraints for Chinese market rules
+# [Purpose 用途] execution safety boundaries for the B-level autonomy model
 execution_rules:
   allow_short: false
   cn_lot_size: 100
   cn_t_plus_one: true
 
 # [Source 来源] repository default
-# [Purpose 用途] fallback static portfolio used when dynamic universe unavailable
+# [Purpose 用途] fallback static portfolio used when dynamic universe is unavailable
 portfolio:
   symbols:
     - "000300.SH"
     - "510300.SH"
     - "159915.SZ"
   default_capital: 1000000
-
-# [Source 来源] repository default
-# [Purpose 用途] outbound notification channels (content only, no hardcoded secrets)
-notifications:
-  telegram:
-    enabled: false
-    chat_id: ""
-  email:
-    enabled: false
-    smtp_host: ""
-    smtp_port: 587
-    from_addr: ""
-    to_addrs: []
 
 # [Source 来源] repository default
 # [Purpose 用途] transaction cost assumptions for backtest and risk review
@@ -113,9 +101,9 @@ trading_costs:
   dividend_withholding: 0.0
 
 # [Source 来源] repository default
-# [Purpose 用途] hard stop requirements for risk gate
+# [Purpose 用途] deterministic hard gates for RiskManagerAgent
 hard_gates:
-  max_drawdown: 0.20
+  max_drawdown: 0.15
   min_data_years: 3
   required_assumptions:
     - slippage
@@ -124,37 +112,47 @@ hard_gates:
     - dividend_withholding
 
 # [Source 来源] repository default
-# [Purpose 用途] warning-level thresholds for strategy approval
+# [Purpose 用途] warning-level thresholds before strategy promotion or rollback
 yellow_flags:
-  max_drawdown_warning_range: [0.15, 0.20]
+  max_drawdown_warning_range: [0.12, 0.15]
   suspiciously_high_cagr: 0.40
   param_sensitivity_threshold: 0.50
   first_live_deployment: true
 
 # [Source 来源] repository default
-# [Purpose 用途] utility score weighting model
+# [Purpose 用途] explicit governance rules for promotion, cooldown, pause, and rollback decisions
+governance:
+  promote_threshold: 75.0
+  keep_threshold: 68.0
+  challenger_min_delta: 3.0
+  cooldown_days: 5
+  live_drawdown_pause: 0.12
+  live_drawdown_rollback: 0.15
+  acceptance_min_days: 7
+  acceptance_min_fill_rate: 0.60
+  acceptance_max_drawdown: 0.08
+  block_promotion_on_macro_degrade: true
+
+# [Source 来源] repository default
+# [Purpose 用途] deterministic score weighting used by evidence review
 weights:
   cagr: 0.35
   max_dd: 0.35
   sharpe: 0.20
   turnover: 0.10
-  adjust_range: 0.10
 
 # [Source 来源] repository default
-# [Purpose 用途] runtime guardrails for debate and iterative optimization
+# [Purpose 用途] guardrails for debate cycles and iterative optimization
 limits:
   max_debate_rounds: 2
   max_iterations: 3
-  on_max_reached: STOP_AND_NOTIFY_HUMAN
 
 # [Source 来源] local.env / shell env recommended
-# [Purpose 用途] integration credentials, loaded from env override first
+# [Purpose 用途] integration credentials injected into providers and agent services
 integrations:
   minimax_api_key: ""
+  fred_api_key: ""
   twelve_data_api_key: ""
   tushare_token: ""
   alphavantage_api_key: ""
   itick_token: ""
-  longbridge_app_key: ""
-  longbridge_app_secret: ""
-  longbridge_access_token: ""

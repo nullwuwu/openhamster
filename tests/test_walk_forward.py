@@ -2,8 +2,8 @@
 Walk-forward 验证测试
 """
 import pytest
-from quant_trader.backtest.backtest_engine import DualMAStrategy
-from quant_trader.models import WalkForwardResult
+from goby_shrimp.backtest.backtest_engine import DualMAStrategy
+from goby_shrimp.models import WalkForwardResult
 
 
 class TestWalkForwardValidation:

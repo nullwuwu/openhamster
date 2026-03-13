@@ -1,4 +1,13 @@
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+export type ProposalStatus = 'candidate' | 'active' | 'rejected' | 'archived'
+export type RiskDecisionAction =
+  | 'reject'
+  | 'keep_candidate'
+  | 'promote_to_paper'
+  | 'pause_active'
+  | 'rollback_to_previous_stable'
+export type EventType = 'macro'
+export type LLMProvider = 'minimax' | 'mock'
 
 export interface RunMetricSnapshot {
   cagr: number | null
@@ -51,16 +60,225 @@ export interface StrategySnapshot {
   updated_at: string
 }
 
-export interface Overview {
-  generated_at: string
-  timezone: string
-  total_backtest_runs: number
-  total_experiment_runs: number
-  running_jobs: number
-  latest_backtest: BacktestRun | null
-  latest_experiment: ExperimentRun | null
-  latest_total_equity: number | null
-  latest_trade_date: string | null
+export interface EventRecord {
+  id: string
+  event_id: string
+  event_type: EventType
+  market_scope: string
+  symbol_scope: string
+  published_at: string
+  source: string
+  title: string
+  body_ref?: string
+  tags: string[]
+  importance: number
+  sentiment_hint: number
+  metadata_payload: Record<string, unknown>
+}
+
+export interface DailyEventDigest {
+  trade_date: string
+  market_scope: string
+  symbol_scope: string
+  macro_summary: string
+  event_scores: Record<string, number>
+  digest_hash: string
+  event_ids: string[]
+}
+
+export interface MacroPipelineStatus {
+  provider: string
+  active_provider?: string
+  provider_chain?: string[]
+  status: string
+  message: string
+  degraded: boolean
+  last_success_at?: string
+  fallback_mode?: string
+  fallback_event_count?: number
+  using_last_known_context?: boolean
+  reliability_score?: number
+  reliability_tier?: string
+  freshness_hours?: number
+  freshness_tier?: string
+  health_score_30d?: number
+  degraded_count_30d?: number
+  fallback_count_30d?: number
+  recovery_count_30d?: number
+}
+
+export interface MarketSnapshot {
+  regime: string
+  confidence: number
+  summary: string
+  market_snapshot_hash: string
+  symbol: string
+  price_context: Record<string, unknown>
+  event_lane_sources: Record<string, string>
+  macro_status: MacroPipelineStatus
+  event_digest: DailyEventDigest
+  event_stream_preview: EventRecord[]
+}
+
+export interface DebateReport {
+  stance_for: string[]
+  stance_against: string[]
+  synthesis: string
+}
+
+export interface GovernanceReport {
+  version?: string
+  thresholds?: Record<string, unknown>
+  promotion_gate?: {
+    eligible?: boolean
+    blocked_reasons?: string[]
+  }
+  active_comparison?: {
+    active_title?: string | null
+    active_score?: number | null
+    score_delta?: number | null
+    can_challenge_active?: boolean
+    cooldown_remaining_days?: number
+  }
+  macro_dependency?: Record<string, unknown>
+  active_health?: Record<string, unknown>
+  lifecycle?: {
+    phase?: string
+    next_step?: string
+    rechallenge_allowed?: boolean
+    review_trigger?: string
+    eta_kind?: string
+    estimated_next_eligible_at?: string | null
+    resume_conditions?: string[]
+  }
+  selected_action?: string
+}
+
+export interface QualityReport {
+  version?: string
+  oos_validation?: {
+    walkforward_pass_rate?: number
+    required_pass_rate?: number
+    passed?: boolean
+    passed_windows?: number
+    total_windows?: number
+    stability_ratio?: number
+  }
+  pool_comparison?: {
+    active_title?: string | null
+    score_delta?: number | null
+    required_delta?: number
+    comparable?: boolean
+    replaceable?: boolean
+    relative_to_active?: string
+  }
+  robustness?: {
+    param_sensitivity?: number
+    max_allowed?: number
+    passed?: boolean
+  }
+  return_quality?: {
+    cagr?: number
+    sharpe?: number
+    max_drawdown?: number
+  }
+  verdict?: {
+    quality_band?: string
+    comparable?: boolean
+    replaceable?: boolean
+    accumulable?: boolean
+  }
+  pool_ranking?: {
+    rank?: number
+    total_tracked?: number
+    leader_score?: number
+    leader_gap?: number
+    percentile?: number
+    median_score?: number
+    median_gap?: number
+    selection_state?: string
+  }
+  track_record?: {
+    recent_total?: number
+    recent_comparable?: number
+    recent_replaceable?: number
+    recent_30d_total?: number
+    recent_30d_comparable?: number
+    window_days?: number
+    comparable_ratio?: number
+    replaceable_ratio?: number
+    average_final_score?: number
+    best_final_score?: number
+    average_stability_ratio?: number
+    stable_streak?: number
+    trend?: string
+  }
+}
+
+export interface EvidencePack {
+  bottom_line_report: Record<string, boolean>
+  deterministic_evidence: Record<string, number | string | boolean>
+  governance_report?: GovernanceReport
+  quality_report?: QualityReport
+  llm_judgment_inputs: Record<string, unknown>
+}
+
+export interface StrategyProposal {
+  id: string
+  run_id: string
+  title: string
+  symbol: string
+  market_scope: string
+  thesis: string
+  source_kind: string
+  provider_status: string
+  provider_model: string
+  provider_message: string
+  market_snapshot_hash: string
+  event_digest_hash: string
+  strategy_dsl: Record<string, unknown>
+  debate_report: DebateReport
+  evidence_pack: EvidencePack
+  features_used: string[]
+  deterministic_score: number
+  llm_score: number
+  final_score: number
+  status: ProposalStatus
+  created_at: string
+  updated_at: string
+  promoted_at?: string
+}
+
+export interface RiskDecision {
+  id: string
+  decision_id: string
+  run_id: string
+  proposal_id: string
+  action: RiskDecisionAction
+  deterministic_score: number
+  llm_score: number
+  final_score: number
+  bottom_line_passed: boolean
+  bottom_line_report: Record<string, boolean>
+  llm_explanation: string
+  evidence_pack: EvidencePack
+  created_at: string
+}
+
+export interface AuditRecord {
+  id: number
+  run_id: string
+  decision_id: string
+  event_type: string
+  entity_type: string
+  entity_id: string
+  strategy_dsl_hash: string
+  market_snapshot_hash: string
+  event_digest_hash: string
+  code_version: string
+  config_version: string
+  payload: Record<string, unknown>
+  created_at: string
 }
 
 export interface PaperNavPoint {
@@ -89,3 +307,72 @@ export interface PaperPosition {
   market_value: number
   updated_at: string
 }
+
+export interface PaperTrading {
+  nav: PaperNavPoint[]
+  orders: PaperOrder[]
+  positions: PaperPosition[]
+}
+
+export interface ActiveStrategy {
+  proposal: StrategyProposal | null
+  latest_decision: RiskDecision | null
+  paper_trading: PaperTrading
+  operational_acceptance?: Record<string, unknown>
+}
+
+export interface AcceptanceReport {
+  generated_at: string
+  window_days: number
+  status: string
+  strategy_title?: string | null
+  key_findings: string[]
+  next_actions: string[]
+  quality: Record<string, unknown>
+  operations: Record<string, unknown>
+  macro: Record<string, unknown>
+  governance: Record<string, unknown>
+}
+
+export interface CandidateStrategy {
+  proposal: StrategyProposal
+  latest_decision: RiskDecision | null
+}
+
+export interface LLMStatus {
+  provider: LLMProvider
+  model: string
+  status: string
+  message: string
+  using_mock_fallback: boolean
+  configured_providers: LLMProvider[]
+}
+
+export interface PipelineRuntimeStatus {
+  current_state: string
+  status_message: string
+  last_run_at?: string
+  last_success_at?: string
+  last_failure_at?: string
+  consecutive_failures: number
+  expected_next_run_at?: string
+  last_duration_ms?: number
+  last_trigger?: string
+  degraded: boolean
+  stalled: boolean
+}
+
+export interface CommandCenter {
+  generated_at: string
+  timezone: string
+  llm_status: LLMStatus
+  runtime_status: PipelineRuntimeStatus
+  market_snapshot: MarketSnapshot
+  active_strategy: ActiveStrategy
+  candidate_count: number
+  latest_risk_decision: RiskDecision | null
+  latest_audit_events: AuditRecord[]
+  latest_event_digest: DailyEventDigest
+}
+
+export interface TriggerSyncResponse extends PipelineRuntimeStatus {}

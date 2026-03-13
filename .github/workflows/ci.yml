@@ -20,7 +20,7 @@ jobs:
       - name: Lint
         run: ruff check src tests
       - name: Type check
-        run: mypy src/quant_trader/api src/quant_trader/config
+        run: mypy src/goby_shrimp/api src/goby_shrimp/config
       - name: Tests
         run: pytest tests/unit tests/integration
       - name: Alembic migrate
