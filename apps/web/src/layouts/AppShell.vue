@@ -2,17 +2,18 @@
 import type { Component } from 'vue'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Command, FileSearch, LibraryBig, Menu, Radar, ShieldCheck } from 'lucide-vue-next'
+import { Activity, Command, FileSearch, LibraryBig, Menu, Radar, ShieldCheck } from 'lucide-vue-next'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 
 import Button from '@/components/ui/Button.vue'
 import { getCurrentLocale, setAppLocale, type SupportedLocale } from '@/i18n'
 import { useUiStore } from '@/stores/ui'
 
-type NavKey = 'command' | 'candidates' | 'research' | 'paper' | 'audit'
+type NavKey = 'command' | 'runtime' | 'candidates' | 'research' | 'paper' | 'audit'
 
 const navDefs: Array<{ path: string; key: NavKey; icon: Component }> = [
   { path: '/command', key: 'command', icon: Command },
+  { path: '/runtime', key: 'runtime', icon: Activity },
   { path: '/candidates', key: 'candidates', icon: Radar },
   { path: '/research', key: 'research', icon: LibraryBig },
   { path: '/paper', key: 'paper', icon: ShieldCheck },

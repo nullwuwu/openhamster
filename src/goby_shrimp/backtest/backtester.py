@@ -19,7 +19,7 @@ from .result import BacktestResult
 logger = logging.getLogger("goby_shrimp.backtest")
 
 # 默认回测参数
-DEFAULT_INITIAL_CAPITAL = 1_000_000  # HKD 100万
+DEFAULT_INITIAL_CAPITAL = 100_000  # HKD 10万
 DEFAULT_COMMISSION = 0.001  # 0.1% 手续费
 
 

@@ -4,6 +4,7 @@
 - 工程重构：约 `92%`
 - 产品可用度：约 `98%`
 - 可审计策略工厂目标达成度：约 `94%`
+- `v2` 推进度：约 `30%`
 
 ## 已完成
 - 仓库已收敛到单一主线：`API + Dashboard + MiniMax LLM Gateway + Macro pipeline + Backtest/Experiment + Audit`
@@ -96,6 +97,14 @@
   - API: `/api/v1/ops/acceptance-report`
   - 本地脚本: `python scripts/generate_acceptance_report.py`
   - 当前覆盖质量、运营、宏观、治理四个视角
+- `v2` 的 provider migration 治理已进入只读能力：
+  - 已形成 `llm_provider_switched / provider_cohort_started / provider_comparison_window_closed` 审计语义
+  - `/command` 与 `/audit` 已展示 provider cohort 摘要
+  - `/audit` 已展示 provider cohort 趋势图
+  - readiness 证据层已纳入 provider comparison
+- `v2` 的桌面应用方向已形成正式方案，但尚未进入壳层实现：
+  - `Desktop Packaging Proposal`
+  - 当前仍以 `launchd + 本地服务 + dashboard` 为长期运行基线
 - dashboard 已可观察持续运行状态：
   - `runtime_status.current_state`
   - `runtime_status.current_stage`
@@ -149,4 +158,5 @@
 1. 用连续运行样本验证验收报告的长期稳定性
 2. 继续加厚策略质量的时间跨度，而不是继续扩功能面
 3. 提升宏观 provider 健康评分的历史建模精度
-4. 补最后一轮 dashboard 细节与操作手册
+4. 按 `V2_TRACKING.md` 持续观察 provider / paper / readiness / runtime 的趋势
+5. 补最后一轮 dashboard 细节与操作手册

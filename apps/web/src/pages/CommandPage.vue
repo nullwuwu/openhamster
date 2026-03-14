@@ -2,6 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { GridComponent, TooltipComponent } from 'echarts/components'
@@ -39,11 +40,23 @@ const strategiesQuery = useQuery({
   queryFn: api.getStrategies,
   refetchInterval: 60_000,
 })
+const logStream = ref<'out' | 'err'>('out')
+const runtimeLogsQuery = useQuery({
+  queryKey: ['runtime-logs', logStream],
+  queryFn: () => api.getRuntimeLogs(logStream.value, 40),
+  refetchInterval: 15_000,
+})
 
 const command = computed(() => commandQuery.data.value)
 const candidates = computed(() => candidatesQuery.data.value ?? [])
 const strategyCatalog = computed(() => strategiesQuery.data.value ?? [])
 const acceptanceReport = computed(() => acceptanceReportQuery.data.value)
+const runtimeLogs = computed(() => runtimeLogsQuery.data.value)
+const providerMigration = computed(() => command.value?.provider_migration)
+const providerMigrationHistory = computed(() => command.value?.provider_migration_history ?? [])
+const liveReadiness = computed(() => command.value?.live_readiness)
+const liveReadinessHistory = computed(() => command.value?.live_readiness_history ?? [])
+const liveReadinessChange = computed(() => command.value?.live_readiness_change ?? null)
 const navRows = computed(() => command.value?.active_strategy.paper_trading.nav ?? [])
 const llmStatus = computed(() => command.value?.llm_status)
 const runtimeStatus = computed(() => command.value?.runtime_status)
@@ -123,12 +136,71 @@ const candidateSummary = computed(() => {
 const topCandidates = computed(() => visibleCandidates.value.slice(0, 3))
 const topUniverseCandidates = computed(() => universeSelection.value?.candidates?.slice(0, 5) ?? [])
 const visibleCandidateCount = computed(() => Math.max(command.value?.candidate_count ?? 0, visibleCandidates.value.length))
+const executiveSummary = computed(() => {
+  if (!command.value) return null
+  const selectedSymbol = universeSelection.value?.selected_symbol ?? '--'
+  const activeTitle = visibleActiveProposal.value?.title ?? '--'
+  const readinessStatus = liveReadiness.value?.status ?? 'not_ready'
+  const blockers = liveReadiness.value?.blockers ?? []
+  const nextActions = liveReadiness.value?.next_actions ?? []
+  const selectionReason = universeSelection.value?.selection_reason
+  const executionExplanation = latestPaperExecution.value?.explanation
+  const governanceNextStep = latestDecision.value?.evidence_pack?.governance_report?.lifecycle?.next_step
+
+  let conclusionKey = 'executiveConclusion_not_ready'
+  if (readinessStatus === 'ready_candidate') conclusionKey = 'executiveConclusion_ready_candidate'
+  else if (readinessStatus === 'paper_building_evidence') conclusionKey = 'executiveConclusion_paper_building_evidence'
+
+  const reasons: string[] = []
+  if (selectionReason) reasons.push(`${t('command.executiveReason_selectedSymbol')}: ${selectedSymbol} - ${selectionReason}`)
+  else reasons.push(`${t('command.executiveReason_selectedSymbol')}: ${selectedSymbol}`)
+
+  if (executionExplanation) reasons.push(`${t('command.executiveReason_execution')}: ${executionExplanation}`)
+  else if (latestPaperExecution.value) reasons.push(`${t('command.executiveReason_execution')}: ${paperExecutionStatusLabel(latestPaperExecution.value.status)}`)
+
+  if (blockers.length > 0) reasons.push(`${t('command.executiveReason_blocker')}: ${humanizeLabel(blockers[0])}`)
+  else if (liveReadiness.value?.summary) reasons.push(`${t('command.executiveReason_readiness')}: ${liveReadiness.value.summary}`)
+
+  const nextStep = nextActions[0] ? humanizeLabel(nextActions[0]) : governanceNextStep ? governanceNextStepLabel(String(governanceNextStep)) : runtimeStatus.value?.current_state === 'running' ? pipelineStageLabel(runtimeStatus.value?.current_stage) : t('common.noData')
+
+  return {
+    selectedSymbol,
+    activeTitle,
+    conclusion: t(`command.${conclusionKey}`),
+    reasons: reasons.slice(0, 3),
+    nextStep,
+  }
+})
+
+const beginnerGuide = computed(() => [
+  {
+    title: t('command.guide_currentStateTitle'),
+    body: t('command.guide_currentStateBody'),
+  },
+  {
+    title: t('command.guide_symbolTitle'),
+    body: t('command.guide_symbolBody'),
+  },
+  {
+    title: t('command.guide_strategyTitle'),
+    body: t('command.guide_strategyBody'),
+  },
+  {
+    title: t('command.guide_paperTitle'),
+    body: t('command.guide_paperBody'),
+  },
+  {
+    title: t('command.guide_liveTitle'),
+    body: t('command.guide_liveBody'),
+  },
+])
+
 const isSampleMode = computed(() => {
   if (!commandQuery.isSuccess.value || !command.value) return false
-  const sourceKind = visibleActiveProposal.value?.source_kind ?? command.value?.active_strategy.proposal?.source_kind
-  const laneValues = Object.values(eventLaneSources.value)
-  const degradedLanes = laneValues.some((value) => value === 'unavailable' || value.startsWith('demo_'))
-  return sourceKind === 'mock' || degradedLanes || !!llmStatus.value?.using_mock_fallback || llmStatus.value?.provider === 'mock'
+  const sourceKind = command.value?.active_strategy.proposal?.source_kind
+  const llmMock = llmStatus.value?.provider === 'mock' || llmStatus.value?.status === 'mock' || !!llmStatus.value?.using_mock_fallback
+  const macroDegraded = macroStatus.value?.degraded === true || macroStatus.value?.status === 'degraded'
+  return sourceKind === 'mock' || llmMock || macroDegraded
 })
 
 const switchProviderMutation = useMutation({
@@ -149,6 +221,74 @@ const triggerSyncMutation = useMutation({
       queryClient.invalidateQueries({ queryKey: ['research-proposals'] }),
     ])
   },
+})
+
+const liveReadinessTrendOption = computed(() => {
+  const rows = [...liveReadinessHistory.value].reverse()
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: 36, right: 16, top: 18, bottom: 28 },
+    xAxis: {
+      type: 'category',
+      data: rows.map((item) => formatDateTime(item.created_at)),
+      axisLabel: { hideOverlap: true, color: '#64748b', fontSize: 11 },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: 100,
+      axisLabel: { color: '#64748b', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.2)' } },
+    },
+    series: [
+      {
+        type: 'line',
+        smooth: true,
+        data: rows.map((item) => item.score),
+        lineStyle: { color: '#0f766e', width: 2.5 },
+        itemStyle: { color: '#0f766e' },
+        areaStyle: { color: 'rgba(15, 118, 110, 0.12)' },
+      },
+    ],
+  }
+})
+const providerMigrationTrendOption = computed(() => {
+  const rows = providerMigrationHistory.value
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: 40, right: 16, top: 20, bottom: 28 },
+    legend: { bottom: 0, textStyle: { color: '#64748b', fontSize: 11 } },
+    xAxis: {
+      type: 'category',
+      data: rows.map((item) => item.label),
+      axisLabel: { hideOverlap: true, color: '#64748b', fontSize: 11 },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: 100,
+      axisLabel: { color: '#64748b', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.2)' } },
+    },
+    series: [
+      {
+        name: t('command.providerPromotionRate'),
+        type: 'line',
+        smooth: true,
+        data: rows.map((item) => Number((item.promotion_rate ?? 0) * 100)),
+        lineStyle: { color: '#0f766e', width: 2.5 },
+        itemStyle: { color: '#0f766e' },
+      },
+      {
+        name: t('command.providerFallbackRate'),
+        type: 'line',
+        smooth: true,
+        data: rows.map((item) => Number((item.fallback_rate ?? 0) * 100)),
+        lineStyle: { color: '#b45309', width: 2.5 },
+        itemStyle: { color: '#b45309' },
+      },
+    ],
+  }
 })
 
 const navOption = computed(() => {
@@ -204,6 +344,10 @@ function switchProvider(provider: LLMProvider): void {
 function triggerSync(): void {
   if (triggerSyncMutation.isPending.value) return
   triggerSyncMutation.mutate()
+}
+
+function setLogStream(stream: 'out' | 'err'): void {
+  logStream.value = stream
 }
 
 function llmStatusLabel(status?: string): string {
@@ -271,8 +415,19 @@ function acceptanceReportStatusLabel(value?: string): string {
   return displayLabel(t, 'acceptanceReportStatus', value)
 }
 
+function liveReadinessStatusLabel(value?: string): string {
+  return displayLabel(t, 'liveReadinessStatus', value)
+}
+
 function runtimeStateLabel(value?: string): string {
   return displayLabel(t, 'runtimeState', value)
+}
+
+function liveReadinessVariant(value?: string): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
+  if (value === 'ready_candidate') return 'success'
+  if (value === 'paper_building_evidence') return 'info'
+  if (value === 'not_ready') return 'warning'
+  return 'neutral'
 }
 
 function pipelineStageLabel(value?: string): string {
@@ -300,6 +455,11 @@ function formatDurationMs(value?: number): string {
   if (value === undefined || value === null) return '--'
   if (value < 1000) return `${value} ms`
   return `${(value / 1000).toFixed(1)} s`
+}
+
+function formatPercent(value?: number | null): string {
+  if (value === undefined || value === null || Number.isNaN(value)) return '--'
+  return `${(Number(value) * 100).toFixed(1)}%`
 }
 
 function governanceNextStepLabel(value?: string): string {
@@ -332,6 +492,21 @@ function formatHours(value?: number | null): string {
   return `${value.toFixed(1)}h`
 }
 
+function formatUptime(value?: number | null): string {
+  if (value === null || value === undefined) return '--'
+  const total = Math.max(0, Math.floor(value))
+  const days = Math.floor(total / 86400)
+  const hours = Math.floor((total % 86400) / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return `${minutes}m`
+}
+
+function logStreamLabel(value?: 'out' | 'err'): string {
+  return value === 'err' ? t('command.logStreamErr') : t('command.logStreamOut')
+}
+
 function formatMetricLabel(key: string): string {
   if (key === 'deterministic') return t('candidates.deterministic')
   if (key === 'llm') return t('candidates.llm')
@@ -346,9 +521,66 @@ function formatMetricLabel(key: string): string {
 
 <template>
   <div class="space-y-4">
+    <Card v-if="executiveSummary" class="border border-slate-200/80 bg-slate-50/80">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.executiveSummary') }}</p>
+          <h3 class="mt-2 text-lg font-semibold text-slate-900">{{ executiveSummary.conclusion }}</h3>
+          <p class="mt-2 text-sm text-slate-600">
+            {{ t('command.executiveSelectedSymbol') }}: <span class="font-semibold text-slate-900">{{ executiveSummary.selectedSymbol }}</span>
+            · {{ t('command.executiveActiveStrategy') }}: <span class="font-semibold text-slate-900">{{ executiveSummary.activeTitle }}</span>
+          </p>
+        </div>
+        <Badge :variant="liveReadinessVariant(liveReadiness?.status)">{{ liveReadinessStatusLabel(liveReadiness?.status) }}</Badge>
+      </div>
+      <div class="mt-4 grid gap-4 xl:grid-cols-[1.4fr,0.8fr]">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.executiveReasons') }}</p>
+          <ul class="mt-2 space-y-2 text-sm text-slate-700">
+            <li v-for="reason in executiveSummary.reasons" :key="reason" class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">{{ reason }}</li>
+          </ul>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.executiveNextStep') }}</p>
+          <div class="mt-2 rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3 text-sm text-slate-700">
+            {{ executiveSummary.nextStep }}
+          </div>
+        </div>
+      </div>
+    </Card>
+
+    <Card class="border border-slate-200/80 bg-white/90">
+      <details>
+        <summary class="cursor-pointer list-none text-sm font-semibold text-slate-900">
+          {{ t('command.guideTitle') }}
+        </summary>
+        <p class="mt-2 text-sm text-slate-600">{{ t('command.guideSubtitle') }}</p>
+        <div class="mt-4 grid gap-3 lg:grid-cols-2">
+          <div
+            v-for="item in beginnerGuide"
+            :key="item.title"
+            class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-3"
+          >
+            <p class="text-sm font-semibold text-slate-900">{{ item.title }}</p>
+            <p class="mt-1 text-sm text-slate-600">{{ item.body }}</p>
+          </div>
+        </div>
+      </details>
+    </Card>
+
     <Card v-if="isSampleMode" class="border border-amber-200 bg-amber-50/80">
       <h3 class="text-sm font-semibold text-amber-900">{{ t('command.sampleModeTitle') }}</h3>
       <p class="mt-1 text-sm text-amber-800">{{ t('command.sampleModeBody') }}</p>
+    </Card>
+
+    <Card class="border border-slate-200/80 bg-slate-50/80">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.strategyLifecycleSection') }}</p>
+          <h3 class="mt-1 text-sm font-semibold text-slate-900">{{ t('command.activeStrategy') }}</h3>
+        </div>
+        <Badge variant="neutral">{{ visibleActiveProposal?.symbol ?? command?.market_snapshot.symbol ?? '--' }}</Badge>
+      </div>
     </Card>
 
     <div class="metric-grid">
@@ -369,6 +601,18 @@ function formatMetricLabel(key: string): string {
         <p class="mt-2 text-2xl font-semibold">{{ command?.latest_risk_decision?.final_score?.toFixed(1) ?? '--' }}</p>
       </Card>
     </div>
+
+    <Card class="border border-slate-200/80 bg-slate-50/80">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.runtimeSection') }}</p>
+          <h3 class="mt-1 text-sm font-semibold text-slate-900">{{ t('command.runtimeStatus') }}</h3>
+        </div>
+        <Badge :variant="runtimeVariant(runtimeStatus?.current_state, runtimeStatus?.degraded, runtimeStatus?.stalled)">
+          {{ runtimeStatus?.degraded || runtimeStatus?.stalled ? t('command.runtimeDegraded') : t('command.runtimeHealthy') }}
+        </Badge>
+      </div>
+    </Card>
 
     <div class="metric-grid">
       <Card>
@@ -392,12 +636,20 @@ function formatMetricLabel(key: string): string {
         </div>
       </Card>
       <Card>
+        <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.serviceStartedAt') }}</p>
+        <p class="mt-2 text-sm font-semibold">{{ formatDateTime(runtimeStatus?.process_started_at) }}</p>
+      </Card>
+      <Card>
         <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.lastRunAt') }}</p>
-        <p class="mt-2 text-sm font-semibold">{{ runtimeStatus?.last_run_at ?? '--' }}</p>
+        <p class="mt-2 text-sm font-semibold">{{ formatDateTime(runtimeStatus?.last_run_at) }}</p>
       </Card>
       <Card>
         <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.lastSuccessAt') }}</p>
-        <p class="mt-2 text-sm font-semibold">{{ runtimeStatus?.last_success_at ?? '--' }}</p>
+        <p class="mt-2 text-sm font-semibold">{{ formatDateTime(runtimeStatus?.last_success_at) }}</p>
+      </Card>
+      <Card>
+        <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.processUptime') }}</p>
+        <p class="mt-2 text-sm font-semibold">{{ formatUptime(runtimeStatus?.process_uptime_seconds) }}</p>
       </Card>
       <Card>
         <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.consecutiveFailures') }}</p>
@@ -405,19 +657,34 @@ function formatMetricLabel(key: string): string {
       </Card>
     </div>
 
+    <Card class="border border-slate-200/80 bg-slate-50/80">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.pipelineSection') }}</p>
+          <h3 class="mt-1 text-sm font-semibold text-slate-900">{{ t('command.currentStage') }}</h3>
+        </div>
+        <Badge variant="info">{{ pipelineStageLabel(runtimeStatus?.current_stage) }}</Badge>
+      </div>
+    </Card>
+
     <Card class="space-y-4">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.runtimeStatus') }}</p>
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.pipelineSection') }}</p>
           <div class="mt-2 flex items-center gap-3">
             <p class="text-2xl font-semibold">{{ runtimeStateLabel(runtimeStatus?.current_state) }}</p>
             <Badge :variant="runtimeVariant(runtimeStatus?.current_state, runtimeStatus?.degraded, runtimeStatus?.stalled)">
               {{ runtimeStatus?.degraded || runtimeStatus?.stalled ? t('command.runtimeDegraded') : t('command.runtimeHealthy') }}
             </Badge>
           </div>
-          <p class="mt-1 text-sm text-slate-600">{{ runtimeStatus?.expected_next_run_at ?? t('common.noData') }}</p>
+          <p class="mt-1 text-sm text-slate-600">
+            {{ t('command.expectedNextRunAt') }}: {{ formatDateTime(runtimeStatus?.expected_next_run_at) }}
+          </p>
           <p class="mt-2 text-sm text-slate-600">
             {{ t('command.currentStage') }}: {{ pipelineStageLabel(runtimeStatus?.current_stage) }}
+          </p>
+          <p class="mt-1 text-sm text-slate-600">
+            {{ t('command.stageStartedAt') }}: {{ formatDateTime(runtimeStatus?.stage_started_at) }}
           </p>
         </div>
 
@@ -427,8 +694,7 @@ function formatMetricLabel(key: string): string {
             <p class="text-2xl font-semibold">{{ llmStatus?.provider ?? '--' }}</p>
             <Badge :variant="llmVariant(llmStatus?.status)">{{ llmStatusLabel(llmStatus?.status) }}</Badge>
           </div>
-          <p class="mt-1 text-sm text-slate-600">{{ llmStatus?.model ?? '--' }}</p>
-          <p class="mt-2 text-sm text-slate-600">{{ llmStatus?.message }}</p>
+          <p class="mt-1 text-sm text-slate-600">{{ t('command.providerEvidenceKeptInRuntime') }}</p>
         </div>
 
         <div class="flex flex-col items-start gap-2">
@@ -482,7 +748,244 @@ function formatMetricLabel(key: string): string {
       </div>
     </Card>
 
-    <div class="grid gap-4 xl:grid-cols-[1.45fr,1fr]">
+    <Card class="space-y-4">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h3 class="text-sm font-semibold">{{ t('command.runtimeLogs') }}</h3>
+          <p class="mt-1 text-sm text-slate-600">
+            {{ runtimeLogs?.updated_at ? t('command.logUpdatedAt', { time: formatDateTime(runtimeLogs.updated_at) }) : t('command.logWaiting') }}
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="rounded-lg border px-3 py-2 text-sm font-medium transition-colors"
+            :class="logStream === 'out' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-900 hover:bg-slate-50'"
+            @click="setLogStream('out')"
+          >
+            {{ t('command.logStreamOut') }}
+          </button>
+          <button
+            type="button"
+            class="rounded-lg border px-3 py-2 text-sm font-medium transition-colors"
+            :class="logStream === 'err' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-900 hover:bg-slate-50'"
+            @click="setLogStream('err')"
+          >
+            {{ t('command.logStreamErr') }}
+          </button>
+          <RouterLink to="/runtime" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition-colors hover:bg-slate-50">
+            {{ t('command.openRuntimeDetail') }}
+          </RouterLink>
+        </div>
+      </div>
+      <div class="grid gap-3 text-sm md:grid-cols-3">
+        <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+          <p class="text-slate-500">{{ t('command.logCurrentStream') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ logStreamLabel(logStream) }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2 md:col-span-2">
+          <p class="text-slate-500">{{ t('command.logPath') }}</p>
+          <p class="mt-1 break-all font-semibold text-slate-900">{{ runtimeLogs?.path ?? '--' }}</p>
+        </div>
+      </div>
+      <div class="rounded-xl border border-slate-200/80 bg-slate-950 p-0.5">
+        <div class="max-h-52 overflow-auto rounded-[11px] bg-slate-950 px-4 py-3 font-mono text-xs leading-6 text-slate-100">
+          <template v-if="runtimeLogsQuery.isLoading.value">
+            <p class="text-slate-400">{{ t('command.logLoading') }}</p>
+          </template>
+          <template v-else-if="runtimeLogsQuery.isError.value">
+            <p class="text-rose-300">
+              {{ runtimeLogsQuery.error.value instanceof Error ? runtimeLogsQuery.error.value.message : t('command.logLoadError') }}
+            </p>
+          </template>
+          <template v-else-if="!runtimeLogs?.exists">
+            <p class="text-slate-400">{{ t('command.logMissing') }}</p>
+          </template>
+          <template v-else-if="!(runtimeLogs?.lines?.length)">
+            <p class="text-slate-400">{{ t('command.logEmpty') }}</p>
+          </template>
+          <template v-else>
+            <div v-for="(line, index) in runtimeLogs.lines" :key="`${logStream}-${index}-${line}`" class="whitespace-pre-wrap break-all">
+              {{ line }}
+            </div>
+          </template>
+        </div>
+      </div>
+    </Card>
+
+    <Card class="border border-slate-200/80 bg-slate-50/80">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.readinessSection') }}</p>
+          <h3 class="mt-1 text-sm font-semibold text-slate-900">{{ t('command.liveReadiness') }}</h3>
+        </div>
+        <div class="flex items-center gap-3">
+          <p class="text-2xl font-semibold text-slate-900">{{ liveReadiness?.score ?? '--' }}</p>
+          <Badge :variant="liveReadinessVariant(liveReadiness?.status)">
+            {{ liveReadinessStatusLabel(liveReadiness?.status) }}
+          </Badge>
+        </div>
+      </div>
+    </Card>
+
+    <Card v-if="liveReadiness" class="space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h3 class="text-sm font-semibold">{{ t('command.liveReadiness') }}</h3>
+          <p class="mt-1 text-sm text-slate-600">{{ liveReadiness.summary }}</p>
+        </div>
+        <Badge :variant="liveReadinessVariant(liveReadiness.status)">
+          {{ liveReadinessStatusLabel(liveReadiness.status) }}
+        </Badge>
+      </div>
+      <VChart v-if="liveReadinessHistory.length" class="h-52 w-full" autoresize :option="liveReadinessTrendOption" />
+      <div
+        v-if="liveReadinessChange"
+        class="rounded-lg border border-slate-200/80 bg-slate-50/80 p-4"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.liveReadinessChange') }}</p>
+          <Badge :variant="liveReadinessChange.trend === 'improved' ? 'success' : liveReadinessChange.trend === 'weakened' ? 'warning' : 'neutral'">
+            {{ liveReadinessChange.score_delta > 0 ? '+' : '' }}{{ liveReadinessChange.score_delta.toFixed(1) }}
+          </Badge>
+        </div>
+        <p class="mt-2 text-sm text-slate-600">{{ t(`command.liveReadinessTrend_${liveReadinessChange.trend}`) }}</p>
+        <div class="mt-3 grid gap-3 lg:grid-cols-3">
+          <div>
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.liveReadinessBlockersAdded') }}</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <Badge v-for="item in liveReadinessChange.added_blockers" :key="`cmd-readiness-added-${item}`" variant="warning">{{ humanizeLabel(item) }}</Badge>
+              <span v-if="!liveReadinessChange.added_blockers.length" class="text-sm text-slate-500">{{ t('common.noData') }}</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.liveReadinessBlockersCleared') }}</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <Badge v-for="item in liveReadinessChange.cleared_blockers" :key="`cmd-readiness-cleared-${item}`" variant="success">{{ humanizeLabel(item) }}</Badge>
+              <span v-if="!liveReadinessChange.cleared_blockers.length" class="text-sm text-slate-500">{{ t('common.noData') }}</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.liveReadinessLinkedChanges') }}</p>
+            <ul class="mt-2 space-y-1 text-sm text-slate-600">
+              <li v-for="item in liveReadinessChange.linked_changes" :key="`cmd-readiness-link-${item}`">{{ item }}</li>
+              <li v-if="!liveReadinessChange.linked_changes.length" class="text-slate-500">{{ t('command.liveReadinessNoLinkedChanges') }}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div
+        v-if="providerMigration"
+        class="rounded-lg border border-slate-200/80 bg-slate-50/80 p-4"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.providerMigration') }}</p>
+            <p class="mt-2 text-sm text-slate-600">{{ providerMigration.summary }}</p>
+          </div>
+          <Badge variant="neutral">{{ providerMigration.current_provider }}</Badge>
+        </div>
+        <div class="mt-3 grid gap-3 md:grid-cols-2">
+          <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2 text-sm">
+            <p class="text-slate-500">{{ t('command.currentProviderCohort') }}</p>
+            <p class="mt-1 font-semibold text-slate-900">{{ providerMigration.current.real_proposal_count }} {{ t('command.providerRealProposals') }}</p>
+            <p class="mt-1 text-slate-600">{{ t('command.providerPromotionRate') }}: {{ formatPercent(providerMigration.current.promotion_rate) }}</p>
+            <p class="mt-1 text-slate-600">{{ t('command.providerFallbackRate') }}: {{ formatPercent(providerMigration.current.fallback_rate) }}</p>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2 text-sm">
+            <p class="text-slate-500">{{ t('command.previousProviderCohort') }}</p>
+            <template v-if="providerMigration.previous">
+              <p class="mt-1 font-semibold text-slate-900">{{ providerMigration.previous.real_proposal_count }} {{ t('command.providerRealProposals') }}</p>
+              <p class="mt-1 text-slate-600">{{ t('command.providerPromotionRate') }}: {{ formatPercent(providerMigration.previous.promotion_rate) }}</p>
+              <p class="mt-1 text-slate-600">{{ t('command.providerFallbackRate') }}: {{ formatPercent(providerMigration.previous.fallback_rate) }}</p>
+            </template>
+            <p v-else class="mt-1 text-slate-500">{{ t('command.providerNoPreviousCohort') }}</p>
+          </div>
+        </div>
+        <VChart
+          v-if="providerMigrationHistory.length"
+          class="mt-3 h-48 w-full"
+          autoresize
+          :option="providerMigrationTrendOption"
+        />
+        <ul v-if="providerMigration.notes.length" class="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
+          <li v-for="note in providerMigration.notes" :key="note">{{ note }}</li>
+        </ul>
+      </div>
+      <div class="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+        <div
+          v-for="(value, key) in liveReadiness.dimensions"
+          :key="`live-readiness-${String(key)}`"
+          class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2"
+        >
+          <p class="text-slate-500">{{ humanizeLabel(String(key)) }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ value }}</p>
+        </div>
+      </div>
+      <div class="grid gap-4 xl:grid-cols-2">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.liveReadinessBlockers') }}</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <Badge
+              v-for="item in liveReadiness.blockers"
+              :key="`readiness-blocker-${item}`"
+              variant="warning"
+            >
+              {{ humanizeLabel(item) }}
+            </Badge>
+            <span v-if="liveReadiness.blockers.length === 0" class="text-sm text-slate-500">
+              {{ t('command.liveReadinessNoBlockers') }}
+            </span>
+          </div>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.liveReadinessNextActions') }}</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <Badge
+              v-for="item in liveReadiness.next_actions"
+              :key="`readiness-action-${item}`"
+              variant="neutral"
+            >
+              {{ humanizeLabel(item) }}
+            </Badge>
+          </div>
+        </div>
+      </div>
+      <div class="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+        <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+          <p class="text-slate-500">{{ t('command.liveReadinessStableStreak') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ liveReadiness.evidence.stable_streak ?? '--' }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+          <p class="text-slate-500">{{ t('command.liveDays') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ liveReadiness.evidence.live_days ?? '--' }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+          <p class="text-slate-500">{{ t('command.trackRecordTrend') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">
+            {{ qualityTrendLabel(String(liveReadiness.evidence.quality_trend ?? 'flat')) }}
+          </p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+          <p class="text-slate-500">{{ t('command.macroHealth30d') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">
+            {{
+              liveReadiness.evidence.macro_health_score_30d !== undefined && liveReadiness.evidence.macro_health_score_30d !== null
+                ? `${Math.round(Number(liveReadiness.evidence.macro_health_score_30d) * 100)}%`
+                : '--'
+            }}
+          </p>
+        </div>
+      </div>
+    </Card>
+
+    <details class="rounded-xl border border-slate-200/80 bg-white p-4">
+      <summary class="cursor-pointer list-none text-sm font-semibold text-slate-900">
+        {{ t('command.advancedContext') }}
+      </summary>
+      <p class="mt-2 text-sm text-slate-600">{{ t('command.advancedContextBody') }}</p>
+
+    <div class="mt-4 grid gap-4 xl:grid-cols-[1.45fr,1fr]">
       <Card class="space-y-4">
         <div class="mb-3 flex items-center justify-between">
           <div>
@@ -580,6 +1083,18 @@ function formatMetricLabel(key: string): string {
               <span class="text-slate-500">{{ t('command.turnoverThreshold') }}</span>
               <span class="font-semibold text-slate-900">
                 {{ universeSelection?.min_turnover_millions !== null && universeSelection?.min_turnover_millions !== undefined ? `${universeSelection.min_turnover_millions}M` : '--' }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('command.accountCapital') }}</span>
+              <span class="font-semibold text-slate-900">
+                {{ universeSelection?.account_capital_hkd !== null && universeSelection?.account_capital_hkd !== undefined ? `HK$${universeSelection.account_capital_hkd.toLocaleString()}` : '--' }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('command.maxLotCostRatio') }}</span>
+              <span class="font-semibold text-slate-900">
+                {{ universeSelection?.max_lot_cost_ratio !== null && universeSelection?.max_lot_cost_ratio !== undefined ? `${Math.round(universeSelection.max_lot_cost_ratio * 100)}%` : '--' }}
               </span>
             </div>
           </div>
@@ -792,6 +1307,9 @@ function formatMetricLabel(key: string): string {
                   </p>
                 </div>
               </div>
+              <RouterLink :to="`/candidates/${item.proposal.id}`" class="mt-3 inline-flex text-xs text-teal-700 underline-offset-2 hover:underline">
+                {{ t('candidateDetail.openDetail') }}
+              </RouterLink>
             </div>
             <p v-if="topCandidates.length === 0" class="text-sm text-slate-500">
               {{ t('command.candidatePreviewEmpty') }}
@@ -1055,7 +1573,7 @@ function formatMetricLabel(key: string): string {
       </Card>
     </div>
 
-    <div class="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
+      <div class="mt-4 grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
       <Card class="space-y-4">
         <div class="flex items-center justify-between">
           <h3 class="text-sm font-semibold">{{ t('command.strategyBrief') }}</h3>
@@ -1069,7 +1587,6 @@ function formatMetricLabel(key: string): string {
         </div>
         <div class="flex flex-wrap gap-2">
           <Badge variant="info">{{ sourceKindLabel(visibleActiveProposal?.source_kind) }}</Badge>
-          <Badge variant="neutral">{{ llmStatusLabel(visibleActiveProposal?.provider_status) }}</Badge>
           <Badge
             v-for="feature in visibleActiveProposal?.features_used ?? []"
             :key="feature"
@@ -1077,10 +1594,6 @@ function formatMetricLabel(key: string): string {
           >
             {{ feature }}
           </Badge>
-        </div>
-        <div>
-          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.providerMessage') }}</p>
-          <p class="mt-2 text-sm text-slate-600">{{ visibleActiveProposal?.provider_message || llmStatus?.message || t('common.noData') }}</p>
         </div>
       </Card>
 
@@ -1108,9 +1621,13 @@ function formatMetricLabel(key: string): string {
           </div>
         </div>
       </Card>
-    </div>
-
-    <div class="grid gap-4 xl:grid-cols-[1.2fr,1fr]">
+      </div>
+    <details class="mt-4 rounded-xl border border-slate-200/80 bg-slate-50/70 p-4">
+      <summary class="cursor-pointer list-none text-sm font-semibold text-slate-900">
+        {{ t('command.catalogAndAuditPreview') }}
+      </summary>
+      <p class="mt-2 text-sm text-slate-600">{{ t('command.catalogAndAuditPreviewBody') }}</p>
+    <div class="mt-4 grid gap-4 xl:grid-cols-[1.2fr,1fr]">
       <Card>
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-sm font-semibold">{{ t('command.baselineCatalog') }}</h3>
@@ -1177,5 +1694,7 @@ function formatMetricLabel(key: string): string {
         </div>
       </Card>
     </div>
+    </details>
+    </details>
   </div>
 </template>

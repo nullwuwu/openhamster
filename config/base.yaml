@@ -79,6 +79,7 @@ universe:
   exclude_st: true
   include_gem: true
   min_turnover_millions: 200.0
+  max_lot_cost_ratio: 0.25
 
 # [Source 来源] repository default
 # [Purpose 用途] execution safety boundaries for the B-level autonomy model
@@ -92,7 +93,8 @@ execution_rules:
 portfolio:
   symbols:
     - "2800.HK"
-  default_capital: 1000000
+  default_capital: 100000
+  base_currency: HKD
 
 # [Source 来源] repository default
 # [Purpose 用途] transaction cost assumptions for backtest and risk review

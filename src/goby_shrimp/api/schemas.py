@@ -218,6 +218,8 @@ class UniverseCandidateDTO(BaseModel):
     return_60d_pct: float | None = None
     volatility_20d_pct: float | None = None
     turnover_millions: float | None = None
+    lot_cost_hkd: float | None = None
+    affordability_ratio: float | None = None
     score: float | None = None
     factor_scores: dict[str, float] = Field(default_factory=dict)
     reason_tags: list[str] = Field(default_factory=list)
@@ -236,6 +238,8 @@ class UniverseSelectionDTO(BaseModel):
     candidate_count: int = 0
     top_n_limit: int | None = None
     min_turnover_millions: float | None = None
+    account_capital_hkd: float | None = None
+    max_lot_cost_ratio: float | None = None
     benchmark_symbol: str | None = None
     benchmark_gap: float | None = None
     benchmark_candidate: UniverseCandidateDTO | None = None
@@ -369,6 +373,73 @@ class PipelineRuntimeStatusDTO(BaseModel):
     last_trigger: str | None = None
     degraded: bool = False
     stalled: bool = False
+    process_started_at: str | None = None
+    process_uptime_seconds: int | None = None
+    startup_mode: str | None = None
+    local_logs_available: bool = False
+
+
+class ProviderCohortDTO(BaseModel):
+    provider: str
+    cohort_started_at: str | None = None
+    cohort_closed_at: str | None = None
+    proposal_count: int = 0
+    real_proposal_count: int = 0
+    fallback_count: int = 0
+    fallback_rate: float = 0.0
+    promoted_count: int = 0
+    promotion_rate: float = 0.0
+    avg_final_score: float | None = None
+    promoted_symbol_distribution: dict[str, int] = Field(default_factory=dict)
+
+
+class ProviderMigrationSummaryDTO(BaseModel):
+    comparison_window_days: int = 30
+    current_provider: str
+    current_cohort_started_at: str | None = None
+    previous_provider: str | None = None
+    switch_detected: bool = False
+    summary: str
+    notes: list[str] = Field(default_factory=list)
+    current: ProviderCohortDTO
+    previous: ProviderCohortDTO | None = None
+    deltas: dict[str, float] = Field(default_factory=dict)
+
+
+class ProviderCohortHistoryItemDTO(ProviderCohortDTO):
+    label: str
+    is_current: bool = False
+
+
+class LiveReadinessDTO(BaseModel):
+    status: str
+    score: int
+    summary: str
+    approved_for_live: bool = False
+    blockers: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    dimensions: dict[str, int] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class LiveReadinessHistoryItemDTO(LiveReadinessDTO):
+    created_at: datetime
+
+
+class LiveReadinessChangeDTO(BaseModel):
+    trend: str
+    score_delta: float
+    added_blockers: list[str] = Field(default_factory=list)
+    cleared_blockers: list[str] = Field(default_factory=list)
+    linked_changes: list[str] = Field(default_factory=list)
+
+
+class RuntimeLogDTO(BaseModel):
+    stream: Literal["out", "err"]
+    path: str | None = None
+    exists: bool = False
+    updated_at: datetime | None = None
+    lines: list[str] = Field(default_factory=list)
 
 
 class CommandCenterDTO(BaseModel):
@@ -376,6 +447,11 @@ class CommandCenterDTO(BaseModel):
     timezone: str
     llm_status: LLMStatusDTO
     runtime_status: PipelineRuntimeStatusDTO
+    provider_migration: ProviderMigrationSummaryDTO
+    provider_migration_history: list[ProviderCohortHistoryItemDTO] = Field(default_factory=list)
+    live_readiness: LiveReadinessDTO
+    live_readiness_history: list[LiveReadinessHistoryItemDTO] = Field(default_factory=list)
+    live_readiness_change: LiveReadinessChangeDTO | None = None
     market_snapshot: MarketSnapshotDTO
     active_strategy: ActiveStrategyDTO
     candidate_count: int

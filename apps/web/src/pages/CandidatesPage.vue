@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useQuery } from '@tanstack/vue-query'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 
 import Badge from '@/components/ui/Badge.vue'
 import Card from '@/components/ui/Card.vue'
@@ -17,6 +18,8 @@ const candidatesQuery = useQuery({
 })
 
 const candidates = computed(() => candidatesQuery.data.value ?? [])
+const showAllCandidates = ref(false)
+const visibleCandidates = computed(() => (showAllCandidates.value ? candidates.value : candidates.value.slice(0, 6)))
 const candidateSummary = computed(() => {
   const summary = {
     total: candidates.value.length,
@@ -108,6 +111,28 @@ function formatDateTime(value?: string | null): string {
       <p class="mt-1 text-sm text-slate-600">{{ t('candidates.subtitle') }}</p>
     </Card>
 
+    <Card class="border border-slate-200/80 bg-slate-50/70">
+      <details>
+        <summary class="cursor-pointer list-none text-sm font-semibold text-slate-900">
+          {{ t('candidates.guideTitle') }}
+        </summary>
+        <div class="mt-3 grid gap-3 lg:grid-cols-3">
+          <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3">
+            <p class="text-sm font-semibold text-slate-900">{{ t('candidates.guideScoreTitle') }}</p>
+            <p class="mt-1 text-sm text-slate-600">{{ t('candidates.guideScoreBody') }}</p>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3">
+            <p class="text-sm font-semibold text-slate-900">{{ t('candidates.guidePhaseTitle') }}</p>
+            <p class="mt-1 text-sm text-slate-600">{{ t('candidates.guidePhaseBody') }}</p>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3">
+            <p class="text-sm font-semibold text-slate-900">{{ t('candidates.guideDecisionTitle') }}</p>
+            <p class="mt-1 text-sm text-slate-600">{{ t('candidates.guideDecisionBody') }}</p>
+          </div>
+        </div>
+      </details>
+    </Card>
+
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
       <Card>
         <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.totalTracked') }}</p>
@@ -131,17 +156,37 @@ function formatDateTime(value?: string | null): string {
       </Card>
     </div>
 
-    <div class="grid gap-4 xl:grid-cols-2">
-      <Card v-for="item in candidates" :key="item.proposal.id" class="space-y-4">
+    <div class="space-y-4">
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-sm text-slate-600">
+          {{ t('candidates.showingCount', { shown: visibleCandidates.length, total: candidates.length }) }}
+        </p>
+        <button
+          v-if="candidates.length > 6"
+          type="button"
+          class="text-sm font-medium text-teal-700 underline-offset-2 hover:underline"
+          @click="showAllCandidates = !showAllCandidates"
+        >
+          {{ showAllCandidates ? t('candidates.showLess') : t('candidates.showAll') }}
+        </button>
+      </div>
+
+      <Card v-for="item in visibleCandidates" :key="item.proposal.id" class="space-y-4">
         <div class="flex items-start justify-between gap-3">
           <div>
             <h3 class="text-base font-semibold text-slate-900">{{ item.proposal.title }}</h3>
             <p class="mt-1 text-sm text-slate-600">{{ item.proposal.thesis }}</p>
+            <RouterLink :to="`/candidates/${item.proposal.id}`" class="mt-2 inline-flex text-sm text-teal-700 underline-offset-2 hover:underline">
+              {{ t('candidateDetail.openDetail') }}
+            </RouterLink>
           </div>
-          <Badge :variant="statusVariant(item.proposal.status)">{{ proposalStatusLabel(item.proposal.status) }}</Badge>
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <Badge :variant="actionVariant(item.latest_decision?.action)">{{ riskActionLabel(item.latest_decision?.action) }}</Badge>
+            <Badge :variant="statusVariant(item.proposal.status)">{{ proposalStatusLabel(item.proposal.status) }}</Badge>
+          </div>
         </div>
 
-        <div class="grid grid-cols-3 gap-3 text-sm">
+        <div class="grid gap-3 sm:grid-cols-3 xl:grid-cols-6 text-sm">
           <div>
             <p class="text-slate-500">{{ t('candidates.deterministic') }}</p>
             <p class="mt-1 font-semibold">{{ item.proposal.deterministic_score.toFixed(1) }}</p>
@@ -154,43 +199,36 @@ function formatDateTime(value?: string | null): string {
             <p class="text-slate-500">{{ t('candidates.final') }}</p>
             <p class="mt-1 font-semibold">{{ item.proposal.final_score.toFixed(1) }}</p>
           </div>
-        </div>
-
-        <div>
-          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.features') }}</p>
-          <div class="mt-2 flex flex-wrap gap-2">
-            <Badge v-for="feature in item.proposal.features_used" :key="feature" variant="neutral">{{ feature }}</Badge>
-          </div>
-        </div>
-
-        <div class="rounded-lg border border-slate-200/80 bg-white/60 p-3">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.latestDecision') }}</p>
-              <p class="mt-2 text-sm text-slate-700">{{ item.latest_decision?.llm_explanation ?? '--' }}</p>
-            </div>
-            <Badge :variant="actionVariant(item.latest_decision?.action)">
-              {{ riskActionLabel(item.latest_decision?.action) }}
-            </Badge>
-          </div>
-        </div>
-
-        <div class="grid gap-3 sm:grid-cols-2">
-          <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3">
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.activeComparison') }}</p>
-            <p class="mt-2 text-sm font-semibold text-slate-900">
-              {{ item.latest_decision?.evidence_pack?.governance_report?.active_comparison?.active_title ?? t('common.noData') }}
-            </p>
-            <p class="mt-2 text-sm text-slate-600">
-              {{ t('candidates.scoreDelta') }}:
-              {{ item.latest_decision?.evidence_pack?.governance_report?.active_comparison?.score_delta ?? '--' }}
-            </p>
-            <p class="mt-1 text-sm text-slate-600">
-              {{ t('candidates.cooldownRemaining') }}:
-              {{ item.latest_decision?.evidence_pack?.governance_report?.active_comparison?.cooldown_remaining_days ?? '--' }}
+          <div>
+            <p class="text-slate-500">{{ t('candidates.poolRank') }}</p>
+            <p class="mt-1 font-semibold">
+              #{{ item.proposal.evidence_pack?.quality_report?.pool_ranking?.rank ?? '--' }}
+              / {{ item.proposal.evidence_pack?.quality_report?.pool_ranking?.total_tracked ?? '--' }}
             </p>
           </div>
+          <div>
+            <p class="text-slate-500">{{ t('candidates.phase') }}</p>
+            <p class="mt-1 font-semibold">
+              {{ governancePhaseLabel(String(item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.phase ?? 'candidate_watch')) }}
+            </p>
+          </div>
+          <div>
+            <p class="text-slate-500">{{ t('candidates.estimatedEligibility') }}</p>
+            <p class="mt-1 font-semibold">
+              {{
+                item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.estimated_next_eligible_at
+                  ? formatDateTime(String(item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.estimated_next_eligible_at))
+                  : lifecycleEtaKindLabel(String(item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.eta_kind ?? 'unknown'))
+              }}
+            </p>
+          </div>
+        </div>
 
+        <div class="grid gap-3 lg:grid-cols-[1.2fr,0.8fr,0.8fr]">
+          <div class="rounded-lg border border-slate-200/80 bg-white/60 p-3">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.latestDecision') }}</p>
+            <p class="mt-2 text-sm text-slate-700">{{ item.latest_decision?.llm_explanation ?? '--' }}</p>
+          </div>
           <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3">
             <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.blockedReasons') }}</p>
             <div class="mt-2 flex flex-wrap gap-2">
@@ -208,6 +246,12 @@ function formatDateTime(value?: string | null): string {
                 {{ t('common.noData') }}
               </span>
             </div>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.nextStep') }}</p>
+            <p class="mt-2 text-sm font-semibold text-slate-900">
+              {{ governanceNextStepLabel(String(item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.next_step ?? 'monitor_candidate')) }}
+            </p>
           </div>
         </div>
 
@@ -234,14 +278,6 @@ function formatDateTime(value?: string | null): string {
 
         <div class="grid gap-3 sm:grid-cols-3 text-sm">
           <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3">
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.poolRank') }}</p>
-            <p class="mt-2 font-semibold text-slate-900">
-              #{{ item.proposal.evidence_pack?.quality_report?.pool_ranking?.rank ?? '--' }}
-              /
-              {{ item.proposal.evidence_pack?.quality_report?.pool_ranking?.total_tracked ?? '--' }}
-            </p>
-          </div>
-          <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3">
             <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.leaderGap') }}</p>
             <p class="mt-2 font-semibold text-slate-900">
               {{ item.proposal.evidence_pack?.quality_report?.pool_ranking?.leader_gap ?? '--' }}
@@ -251,31 +287,6 @@ function formatDateTime(value?: string | null): string {
             <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.latestDecision') }}</p>
             <p class="mt-2 font-semibold text-slate-900">
               {{ poolSelectionLabel(String(item.proposal.evidence_pack?.quality_report?.pool_ranking?.selection_state ?? 'challenger')) }}
-            </p>
-          </div>
-        </div>
-
-        <div class="grid gap-3 sm:grid-cols-2 text-sm">
-          <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3">
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.phase') }}</p>
-            <p class="mt-2 font-semibold text-slate-900">
-              {{ governancePhaseLabel(String(item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.phase ?? 'candidate_watch')) }}
-            </p>
-          </div>
-          <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3">
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.nextStep') }}</p>
-            <p class="mt-2 font-semibold text-slate-900">
-              {{ governanceNextStepLabel(String(item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.next_step ?? 'monitor_candidate')) }}
-            </p>
-          </div>
-          <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3 sm:col-span-2">
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.estimatedEligibility') }}</p>
-            <p class="mt-2 font-semibold text-slate-900">
-              {{
-                item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.estimated_next_eligible_at
-                  ? formatDateTime(String(item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.estimated_next_eligible_at))
-                  : lifecycleEtaKindLabel(String(item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.eta_kind ?? 'unknown'))
-              }}
             </p>
           </div>
         </div>
@@ -295,6 +306,42 @@ function formatDateTime(value?: string | null): string {
             </Badge>
           </div>
         </div>
+
+        <details class="rounded-lg border border-slate-200/80 bg-white/70 p-3">
+          <summary class="cursor-pointer list-none text-sm font-semibold text-slate-900">
+            {{ t('candidates.advancedDetails') }}
+          </summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.features') }}</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <Badge v-for="feature in item.proposal.features_used" :key="feature" variant="neutral">{{ feature }}</Badge>
+              </div>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-2 text-sm">
+              <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3">
+                <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.activeComparison') }}</p>
+                <p class="mt-2 text-sm font-semibold text-slate-900">
+                  {{ item.latest_decision?.evidence_pack?.governance_report?.active_comparison?.active_title ?? t('common.noData') }}
+                </p>
+                <p class="mt-2 text-sm text-slate-600">
+                  {{ t('candidates.scoreDelta') }}:
+                  {{ item.latest_decision?.evidence_pack?.governance_report?.active_comparison?.score_delta ?? '--' }}
+                </p>
+                <p class="mt-1 text-sm text-slate-600">
+                  {{ t('candidates.cooldownRemaining') }}:
+                  {{ item.latest_decision?.evidence_pack?.governance_report?.active_comparison?.cooldown_remaining_days ?? '--' }}
+                </p>
+              </div>
+              <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3">
+                <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.createdAt') }}</p>
+                <p class="mt-2 text-sm font-semibold text-slate-900">{{ formatDateTime(item.proposal.created_at) }}</p>
+                <p class="mt-2 text-xs text-slate-500">{{ t('common.symbol') }}: {{ item.proposal.symbol }}</p>
+                <p class="mt-1 text-xs text-slate-500">{{ t('common.source') }}: {{ item.proposal.source_kind }}</p>
+              </div>
+            </div>
+          </div>
+        </details>
       </Card>
     </div>
   </div>

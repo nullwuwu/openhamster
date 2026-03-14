@@ -44,6 +44,7 @@ class UniverseSettings(BaseModel):
     exclude_st: bool = True
     include_gem: bool = True
     min_turnover_millions: float = 200.0
+    max_lot_cost_ratio: float = 0.25
 
 
 class ExecutionRulesSettings(BaseModel):
@@ -54,7 +55,8 @@ class ExecutionRulesSettings(BaseModel):
 
 class PortfolioSettings(BaseModel):
     symbols: list[str] = Field(default_factory=lambda: ["2800.HK"])
-    default_capital: int = 1_000_000
+    default_capital: int = 100_000
+    base_currency: str = "HKD"
 
 
 class TradingCostsSettings(BaseModel):

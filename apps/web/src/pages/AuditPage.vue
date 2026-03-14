@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { LineChart } from 'echarts/charts'
+import VChart from 'vue-echarts'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 
 import Badge from '@/components/ui/Badge.vue'
 import Card from '@/components/ui/Card.vue'
 import { api } from '@/lib/api'
 import { displayLabel, humanizeLabel } from '@/lib/display'
+
+use([CanvasRenderer, GridComponent, TooltipComponent, LineChart])
 
 const { t, locale } = useI18n()
 
@@ -35,12 +43,123 @@ const eventStreamQuery = useQuery({
   queryFn: api.getEventStream,
   refetchInterval: 12_000,
 })
+const commandQuery = useQuery({
+  queryKey: ['audit-command-center'],
+  queryFn: api.getCommandCenter,
+  refetchInterval: 12_000,
+})
 
 const decisions = computed(() => riskDecisionQuery.data.value ?? [])
 const audits = computed(() => auditEventQuery.data.value ?? [])
 const proposals = computed(() => proposalQuery.data.value ?? [])
 const digests = computed(() => eventDigestQuery.data.value ?? [])
 const events = computed(() => eventStreamQuery.data.value ?? [])
+const providerMigration = computed(() => commandQuery.data.value?.provider_migration ?? null)
+const providerMigrationHistory = computed(() => commandQuery.data.value?.provider_migration_history ?? [])
+const liveReadinessHistory = computed(() =>
+  audits.value
+    .filter((audit) => audit.event_type === 'live_readiness_evaluated')
+    .map((audit) => {
+      const payload = audit.payload as Record<string, unknown>
+      const dimensions = (payload.dimensions as Record<string, unknown> | undefined) ?? {}
+      const evidence = (payload.evidence as Record<string, unknown> | undefined) ?? {}
+      return {
+        ...audit,
+        status: String(payload.status ?? 'not_ready'),
+        score: Number(payload.score ?? 0),
+        summary: String(payload.summary ?? ''),
+        blockers: Array.isArray(payload.blockers) ? payload.blockers.map((item) => String(item)) : [],
+        nextActions: Array.isArray(payload.next_actions) ? payload.next_actions.map((item) => String(item)) : [],
+        dimensions: Object.fromEntries(
+          Object.entries(dimensions).map(([key, value]) => [key, Number(value)]),
+        ),
+        evidence,
+      }
+    })
+    .sort((left, right) => right.created_at.localeCompare(left.created_at))
+    .slice(0, 10),
+)
+const latestLiveReadiness = computed(() => liveReadinessHistory.value[0] ?? null)
+const previousLiveReadiness = computed(() => liveReadinessHistory.value[1] ?? null)
+const liveReadinessDelta = computed(() => {
+  if (!latestLiveReadiness.value || !previousLiveReadiness.value) return null
+  const latest = latestLiveReadiness.value
+  const previous = previousLiveReadiness.value
+  const scoreDelta = latest.score - previous.score
+  const previousBlockers = new Set(previous.blockers)
+  const latestBlockers = new Set(latest.blockers)
+  const addedBlockers = latest.blockers.filter((item) => !previousBlockers.has(item))
+  const clearedBlockers = previous.blockers.filter((item) => !latestBlockers.has(item))
+  const trend = scoreDelta > 0 ? 'improved' : scoreDelta < 0 ? 'weakened' : 'flat'
+  return { scoreDelta, addedBlockers, clearedBlockers, trend }
+})
+const liveReadinessTrendOption = computed(() => {
+  const rows = [...liveReadinessHistory.value].reverse()
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: 40, right: 16, top: 20, bottom: 28 },
+    xAxis: {
+      type: 'category',
+      data: rows.map((item) => formatDateTime(item.created_at)),
+      axisLabel: { hideOverlap: true, color: '#64748b', fontSize: 11 },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: 100,
+      axisLabel: { color: '#64748b', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.2)' } },
+    },
+    series: [
+      {
+        type: 'line',
+        smooth: true,
+        data: rows.map((item) => item.score),
+        lineStyle: { color: '#0f766e', width: 2.5 },
+        itemStyle: { color: '#0f766e' },
+        areaStyle: { color: 'rgba(15, 118, 110, 0.12)' },
+      },
+    ],
+  }
+})
+const providerMigrationTrendOption = computed(() => {
+  const rows = providerMigrationHistory.value
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: 40, right: 16, top: 20, bottom: 28 },
+    legend: { bottom: 0, textStyle: { color: '#64748b', fontSize: 11 } },
+    xAxis: {
+      type: 'category',
+      data: rows.map((item) => item.label),
+      axisLabel: { hideOverlap: true, color: '#64748b', fontSize: 11 },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: 100,
+      axisLabel: { color: '#64748b', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.2)' } },
+    },
+    series: [
+      {
+        name: t('audit.providerPromotionRate'),
+        type: 'line',
+        smooth: true,
+        data: rows.map((item) => Number((item.promotion_rate ?? 0) * 100)),
+        lineStyle: { color: '#0f766e', width: 2.5 },
+        itemStyle: { color: '#0f766e' },
+      },
+      {
+        name: t('audit.providerFallbackRate'),
+        type: 'line',
+        smooth: true,
+        data: rows.map((item) => Number((item.fallback_rate ?? 0) * 100)),
+        lineStyle: { color: '#b45309', width: 2.5 },
+        itemStyle: { color: '#b45309' },
+      },
+    ],
+  }
+})
 const universeSelectionHistory = computed(() =>
   audits.value
     .filter((audit) => ['universe_selection_evaluated', 'universe_selection_changed'].includes(audit.event_type))
@@ -174,6 +293,7 @@ const summaryCards = computed(() => {
     { key: 'fallbacks', label: t('audit.summaryFallbacks'), value: fallbackCount },
     { key: 'degraded', label: t('audit.summaryMacroDegraded'), value: degradedCount },
     { key: 'safety', label: t('audit.summarySafetyActions'), value: rollbackCount + pausedCount },
+    { key: 'readiness', label: t('audit.summaryReadiness'), value: liveReadinessHistory.value.length },
   ]
 })
 
@@ -230,6 +350,10 @@ function poolSelectionLabel(value?: string): string {
   return displayLabel(t, 'poolSelection', value)
 }
 
+function liveReadinessStatusLabel(value?: string): string {
+  return displayLabel(t, 'liveReadinessStatus', value)
+}
+
 function universeReasonTagLabel(value?: string): string {
   return displayLabel(t, 'universeReasonTag', value)
 }
@@ -243,6 +367,7 @@ function actionVariant(action?: string): 'neutral' | 'success' | 'warning' | 'da
 }
 
 function auditVariant(eventType?: string): 'neutral' | 'success' | 'warning' | 'danger' | 'info' {
+  if (eventType === 'live_readiness_evaluated') return 'info'
   if (eventType === 'llm_fallback_triggered' || eventType === 'macro_provider_degraded') return 'warning'
   if (eventType === 'macro_provider_recovered' || eventType === 'proposal_created') return 'success'
   if (eventType === 'risk_decision_recorded') return 'info'
@@ -259,6 +384,20 @@ function chainCauseLabel(chain: (typeof timelineChains.value)[number]): string {
   if (blockedReasons.includes('delta_below_threshold')) return t('labels.auditCause.score_gap')
   return t('labels.auditCause.monitoring')
 }
+
+function chainTitle(chain: (typeof timelineChains.value)[number]): string {
+  if (chain.proposal?.title) return chain.proposal.title
+  if (chain.decision?.action) return riskActionLabel(chain.decision.action)
+  if (chain.eventTypes.length > 0) return auditEventLabel(chain.eventTypes[0])
+  return t('common.noData')
+}
+
+function chainSummary(chain: (typeof timelineChains.value)[number]): string {
+  if (chain.decision?.llm_explanation) return chain.decision.llm_explanation
+  const firstMessage = chain.sortedEvents.find((event) => typeof event.payload?.message === 'string')?.payload?.message
+  if (typeof firstMessage === 'string' && firstMessage.trim().length > 0) return firstMessage
+  return `${t('audit.relatedContext')}: ${chain.runId}`
+}
 </script>
 
 <template>
@@ -274,6 +413,42 @@ function chainCauseLabel(chain: (typeof timelineChains.value)[number]): string {
         <p class="mt-3 text-2xl font-semibold text-slate-900">{{ item.value }}</p>
       </Card>
     </div>
+
+    <Card v-if="providerMigration" class="space-y-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 class="text-sm font-semibold">{{ t('audit.providerMigration') }}</h3>
+          <p class="mt-1 text-sm text-slate-600">{{ providerMigration.summary }}</p>
+        </div>
+        <Badge variant="neutral">{{ providerMigration.current_provider }}</Badge>
+      </div>
+      <div class="grid gap-3 md:grid-cols-2">
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-3 text-sm">
+          <p class="text-slate-500">{{ t('audit.currentProviderCohort') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ providerMigration.current.real_proposal_count }}</p>
+          <p class="mt-1 text-slate-600">{{ t('audit.providerPromotionRate') }}: {{ `${(providerMigration.current.promotion_rate * 100).toFixed(1)}%` }}</p>
+          <p class="mt-1 text-slate-600">{{ t('audit.providerFallbackRate') }}: {{ `${(providerMigration.current.fallback_rate * 100).toFixed(1)}%` }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-3 text-sm">
+          <p class="text-slate-500">{{ t('audit.previousProviderCohort') }}</p>
+          <template v-if="providerMigration.previous">
+            <p class="mt-1 font-semibold text-slate-900">{{ providerMigration.previous.real_proposal_count }}</p>
+            <p class="mt-1 text-slate-600">{{ t('audit.providerPromotionRate') }}: {{ `${(providerMigration.previous.promotion_rate * 100).toFixed(1)}%` }}</p>
+            <p class="mt-1 text-slate-600">{{ t('audit.providerFallbackRate') }}: {{ `${(providerMigration.previous.fallback_rate * 100).toFixed(1)}%` }}</p>
+          </template>
+          <p v-else class="mt-1 text-slate-500">{{ t('audit.providerNoPreviousCohort') }}</p>
+        </div>
+      </div>
+      <VChart
+        v-if="providerMigrationHistory.length"
+        class="h-56 w-full"
+        autoresize
+        :option="providerMigrationTrendOption"
+      />
+      <ul v-if="providerMigration.notes.length" class="list-disc space-y-1 pl-5 text-sm text-slate-600">
+        <li v-for="note in providerMigration.notes" :key="note">{{ note }}</li>
+      </ul>
+    </Card>
 
     <div class="grid gap-4 xl:grid-cols-[1.25fr,0.95fr]">
       <Card>
@@ -303,11 +478,18 @@ function chainCauseLabel(chain: (typeof timelineChains.value)[number]): string {
                   <Badge variant="neutral">{{ chainCauseLabel(chain) }}</Badge>
                 </div>
                 <p class="mt-3 text-sm font-semibold text-slate-900">
-                  {{ chain.proposal?.title ?? t('common.noData') }}
+                  {{ chainTitle(chain) }}
                 </p>
                 <p class="mt-1 text-sm text-slate-600">
-                  {{ chain.decision?.llm_explanation ?? t('common.noData') }}
+                  {{ chainSummary(chain) }}
                 </p>
+                <RouterLink
+                  v-if="chain.decisionId"
+                  :to="`/audit/${chain.decisionId}`"
+                  class="mt-3 inline-block text-sm font-medium text-teal-700 underline-offset-2 hover:underline"
+                >
+                  {{ t('audit.openDetail') }}
+                </RouterLink>
               </div>
               <div class="text-right text-xs text-slate-500">
                 <p class="font-mono">{{ chain.decisionId }}</p>
@@ -373,7 +555,7 @@ function chainCauseLabel(chain: (typeof timelineChains.value)[number]): string {
 
             <div class="mt-4 space-y-2 border-l border-slate-200 pl-4">
               <div
-                v-for="event in chain.sortedEvents"
+                v-for="event in chain.sortedEvents.slice(0, 2)"
                 :key="event.id"
                 class="rounded-lg border border-slate-200/80 bg-slate-50/80 p-3"
               >
@@ -389,12 +571,79 @@ function chainCauseLabel(chain: (typeof timelineChains.value)[number]): string {
                   {{ String(event.payload.message) }}
                 </p>
               </div>
+              <p v-if="chain.sortedEvents.length > 2" class="text-xs text-slate-500">
+                {{ t('audit.moreEventsInDetail', { count: chain.sortedEvents.length - 2 }) }}
+              </p>
             </div>
           </div>
         </div>
       </Card>
 
       <Card>
+        <div v-if="latestLiveReadiness" class="mb-4 rounded-lg border border-slate-200/80 bg-slate-50/80 p-4">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold">{{ t('audit.liveReadinessLatest') }}</h3>
+            <Badge variant="info">{{ latestLiveReadiness.score }}</Badge>
+          </div>
+          <div class="mt-2 flex items-center gap-2">
+            <Badge variant="neutral">{{ liveReadinessStatusLabel(latestLiveReadiness.status) }}</Badge>
+            <span class="text-xs text-slate-500">{{ formatDateTime(latestLiveReadiness.created_at) }}</span>
+          </div>
+          <p class="mt-3 text-sm text-slate-600">{{ latestLiveReadiness.summary }}</p>
+          <div v-if="latestLiveReadiness.blockers.length" class="mt-3 flex flex-wrap gap-2">
+            <Badge
+              v-for="item in latestLiveReadiness.blockers"
+              :key="`latest-readiness-${item}`"
+              variant="warning"
+            >
+              {{ humanizeLabel(item) }}
+            </Badge>
+          </div>
+        </div>
+
+        <div
+          v-if="liveReadinessDelta"
+          class="mb-4 rounded-lg border border-slate-200/80 bg-white/70 p-4"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold">{{ t('audit.liveReadinessChange') }}</h3>
+            <Badge :variant="liveReadinessDelta.trend === 'improved' ? 'success' : liveReadinessDelta.trend === 'weakened' ? 'warning' : 'neutral'">
+              {{ liveReadinessDelta.scoreDelta > 0 ? '+' : '' }}{{ liveReadinessDelta.scoreDelta.toFixed(1) }}
+            </Badge>
+          </div>
+          <p class="mt-2 text-sm text-slate-600">
+            {{ t(`audit.liveReadinessTrend_${liveReadinessDelta.trend}`) }}
+          </p>
+          <div class="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('audit.liveReadinessBlockersAdded') }}</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <Badge
+                  v-for="item in liveReadinessDelta.addedBlockers"
+                  :key="`added-${item}`"
+                  variant="warning"
+                >
+                  {{ humanizeLabel(item) }}
+                </Badge>
+                <span v-if="!liveReadinessDelta.addedBlockers.length" class="text-sm text-slate-500">{{ t('common.noData') }}</span>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('audit.liveReadinessBlockersCleared') }}</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <Badge
+                  v-for="item in liveReadinessDelta.clearedBlockers"
+                  :key="`cleared-${item}`"
+                  variant="success"
+                >
+                  {{ humanizeLabel(item) }}
+                </Badge>
+                <span v-if="!liveReadinessDelta.clearedBlockers.length" class="text-sm text-slate-500">{{ t('common.noData') }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-sm font-semibold">{{ t('audit.incidents') }}</h3>
           <Badge variant="warning">{{ recentIncidents.length }}</Badge>
@@ -416,7 +665,56 @@ function chainCauseLabel(chain: (typeof timelineChains.value)[number]): string {
       </Card>
     </div>
 
-    <div class="grid gap-4 xl:grid-cols-[1.1fr,1fr]">
+    <details class="rounded-xl border border-slate-200/80 bg-white/90 p-4">
+      <summary class="cursor-pointer list-none text-sm font-semibold text-slate-900">
+        {{ t('audit.advancedSections') }}
+      </summary>
+      <p class="mt-2 text-sm text-slate-600">{{ t('audit.advancedSectionsBody') }}</p>
+
+    <div class="mt-4 grid gap-4 xl:grid-cols-[1.1fr,1fr]">
+      <Card v-if="liveReadinessHistory.length">
+        <div class="mb-3 flex items-center justify-between">
+          <h3 class="text-sm font-semibold">{{ t('audit.liveReadinessHistory') }}</h3>
+          <Badge variant="info">{{ liveReadinessHistory.length }}</Badge>
+        </div>
+        <VChart class="mb-4 h-56 w-full" autoresize :option="liveReadinessTrendOption" />
+        <div class="space-y-3">
+          <div
+            v-for="item in liveReadinessHistory"
+            :key="`readiness-history-${item.id}`"
+            class="rounded-lg border border-slate-200/80 bg-white/60 p-3"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <Badge variant="info">{{ item.score }}</Badge>
+                <Badge variant="neutral">{{ liveReadinessStatusLabel(item.status) }}</Badge>
+              </div>
+              <span class="text-xs text-slate-500">{{ formatDateTime(item.created_at) }}</span>
+            </div>
+            <p class="mt-2 text-sm text-slate-600">{{ item.summary }}</p>
+            <div class="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+              <div
+                v-for="(value, key) in item.dimensions"
+                :key="`readiness-dimension-${item.id}-${String(key)}`"
+                class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2"
+              >
+                <p class="text-slate-500">{{ humanizeLabel(String(key)) }}</p>
+                <p class="mt-1 font-semibold text-slate-900">{{ value }}</p>
+              </div>
+            </div>
+            <div v-if="item.blockers.length" class="mt-3 flex flex-wrap gap-2">
+              <Badge
+                v-for="blocker in item.blockers"
+                :key="`${item.id}-${blocker}`"
+                variant="warning"
+              >
+                {{ humanizeLabel(blocker) }}
+              </Badge>
+            </div>
+          </div>
+        </div>
+      </Card>
+
       <Card>
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-sm font-semibold">{{ t('audit.universeHistory') }}</h3>
@@ -532,7 +830,7 @@ function chainCauseLabel(chain: (typeof timelineChains.value)[number]): string {
       </Card>
     </div>
 
-    <div class="grid gap-4 xl:grid-cols-[1.1fr,1fr]">
+    <div class="mt-4 grid gap-4 xl:grid-cols-[1.1fr,1fr]">
       <Card>
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-sm font-semibold">{{ t('audit.auditEvents') }}</h3>
@@ -579,5 +877,6 @@ function chainCauseLabel(chain: (typeof timelineChains.value)[number]): string {
         </div>
       </Card>
     </div>
+    </details>
   </div>
 </template>

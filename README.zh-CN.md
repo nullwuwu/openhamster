@@ -220,6 +220,14 @@ npm run dev --prefix apps/web
 - Frontend: `http://127.0.0.1:5173`
 - Backend: `http://127.0.0.1:8000`
 
+Mac mini 长期运行推荐方式：
+```bash
+bash scripts/start_local_daemon.sh
+```
+
+生产形态本地入口：
+- Dashboard + API：`http://127.0.0.1:8000`
+
 ## 配置
 
 配置优先级：
@@ -258,6 +266,14 @@ defaults < config/base.yaml < config/local.yaml < .env < .env.local < environmen
 - Script:
   - `python scripts/generate_acceptance_report.py`
   - `python scripts/generate_acceptance_report.py --window-days 30 --format json`
+
+## Mac mini 部署
+- 单机长期运行方案见：
+  - `docs/MAC_MINI_DEPLOYMENT.md`
+- 推荐形态：
+  - 运行 `bash scripts/start_local_daemon.sh`
+  - 由 FastAPI 直接托管 `apps/web/dist`
+  - 用 `launchd` 守护后端进程
 
 ## 当前验证基线
 

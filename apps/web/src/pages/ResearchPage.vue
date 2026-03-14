@@ -2,6 +2,7 @@
 import { useQuery } from '@tanstack/vue-query'
 import { computed, ref, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 
 import Badge from '@/components/ui/Badge.vue'
 import Card from '@/components/ui/Card.vue'
@@ -46,7 +47,7 @@ const orderedProposals = computed(() => {
   })
 })
 const current = computed(() => orderedProposals.value.find((item) => item.id === selectedId.value) ?? orderedProposals.value[0] ?? null)
-const isSampleMode = computed(() => current.value?.source_kind === 'mock')
+const isSampleMode = computed(() => current.value?.source_kind === 'mock' || command.value?.llm_status?.provider === 'mock' || command.value?.llm_status?.status === 'mock' || command.value?.market_snapshot.macro_status?.status === 'degraded')
 const leaderboard = computed(() =>
   [...proposals.value]
     .sort(
@@ -250,7 +251,12 @@ function formatDateTime(value?: string | null): string {
             </div>
             <p class="mt-2 text-sm text-slate-600">{{ current.provider_message }}</p>
           </div>
-          <Badge variant="info">{{ current.final_score.toFixed(1) }}</Badge>
+          <div class="flex flex-col items-end gap-2">
+            <Badge variant="info">{{ current.final_score.toFixed(1) }}</Badge>
+            <RouterLink :to="`/research/${current.id}`" class="text-sm font-medium text-teal-700 underline-offset-2 hover:underline">
+              {{ t('research.openDetail') }}
+            </RouterLink>
+          </div>
         </div>
         <div class="grid gap-3 md:grid-cols-3">
           <div
@@ -302,6 +308,11 @@ function formatDateTime(value?: string | null): string {
                     {{ poolSelectionLabel(String(proposal.evidence_pack?.quality_report?.pool_ranking?.selection_state ?? 'challenger')) }}
                   </p>
                 </div>
+              </div>
+              <div class="mt-3">
+                <RouterLink :to="`/research/${proposal.id}`" class="text-sm font-medium text-teal-700 underline-offset-2 hover:underline">
+                  {{ t('research.openDetail') }}
+                </RouterLink>
               </div>
             </div>
           </div>
@@ -384,13 +395,26 @@ function formatDateTime(value?: string | null): string {
                   {{ t('common.noData') }}
                 </span>
               </div>
+              <div class="mt-3">
+                <RouterLink :to="`/research/${proposal.id}`" class="text-sm font-medium text-teal-700 underline-offset-2 hover:underline">
+                  {{ t('research.openDetail') }}
+                </RouterLink>
+              </div>
             </div>
           </div>
         </Card>
       </div>
 
-      <Card v-if="current">
-        <h3 class="text-sm font-semibold">{{ t('research.causalView') }}</h3>
+      <details v-if="current" class="rounded-xl border border-slate-200/80 bg-white/90 p-4">
+        <summary class="cursor-pointer list-none text-sm font-semibold text-slate-900">
+          {{ t('research.detailPreviewTitle') }}
+        </summary>
+        <p class="mt-2 text-sm text-slate-600">
+          {{ t('research.detailPreviewBody') }}
+          <RouterLink :to="`/research/${current.id}`" class="ml-1 font-medium text-teal-700 underline-offset-2 hover:underline">
+            {{ t('research.openDetail') }}
+          </RouterLink>
+        </p>
         <div class="mt-3 grid gap-4 text-sm md:grid-cols-3">
           <div class="rounded-lg border border-slate-200/80 bg-white/60 p-3">
             <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('research.marketLens') }}</p>
@@ -426,6 +450,18 @@ function formatDateTime(value?: string | null): string {
                 <span class="text-slate-500">{{ t('command.turnoverThreshold') }}</span>
                 <span class="font-semibold text-slate-900">
                   {{ universeSelection?.min_turnover_millions !== null && universeSelection?.min_turnover_millions !== undefined ? `${universeSelection.min_turnover_millions}M` : '--' }}
+                </span>
+              </div>
+              <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2">
+                <span class="text-slate-500">{{ t('command.accountCapital') }}</span>
+                <span class="font-semibold text-slate-900">
+                  {{ universeSelection?.account_capital_hkd !== null && universeSelection?.account_capital_hkd !== undefined ? `HK$${universeSelection.account_capital_hkd.toLocaleString()}` : '--' }}
+                </span>
+              </div>
+              <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2">
+                <span class="text-slate-500">{{ t('command.maxLotCostRatio') }}</span>
+                <span class="font-semibold text-slate-900">
+                  {{ universeSelection?.max_lot_cost_ratio !== null && universeSelection?.max_lot_cost_ratio !== undefined ? `${Math.round(universeSelection.max_lot_cost_ratio * 100)}%` : '--' }}
                 </span>
               </div>
             </div>
@@ -490,7 +526,7 @@ function formatDateTime(value?: string | null): string {
             </p>
           </div>
         </div>
-      </Card>
+      </details>
 
       <div class="grid gap-4 lg:grid-cols-[1.05fr,0.95fr]">
         <Card v-if="current">

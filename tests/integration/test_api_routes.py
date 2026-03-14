@@ -64,10 +64,28 @@ def test_command_center_includes_llm_status() -> None:
         data = response.json()
         assert 'llm_status' in data
         assert 'runtime_status' in data
+        assert 'live_readiness' in data
+        assert data['live_readiness']['status'] in {'ready_candidate', 'paper_building_evidence', 'not_ready'}
+        assert isinstance(data['live_readiness']['score'], int)
+        assert isinstance(data['live_readiness']['blockers'], list)
+        assert isinstance(data['live_readiness']['next_actions'], list)
+        assert isinstance(data['live_readiness']['dimensions'], dict)
+        assert isinstance(data['live_readiness_history'], list)
+        assert 'live_readiness_change' in data
         assert data['runtime_status']['current_state'] in {'idle', 'running', 'degraded', 'stalled', 'failed'}
         assert 'consecutive_failures' in data['runtime_status']
         assert 'current_stage' in data['runtime_status']
         assert 'stage_durations_ms' in data['runtime_status']
+        assert 'process_started_at' in data['runtime_status']
+        assert 'process_uptime_seconds' in data['runtime_status']
+        assert 'startup_mode' in data['runtime_status']
+        assert 'local_logs_available' in data['runtime_status']
+        assert 'provider_migration' in data
+        assert 'provider_migration_history' in data
+        assert data['provider_migration']['current_provider'] in {'minimax', 'mock'}
+        assert 'summary' in data['provider_migration']
+        assert 'current' in data['provider_migration']
+        assert isinstance(data['provider_migration_history'], list)
         assert data['llm_status']['provider'] in {'minimax', 'mock'}
         assert 'event_lane_sources' in data['market_snapshot']
         assert set(data['market_snapshot']['event_lane_sources']) == {'macro'}
@@ -157,6 +175,17 @@ def test_runtime_llm_can_switch_to_mock() -> None:
         assert data['status'] == 'mock'
 
 
+def test_runtime_llm_switch_records_provider_migration_events() -> None:
+    with TestClient(app) as client:
+        response = client.patch('/api/v1/runtime/llm', json={'provider': 'mock'})
+        assert response.status_code == 200
+        audits = client.get('/api/v1/audit/events').json()
+        event_types = {item['event_type'] for item in audits}
+        assert 'llm_provider_switched' in event_types
+        assert 'provider_cohort_started' in event_types
+        assert 'provider_comparison_window_closed' in event_types
+
+
 def test_runtime_llm_switch_queues_background_sync(monkeypatch) -> None:
     app_module = importlib.import_module("goby_shrimp.api.app")
     calls: list[str] = []
@@ -214,6 +243,29 @@ def test_runtime_sync_can_be_triggered_when_previous_run_is_stalled(monkeypatch)
         assert response.json()['current_state'] == 'stalled'
 
     assert calls == ["manual_api"]
+
+
+def test_runtime_logs_endpoint_returns_tail(monkeypatch, tmp_path) -> None:
+    app_module = importlib.import_module("goby_shrimp.api.app")
+    out_log = tmp_path / "gobyshrimp-api.out.log"
+    out_log.write_text("line-1\nline-2\nline-3\n", encoding="utf-8")
+    monkeypatch.setattr(app_module, "RUNTIME_LOG_PATHS", {"out": out_log, "err": tmp_path / "missing.err.log"})
+
+    with TestClient(app) as client:
+        response = client.get('/api/v1/runtime/logs?stream=out&lines=20')
+        assert response.status_code == 200
+        data = response.json()
+        assert data['stream'] == 'out'
+        assert data['exists'] is True
+        assert data['path'] == str(out_log)
+        assert data['lines'] == ['line-1', 'line-2', 'line-3']
+
+        missing = client.get('/api/v1/runtime/logs?stream=err&lines=20')
+        assert missing.status_code == 200
+        missing_data = missing.json()
+        assert missing_data['stream'] == 'err'
+        assert missing_data['exists'] is False
+        assert missing_data['lines'] == []
 
 
 def test_runtime_llm_rejects_minimax_without_key(monkeypatch) -> None:

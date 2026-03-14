@@ -58,6 +58,12 @@ def _reason_tags(*, turnover_millions: float, change_pct: float, amplitude_pct: 
     return tags
 
 
+def _lot_cost(symbol: str, latest_price: float) -> float:
+    normalized = normalize_symbol(symbol, market="hk")
+    lot_size = 100 if normalized.endswith(".HK") else 1
+    return round(lot_size * latest_price, 2)
+
+
 def _apply_history_signals(candidate: dict[str, object], history: pd.DataFrame) -> None:
     factor_scores = dict(candidate.get("factor_scores", {}) or {})
     reason_tags = list(candidate.get("reason_tags", []) or [])
@@ -157,7 +163,13 @@ def _selection_reason(tags: list[str]) -> str:
     return " ".join(selected) if selected else "Selected as the best available HK candidate after liquidity and stability screening."
 
 
-def fetch_hk_universe_candidates(*, top_n: int, min_turnover_millions: float) -> list[dict[str, object]]:
+def fetch_hk_universe_candidates(
+    *,
+    top_n: int,
+    min_turnover_millions: float,
+    account_capital_hkd: float,
+    max_lot_cost_ratio: float,
+) -> list[dict[str, object]]:
     import akshare as ak
 
     frame = ak.stock_hk_spot_em()
@@ -188,6 +200,10 @@ def fetch_hk_universe_candidates(*, top_n: int, min_turnover_millions: float) ->
             continue
         if turnover_millions < min_turnover_millions:
             continue
+        lot_cost_hkd = _lot_cost(symbol, latest_price)
+        affordability_ratio = lot_cost_hkd / max(account_capital_hkd, 1.0)
+        if lot_cost_hkd > account_capital_hkd or affordability_ratio > max_lot_cost_ratio:
+            continue
 
         liquidity_score = _bounded(
             20.0 + math.log10(max(turnover_millions / max(min_turnover_millions, 1.0), 1.0)) * 22.0,
@@ -214,6 +230,8 @@ def fetch_hk_universe_candidates(*, top_n: int, min_turnover_millions: float) ->
                 "change_pct": round(change_pct or 0.0, 2),
                 "amplitude_pct": round(amplitude_pct, 2) if amplitude_pct is not None else None,
                 "turnover_millions": turnover_millions,
+                "lot_cost_hkd": lot_cost_hkd,
+                "affordability_ratio": round(affordability_ratio, 4),
                 "score": round(score, 2),
                 "factor_scores": {
                     "liquidity": round(liquidity_score, 2),

@@ -134,6 +134,8 @@ export interface UniverseCandidate {
   return_60d_pct?: number | null
   volatility_20d_pct?: number | null
   turnover_millions?: number | null
+  lot_cost_hkd?: number | null
+  affordability_ratio?: number | null
   score?: number | null
   factor_scores?: Record<string, number>
   reason_tags?: string[]
@@ -152,6 +154,8 @@ export interface UniverseSelection {
   candidate_count?: number
   top_n_limit?: number | null
   min_turnover_millions?: number | null
+  account_capital_hkd?: number | null
+  max_lot_cost_ratio?: number | null
   benchmark_symbol?: string | null
   benchmark_gap?: number | null
   benchmark_candidate?: UniverseCandidate | null
@@ -441,6 +445,73 @@ export interface PipelineRuntimeStatus {
   last_trigger?: string
   degraded: boolean
   stalled: boolean
+  process_started_at?: string
+  process_uptime_seconds?: number
+  startup_mode?: string
+  local_logs_available: boolean
+}
+
+export interface ProviderCohort {
+  provider: string
+  cohort_started_at?: string | null
+  cohort_closed_at?: string | null
+  proposal_count: number
+  real_proposal_count: number
+  fallback_count: number
+  fallback_rate: number
+  promoted_count: number
+  promotion_rate: number
+  avg_final_score?: number | null
+  promoted_symbol_distribution: Record<string, number>
+}
+
+export interface ProviderMigrationSummary {
+  comparison_window_days: number
+  current_provider: string
+  current_cohort_started_at?: string | null
+  previous_provider?: string | null
+  switch_detected: boolean
+  summary: string
+  notes: string[]
+  current: ProviderCohort
+  previous?: ProviderCohort | null
+  deltas: Record<string, number>
+}
+
+export interface ProviderCohortHistoryItem extends ProviderCohort {
+  label: string
+  is_current: boolean
+}
+
+export interface LiveReadiness {
+  status: string
+  score: number
+  summary: string
+  approved_for_live: boolean
+  blockers: string[]
+  next_actions: string[]
+  dimensions: Record<string, number>
+  evidence: Record<string, unknown>
+}
+
+export interface LiveReadinessHistoryItem extends LiveReadiness {
+  created_at: string
+}
+
+export interface LiveReadinessChange {
+  trend: string
+  score_delta: number
+  added_blockers: string[]
+  cleared_blockers: string[]
+  linked_changes: string[]
+}
+
+export interface RuntimeLog {
+  stream: 'out' | 'err'
+  path?: string | null
+  exists: boolean
+  updated_at?: string | null
+  lines: string[]
 }
 
 export interface CommandCenter {
@@ -448,6 +519,11 @@ export interface CommandCenter {
   timezone: string
   llm_status: LLMStatus
   runtime_status: PipelineRuntimeStatus
+  provider_migration: ProviderMigrationSummary
+  provider_migration_history: ProviderCohortHistoryItem[]
+  live_readiness: LiveReadiness
+  live_readiness_history: LiveReadinessHistoryItem[]
+  live_readiness_change: LiveReadinessChange | null
   market_snapshot: MarketSnapshot
   active_strategy: ActiveStrategy
   candidate_count: number

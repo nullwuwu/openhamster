@@ -7,5 +7,10 @@
 - `configuration.md`：配置分层、来源、覆盖规则
 - `CONFIG_BOUNDARIES.md`：哪些进 `.env`、哪些进 YAML、哪些进 runtime、哪些根本不是配置
 - `RUNBOOK.md`：本地启动、故障语义、runtime 切换和日常排障
+- `MAC_MINI_DEPLOYMENT.md`：Mac mini 单机长期运行、launchd 守护、更新流程
+- `LIVE_READINESS.md`：从模拟盘进入实盘前必须满足的准入标准
+- `V2_TRACKING.md`：未来 2-4 周应持续跟踪的 provider / paper / readiness / runtime 指标
+- `LLM_PROVIDER_MIGRATION.md`：未来切换 LLM provider 时的历史保留、对照窗口与审计原则
+- `DESKTOP_PACKAGING_PROPOSAL.md`：Mac-only 轻壳本地控制台方案，不改变当前后端主线
 - `RELEASE_CHECKLIST.md`：发布前检查清单
 - `releases/v0.1.0.md`：`v0.1.0` 发布说明草稿

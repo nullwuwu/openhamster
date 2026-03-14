@@ -13,6 +13,15 @@ npm run dev --prefix apps/web
 - 前端：`http://127.0.0.1:5173`
 - 后端：`http://127.0.0.1:8000`
 
+## Mac mini 长期运行
+- 生产模式不建议长期跑 `vite dev`
+- 当前推荐方案：
+  1. `bash scripts/start_local_daemon.sh`
+  2. 由 FastAPI 直接托管 `apps/web/dist`
+  3. `launchd` 负责自动拉起与重启
+- 完整步骤见：
+  - `docs/MAC_MINI_DEPLOYMENT.md`
+
 ## 本地密钥
 推荐把密钥放在 `.env.local`：
 - `MINIMAX_API_KEY`

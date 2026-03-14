@@ -46,7 +46,7 @@ def test_initialize_paper_snapshot_is_idempotent(monkeypatch, tmp_path: Path) ->
     TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
     Base.metadata.create_all(bind=engine)
 
-    current_time = datetime.now(ZoneInfo(patched_settings.timezone))
+    current_time = datetime(2026, 3, 13, 10, 0, tzinfo=ZoneInfo(patched_settings.timezone))
     with TestingSession() as db:
         proposal = StrategyProposal(
             run_id="test-run-paper-snapshot",
@@ -140,7 +140,7 @@ def test_bootstrap_paper_trade_writes_order_and_position(monkeypatch, tmp_path: 
     TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
     Base.metadata.create_all(bind=engine)
 
-    current_time = datetime.now(ZoneInfo(patched_settings.timezone))
+    current_time = datetime(2026, 3, 13, 10, 0, tzinfo=ZoneInfo(patched_settings.timezone))
     with TestingSession() as db:
         proposal = StrategyProposal(
             run_id="test-run-paper-trade",
@@ -258,7 +258,7 @@ def test_execute_active_paper_cycle_rebalances_and_updates_nav(monkeypatch, tmp_
     TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
     Base.metadata.create_all(bind=engine)
 
-    current_time = datetime.now(ZoneInfo(patched_settings.timezone))
+    current_time = datetime(2026, 3, 13, 10, 0, tzinfo=ZoneInfo(patched_settings.timezone))
     with TestingSession() as db:
         proposal = StrategyProposal(
             run_id="test-run-paper-cycle",
@@ -313,7 +313,7 @@ def test_execute_active_paper_cycle_rebalances_and_updates_nav(monkeypatch, tmp_
         second_cycle = execute_active_paper_cycle(
             db,
             proposal=proposal,
-            current_time=current_time.replace(day=min(28, current_time.day + 5)),
+            current_time=datetime(2026, 3, 20, 10, 0, tzinfo=ZoneInfo(patched_settings.timezone)),
             reason="scheduled_execution",
         )
         assert second_cycle["executed"] is True
@@ -326,3 +326,274 @@ def test_execute_active_paper_cycle_rebalances_and_updates_nav(monkeypatch, tmp_
         assert data["orders"][1]["side"] == "buy"
         assert len(data["nav"]) >= 3
         assert data["positions"] == []
+
+
+def test_bootstrap_paper_trade_skips_non_trading_day(monkeypatch, tmp_path: Path) -> None:
+    runtime_db = tmp_path / "runtime-paper.db"
+    paper_db = tmp_path / "legacy-paper.db"
+    app_db = tmp_path / "app.db"
+
+    original_settings = get_settings()
+    patched_settings = original_settings.model_copy(
+        deep=True,
+        update={
+            "storage": original_settings.storage.model_copy(
+                update={
+                    "runtime_db_path": str(runtime_db),
+                    "paper_db_path": str(paper_db),
+                    "database_url": f"sqlite:///{app_db}",
+                }
+            )
+        },
+    )
+
+    import goby_shrimp.api.services as services_module
+
+    class DummySourceManager:
+        def fetch_latest_price(self, ticker: str) -> float:
+            assert ticker == "2800.HK"
+            return 20.0
+
+    monkeypatch.setattr(services_module, "get_settings", lambda: patched_settings)
+    monkeypatch.setattr(services_module, "get_source_manager", lambda: DummySourceManager())
+
+    engine = create_engine(f"sqlite:///{app_db}", future=True)
+    TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    Base.metadata.create_all(bind=engine)
+
+    saturday = datetime(2026, 3, 14, 10, 0, tzinfo=ZoneInfo(patched_settings.timezone))
+    with TestingSession() as db:
+        proposal = StrategyProposal(
+            run_id="test-run-paper-trade-weekend",
+            title="Weekend Trade Guard",
+            symbol="2800.HK",
+            market_scope="HK",
+            thesis="Do not bootstrap paper fills on weekends.",
+            source_kind="minimax",
+            provider_status="ready",
+            provider_model="MiniMax-M2.5",
+            provider_message="ok",
+            market_snapshot_hash="snapshot-hash",
+            event_digest_hash="digest-hash",
+            strategy_dsl={"params": {"base_strategy": "ma_cross"}, "position_sizing": {"mode": "fixed_fraction", "value": 0.25}},
+            debate_report={},
+            evidence_pack={},
+            features_used=["EMA", "macro_summary"],
+            deterministic_score=82.0,
+            llm_score=84.0,
+            final_score=82.6,
+            status=ProposalStatus.ACTIVE,
+            created_at=saturday,
+            updated_at=saturday,
+            promoted_at=saturday,
+            archived_at=None,
+        )
+        db.add(proposal)
+        db.flush()
+
+        _initialize_paper_snapshot_for_proposal(
+            db,
+            proposal=proposal,
+            current_time=saturday,
+            decision_id="decision-paper-init",
+            reason="promoted_to_paper",
+        )
+        inserted = _bootstrap_paper_trade_for_proposal(
+            db,
+            proposal=proposal,
+            current_time=saturday,
+            decision_id="decision-paper-trade",
+            reason="promoted_to_paper",
+        )
+        assert inserted is False
+        db.commit()
+
+        data = fetch_paper_data(limit=10)
+        assert data["orders"] == []
+        assert data["positions"] == []
+        assert len(data["nav"]) == 1
+
+
+def test_execute_active_paper_cycle_skips_rebalance_on_non_trading_day(monkeypatch, tmp_path: Path) -> None:
+    runtime_db = tmp_path / "runtime-paper.db"
+    paper_db = tmp_path / "legacy-paper.db"
+    app_db = tmp_path / "app.db"
+
+    original_settings = get_settings()
+    patched_settings = original_settings.model_copy(
+        deep=True,
+        update={
+            "storage": original_settings.storage.model_copy(
+                update={
+                    "runtime_db_path": str(runtime_db),
+                    "paper_db_path": str(paper_db),
+                    "database_url": f"sqlite:///{app_db}",
+                }
+            )
+        },
+    )
+
+    import goby_shrimp.api.services as services_module
+
+    class DummySourceManager:
+        def fetch_ohlcv(self, ticker: str, start: str, end: str | None = None) -> pd.DataFrame:
+            assert ticker == "2800.HK"
+            return pd.DataFrame(
+                {
+                    "open": [10.0, 10.0, 10.0, 12.0],
+                    "high": [10.2, 10.2, 10.2, 12.2],
+                    "low": [9.8, 9.8, 9.8, 11.8],
+                    "close": [10.0, 10.0, 10.0, 12.0],
+                    "volume": [1000, 1000, 1000, 1000],
+                },
+                index=pd.date_range("2026-03-10", periods=4, freq="D"),
+            )
+
+    monkeypatch.setattr(services_module, "get_settings", lambda: patched_settings)
+    monkeypatch.setattr(services_module, "get_source_manager", lambda: DummySourceManager())
+
+    engine = create_engine(f"sqlite:///{app_db}", future=True)
+    TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    Base.metadata.create_all(bind=engine)
+
+    friday = datetime(2026, 3, 13, 10, 0, tzinfo=ZoneInfo(patched_settings.timezone))
+    saturday = datetime(2026, 3, 14, 10, 0, tzinfo=ZoneInfo(patched_settings.timezone))
+    with TestingSession() as db:
+        proposal = StrategyProposal(
+            run_id="test-run-paper-cycle-weekend",
+            title="Weekend Execution Guard",
+            symbol="2800.HK",
+            market_scope="HK",
+            thesis="Do not rebalance on weekends.",
+            source_kind="minimax",
+            provider_status="ready",
+            provider_model="MiniMax-M2.5",
+            provider_message="ok",
+            market_snapshot_hash="snapshot-hash",
+            event_digest_hash="digest-hash",
+            strategy_dsl={
+                "params": {"base_strategy": "ma_cross", "short_window": 2, "long_window": 3},
+                "position_sizing": {"mode": "fixed_fraction", "value": 0.25},
+            },
+            debate_report={},
+            evidence_pack={},
+            features_used=["EMA", "macro_summary"],
+            deterministic_score=82.0,
+            llm_score=84.0,
+            final_score=82.6,
+            status=ProposalStatus.ACTIVE,
+            created_at=friday,
+            updated_at=friday,
+            promoted_at=friday,
+            archived_at=None,
+        )
+        db.add(proposal)
+        db.flush()
+
+        _initialize_paper_snapshot_for_proposal(
+            db,
+            proposal=proposal,
+            current_time=friday,
+            decision_id="decision-paper-init",
+            reason="promoted_to_paper",
+        )
+        weekend_cycle = execute_active_paper_cycle(
+            db,
+            proposal=proposal,
+            current_time=saturday,
+            reason="scheduled_execution",
+        )
+        assert weekend_cycle["executed"] is False
+        assert weekend_cycle["reason"] == "market_closed_non_trading_day"
+        db.commit()
+
+        data = fetch_paper_data(limit=20)
+        assert data["orders"] == []
+        assert data["positions"] == []
+        assert len(data["nav"]) == 2
+
+
+def test_bootstrap_paper_trade_skips_outside_session(monkeypatch, tmp_path: Path) -> None:
+    runtime_db = tmp_path / "runtime-paper.db"
+    paper_db = tmp_path / "legacy-paper.db"
+    app_db = tmp_path / "app.db"
+
+    original_settings = get_settings()
+    patched_settings = original_settings.model_copy(
+        deep=True,
+        update={
+            "storage": original_settings.storage.model_copy(
+                update={
+                    "runtime_db_path": str(runtime_db),
+                    "paper_db_path": str(paper_db),
+                    "database_url": f"sqlite:///{app_db}",
+                }
+            )
+        },
+    )
+
+    import goby_shrimp.api.services as services_module
+
+    class DummySourceManager:
+        def fetch_latest_price(self, ticker: str) -> float:
+            assert ticker == "2800.HK"
+            return 20.0
+
+    monkeypatch.setattr(services_module, "get_settings", lambda: patched_settings)
+    monkeypatch.setattr(services_module, "get_source_manager", lambda: DummySourceManager())
+
+    engine = create_engine(f"sqlite:///{app_db}", future=True)
+    TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    Base.metadata.create_all(bind=engine)
+
+    after_close = datetime(2026, 3, 13, 19, 0, tzinfo=ZoneInfo(patched_settings.timezone))
+    with TestingSession() as db:
+        proposal = StrategyProposal(
+            run_id="test-run-paper-trade-after-close",
+            title="After Close Trade Guard",
+            symbol="2800.HK",
+            market_scope="HK",
+            thesis="Do not bootstrap paper fills after market close.",
+            source_kind="minimax",
+            provider_status="ready",
+            provider_model="MiniMax-M2.5",
+            provider_message="ok",
+            market_snapshot_hash="snapshot-hash",
+            event_digest_hash="digest-hash",
+            strategy_dsl={"params": {"base_strategy": "ma_cross"}, "position_sizing": {"mode": "fixed_fraction", "value": 0.25}},
+            debate_report={},
+            evidence_pack={},
+            features_used=["EMA", "macro_summary"],
+            deterministic_score=82.0,
+            llm_score=84.0,
+            final_score=82.6,
+            status=ProposalStatus.ACTIVE,
+            created_at=after_close,
+            updated_at=after_close,
+            promoted_at=after_close,
+            archived_at=None,
+        )
+        db.add(proposal)
+        db.flush()
+
+        _initialize_paper_snapshot_for_proposal(
+            db,
+            proposal=proposal,
+            current_time=after_close,
+            decision_id="decision-paper-init",
+            reason="promoted_to_paper",
+        )
+        inserted = _bootstrap_paper_trade_for_proposal(
+            db,
+            proposal=proposal,
+            current_time=after_close,
+            decision_id="decision-paper-trade",
+            reason="promoted_to_paper",
+        )
+        assert inserted is False
+        db.commit()
+
+        data = fetch_paper_data(limit=10)
+        assert data["orders"] == []
+        assert data["positions"] == []
+        assert len(data["nav"]) == 1

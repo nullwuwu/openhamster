@@ -3,10 +3,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from collections import deque
 
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from ..runtime import build_pipeline_scheduler
@@ -27,6 +33,9 @@ from .schemas import (
     ExperimentRunCreate,
     ExperimentRunDTO,
     LLMStatusDTO,
+    LiveReadinessChangeDTO,
+    LiveReadinessDTO,
+    LiveReadinessHistoryItemDTO,
     MacroPipelineStatusDTO,
     MarketProfileDTO,
     MarketSnapshotDTO,
@@ -38,7 +47,11 @@ from .schemas import (
     PaperPositionDTO,
     PaperTradingDTO,
     PipelineRuntimeStatusDTO,
+    ProviderCohortDTO,
+    ProviderCohortHistoryItemDTO,
+    ProviderMigrationSummaryDTO,
     RiskDecisionDTO,
+    RuntimeLogDTO,
     RuntimeLLMUpdate,
     RunMetricSnapshotDTO,
     StrategyProposalDTO,
@@ -46,7 +59,12 @@ from .schemas import (
 )
 from .services import (
     build_acceptance_report,
+    build_live_readiness,
+    build_live_readiness_change,
+    build_live_readiness_history,
     build_operational_acceptance,
+    build_provider_migration_history,
+    build_provider_migration_summary,
     build_market_snapshot,
     execute_backtest_run,
     execute_experiment_run,
@@ -75,6 +93,14 @@ from .services import (
 
 router = APIRouter(prefix="/api/v1")
 logger = logging.getLogger(__name__)
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FRONTEND_DIST_DIR = REPO_ROOT / "apps" / "web" / "dist"
+LOG_DIR = REPO_ROOT / "logs"
+RUNTIME_LOG_PATHS = {
+    "out": LOG_DIR / "gobyshrimp-api.out.log",
+    "err": LOG_DIR / "gobyshrimp-api.err.log",
+}
+PROCESS_STARTED_AT: datetime | None = None
 
 
 def _run_sync_job(*, trigger: str, force_refresh: bool = True) -> None:
@@ -279,6 +305,11 @@ def _to_llm_status_dto(status) -> LLMStatusDTO:
 
 
 def _to_pipeline_runtime_status_dto(status: dict[str, object]) -> PipelineRuntimeStatusDTO:
+    uptime_seconds = None
+    if PROCESS_STARTED_AT is not None:
+        uptime_seconds = max(0, int((now_tz() - PROCESS_STARTED_AT).total_seconds()))
+    startup_mode = os.environ.get("GOBYSHRIMP_STARTUP_MODE", "manual")
+    local_logs_available = any(path.exists() for path in RUNTIME_LOG_PATHS.values())
     return PipelineRuntimeStatusDTO(
         current_state=str(status.get('current_state', 'idle')),
         status_message=str(status.get('status_message', 'Pipeline status unavailable.')),
@@ -294,7 +325,49 @@ def _to_pipeline_runtime_status_dto(status: dict[str, object]) -> PipelineRuntim
         last_trigger=status.get('last_trigger'),
         degraded=bool(status.get('degraded', False)),
         stalled=bool(status.get('stalled', False)),
+        process_started_at=PROCESS_STARTED_AT.isoformat() if PROCESS_STARTED_AT is not None else None,
+        process_uptime_seconds=uptime_seconds,
+        startup_mode=startup_mode,
+        local_logs_available=local_logs_available,
     )
+
+
+def _to_provider_migration_summary_dto(summary: dict[str, object]) -> ProviderMigrationSummaryDTO:
+    previous = dict(summary.get("previous", {}) or {})
+    return ProviderMigrationSummaryDTO(
+        comparison_window_days=int(summary.get("comparison_window_days", 30) or 30),
+        current_provider=str(summary.get("current_provider", "mock")),
+        current_cohort_started_at=summary.get("current_cohort_started_at"),
+        previous_provider=str(previous.get("provider")) if previous.get("provider") is not None else None,
+        switch_detected=bool(summary.get("switch_detected", False)),
+        summary=str(summary.get("summary", "")),
+        notes=[str(item) for item in list(summary.get("notes", []) or [])],
+        current=ProviderCohortDTO(**dict(summary.get("current", {}) or {})),
+        previous=ProviderCohortDTO(**previous) if previous else None,
+        deltas={str(key): float(value) for key, value in dict(summary.get("deltas", {}) or {}).items()},
+    )
+
+
+def _to_provider_migration_history_dto(items: list[dict[str, object]]) -> list[ProviderCohortHistoryItemDTO]:
+    return [ProviderCohortHistoryItemDTO(**item) for item in items]
+
+
+def _read_runtime_log(stream: str, *, lines: int = 120) -> RuntimeLogDTO:
+    if stream not in RUNTIME_LOG_PATHS:
+        raise HTTPException(status_code=400, detail="Unsupported log stream")
+    path = RUNTIME_LOG_PATHS[stream]
+    max_lines = max(20, min(lines, 400))
+    if not path.exists():
+        return RuntimeLogDTO(stream=stream, path=str(path), exists=False, lines=[])
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            tail = list(deque((line.rstrip("\n") for line in handle), maxlen=max_lines))
+        updated_at = datetime.fromtimestamp(path.stat().st_mtime)
+        return RuntimeLogDTO(
+            stream=stream, path=str(path), exists=True, updated_at=updated_at, lines=tail
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read runtime log: {exc}") from exc
 
 
 @router.get("/command", response_model=CommandCenterDTO)
@@ -310,11 +383,21 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
         latest_execution=PaperExecutionDTO(**latest_execution) if (latest_execution := get_latest_paper_execution(db, active)) else None,
     )
     latest_digest = snapshot["event_digest"]
+    provider_migration = build_provider_migration_summary(db)
+    provider_migration_history = build_provider_migration_history(db)
+    live_readiness = build_live_readiness(db)
+    live_readiness_history = build_live_readiness_history(db, limit=8)
+    live_readiness_change = build_live_readiness_change(db, live_readiness_history)
     return CommandCenterDTO(
         generated_at=now_tz(),
         timezone="Asia/Shanghai",
         llm_status=_to_llm_status_dto(get_current_llm_status(db)),
         runtime_status=_to_pipeline_runtime_status_dto(get_pipeline_runtime_status(db)),
+        provider_migration=_to_provider_migration_summary_dto(provider_migration),
+        provider_migration_history=_to_provider_migration_history_dto(provider_migration_history),
+        live_readiness=LiveReadinessDTO(**live_readiness),
+        live_readiness_history=[LiveReadinessHistoryItemDTO(**item) for item in live_readiness_history],
+        live_readiness_change=LiveReadinessChangeDTO(**live_readiness_change) if live_readiness_change else None,
         market_snapshot=MarketSnapshotDTO(
             regime=str(snapshot["regime"]),
             confidence=float(snapshot["confidence"]),
@@ -335,6 +418,8 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
                 candidate_count=int(dict(snapshot["universe_selection"]).get("candidate_count", 0) or 0),
                 top_n_limit=dict(snapshot["universe_selection"]).get("top_n_limit"),
                 min_turnover_millions=dict(snapshot["universe_selection"]).get("min_turnover_millions"),
+                account_capital_hkd=dict(snapshot["universe_selection"]).get("account_capital_hkd"),
+                max_lot_cost_ratio=dict(snapshot["universe_selection"]).get("max_lot_cost_ratio"),
                 benchmark_symbol=dict(snapshot["universe_selection"]).get("benchmark_symbol"),
                 benchmark_gap=dict(snapshot["universe_selection"]).get("benchmark_gap"),
                 benchmark_candidate=UniverseCandidateDTO(**dict(snapshot["universe_selection"]).get("benchmark_candidate"))
@@ -407,6 +492,14 @@ def trigger_runtime_sync(background_tasks: BackgroundTasks, db: Session = Depend
     return _to_pipeline_runtime_status_dto(status)
 
 
+@router.get("/runtime/logs", response_model=RuntimeLogDTO)
+def get_runtime_logs(
+    stream: str = Query(default="out", pattern="^(out|err)$"),
+    lines: int = Query(default=120, ge=20, le=400),
+) -> RuntimeLogDTO:
+    return _read_runtime_log(stream, lines=lines)
+
+
 @router.get("/candidates", response_model=list[CandidateStrategyDTO])
 def get_candidates(db: Session = Depends(get_db)) -> list[CandidateStrategyDTO]:
     records = list_candidate_strategies(db)
@@ -417,6 +510,17 @@ def get_candidates(db: Session = Depends(get_db)) -> list[CandidateStrategyDTO]:
         )
         for record in records
     ]
+
+
+@router.get("/candidates/{proposal_id}", response_model=CandidateStrategyDTO)
+def get_candidate(proposal_id: str, db: Session = Depends(get_db)) -> CandidateStrategyDTO:
+    proposal = get_strategy_proposal(db, proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Candidate strategy not found")
+    return CandidateStrategyDTO(
+        proposal=_to_proposal_dto(proposal),
+        latest_decision=_to_risk_decision_dto(proposal.decisions[-1]) if proposal.decisions else None,
+    )
 
 
 @router.get("/research/proposals", response_model=list[StrategyProposalDTO])
@@ -598,7 +702,9 @@ def get_paper_positions(limit: int = Query(default=200, ge=1, le=1000)) -> list[
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global PROCESS_STARTED_AT
     init_database()
+    PROCESS_STARTED_AT = now_tz()
     scheduler = build_pipeline_scheduler()
     with SessionLocal() as db:
         sync_strategy_snapshots(db)
@@ -628,6 +734,22 @@ def create_app() -> FastAPI:
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    if FRONTEND_DIST_DIR.exists():
+        assets_dir = FRONTEND_DIST_DIR / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+        @app.get("/", include_in_schema=False)
+        def frontend_index() -> FileResponse:
+            return FileResponse(FRONTEND_DIST_DIR / "index.html")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        def frontend_spa(full_path: str) -> FileResponse:
+            candidate = FRONTEND_DIST_DIR / full_path
+            if candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(FRONTEND_DIST_DIR / "index.html")
 
     return app
 

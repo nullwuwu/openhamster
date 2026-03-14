@@ -364,32 +364,251 @@ def set_runtime_llm_provider(db: Session, provider: str):
     current_provider = get_llm_gateway().get_provider(db)
     status = get_llm_gateway().set_provider(db, provider)
     audit_time = now_tz()
-    db.add(
-        AuditRecord(
-            run_id="system-llm-gateway",
-            decision_id=f"llm-provider-{stable_hash([current_provider, provider, audit_time.isoformat()])}",
-            event_type="llm_provider_changed",
-            entity_type="llm_gateway",
-            entity_id=status.provider,
-            strategy_dsl_hash="",
-            market_snapshot_hash="",
-            event_digest_hash="",
-            payload={
-                "old_provider": current_provider,
-                "new_provider": status.provider,
-                "status": status.status,
-                "message": status.message,
-                "success": not (
-                    status.provider == LLMProvider.MINIMAX and status.status == "missing_key"
-                ),
+    success = not (status.provider == LLMProvider.MINIMAX and status.status == "missing_key")
+    decision_id = f"llm-provider-{stable_hash([current_provider, provider, audit_time.isoformat()])}"
+    payload = {
+        "old_provider": current_provider,
+        "new_provider": status.provider,
+        "status": status.status,
+        "message": status.message,
+        "success": success,
+    }
+    for event_type, entity_id, event_payload in [
+        ("llm_provider_changed", status.provider, payload),
+        ("llm_provider_switched", status.provider, payload),
+        (
+            "provider_cohort_started",
+            status.provider,
+            {
+                **payload,
+                "cohort_provider": status.provider,
+                "cohort_started_at": audit_time.isoformat(),
             },
-            created_at=audit_time,
+        ),
+        (
+            "provider_comparison_window_closed",
+            current_provider,
+            {
+                "provider": current_provider,
+                "next_provider": status.provider,
+                "window_closed_at": audit_time.isoformat(),
+                "reason": "provider_switched",
+            },
+        ),
+    ]:
+        db.add(
+            AuditRecord(
+                run_id="system-llm-gateway",
+                decision_id=decision_id,
+                event_type=event_type,
+                entity_type="llm_gateway",
+                entity_id=entity_id,
+                strategy_dsl_hash="",
+                market_snapshot_hash="",
+                event_digest_hash="",
+                payload=event_payload,
+                created_at=audit_time,
+            )
         )
-    )
     db.commit()
-    if status.provider == LLMProvider.MINIMAX and status.status == "missing_key":
+    if not success:
         return status, False
     return status, True
+
+
+def _provider_cohort_windows(db: Session, *, window_days: int = 30) -> list[dict[str, object]]:
+    since = now_tz() - timedelta(days=window_days)
+    rows = list(
+        db.execute(
+            select(AuditRecord)
+            .where(
+                AuditRecord.event_type == "provider_cohort_started",
+                AuditRecord.created_at >= since,
+            )
+            .order_by(AuditRecord.created_at.asc(), AuditRecord.id.asc())
+        ).scalars()
+    )
+    windows: list[dict[str, object]] = []
+    for index, row in enumerate(rows):
+        payload = dict(row.payload or {})
+        next_row = rows[index + 1] if index + 1 < len(rows) else None
+        provider = str(payload.get("cohort_provider") or payload.get("new_provider") or row.entity_id)
+        windows.append(
+            {
+                "provider": provider,
+                "cohort_started_at": row.created_at,
+                "cohort_closed_at": next_row.created_at if next_row is not None else None,
+            }
+        )
+    current_provider = get_current_llm_status(db).provider
+    if not windows:
+        windows.append(
+            {
+                "provider": current_provider,
+                "cohort_started_at": since,
+                "cohort_closed_at": None,
+            }
+        )
+    elif str(windows[-1].get("provider")) != current_provider:
+        windows.append(
+            {
+                "provider": current_provider,
+                "cohort_started_at": since,
+                "cohort_closed_at": None,
+            }
+        )
+    return windows[-3:]
+
+
+def _build_provider_cohort_metrics(
+    db: Session,
+    *,
+    provider: str,
+    cohort_started_at: datetime | None,
+    cohort_closed_at: datetime | None,
+) -> dict[str, object]:
+    query = select(StrategyProposal)
+    if cohort_started_at is not None:
+        query = query.where(StrategyProposal.created_at >= cohort_started_at)
+    if cohort_closed_at is not None:
+        query = query.where(StrategyProposal.created_at < cohort_closed_at)
+    proposals = list(db.execute(query.order_by(StrategyProposal.created_at.asc())).scalars())
+
+    if provider == "mock":
+        real = [proposal for proposal in proposals if proposal.source_kind == "mock"]
+        fallback = []
+        cohort_total = len(real)
+    else:
+        real = [proposal for proposal in proposals if proposal.source_kind == provider]
+        fallback = [proposal for proposal in proposals if proposal.source_kind == "mock"]
+        cohort_total = len(real) + len(fallback)
+
+    promoted = [
+        proposal
+        for proposal in real
+        if proposal.promoted_at is not None or proposal.status == ProposalStatus.ACTIVE
+    ]
+    promoted_symbols: dict[str, int] = {}
+    for proposal in promoted:
+        promoted_symbols[proposal.symbol] = promoted_symbols.get(proposal.symbol, 0) + 1
+    avg_final_score = None
+    if real:
+        avg_final_score = round(sum(float(proposal.final_score or 0.0) for proposal in real) / len(real), 1)
+
+    return {
+        "provider": provider,
+        "cohort_started_at": cohort_started_at.isoformat() if cohort_started_at is not None else None,
+        "cohort_closed_at": cohort_closed_at.isoformat() if cohort_closed_at is not None else None,
+        "proposal_count": cohort_total,
+        "real_proposal_count": len(real),
+        "fallback_count": len(fallback),
+        "fallback_rate": round((len(fallback) / cohort_total), 3) if cohort_total else 0.0,
+        "promoted_count": len(promoted),
+        "promotion_rate": round((len(promoted) / len(real)), 3) if real else 0.0,
+        "avg_final_score": avg_final_score,
+        "promoted_symbol_distribution": promoted_symbols,
+    }
+
+
+def build_provider_migration_summary(db: Session, *, window_days: int = 30) -> dict[str, object]:
+    cohorts = _provider_cohort_windows(db, window_days=window_days)
+    current_provider = str(get_current_llm_status(db).provider)
+    current_window = next((cohort for cohort in reversed(cohorts) if str(cohort.get("provider")) == current_provider), cohorts[-1])
+    current_metrics = _build_provider_cohort_metrics(
+        db,
+        provider=str(current_window.get("provider")),
+        cohort_started_at=current_window.get("cohort_started_at"),
+        cohort_closed_at=current_window.get("cohort_closed_at"),
+    )
+    previous_window = None
+    for cohort in reversed(cohorts[:-1]):
+        if str(cohort.get("provider")) != current_provider:
+            previous_window = cohort
+            break
+    previous_metrics = None
+    if previous_window is not None:
+        previous_metrics = _build_provider_cohort_metrics(
+            db,
+            provider=str(previous_window.get("provider")),
+            cohort_started_at=previous_window.get("cohort_started_at"),
+            cohort_closed_at=previous_window.get("cohort_closed_at"),
+        )
+
+    deltas: dict[str, float] = {}
+    notes: list[str] = []
+    if previous_metrics is not None:
+        previous_avg = previous_metrics.get("avg_final_score")
+        current_avg = current_metrics.get("avg_final_score")
+        if isinstance(current_avg, (int, float)) and isinstance(previous_avg, (int, float)):
+            deltas["avg_final_score"] = round(float(current_avg) - float(previous_avg), 1)
+        deltas["promotion_rate"] = round(
+            float(current_metrics.get("promotion_rate", 0.0) or 0.0) - float(previous_metrics.get("promotion_rate", 0.0) or 0.0),
+            3,
+        )
+        deltas["fallback_rate"] = round(
+            float(current_metrics.get("fallback_rate", 0.0) or 0.0) - float(previous_metrics.get("fallback_rate", 0.0) or 0.0),
+            3,
+        )
+    if float(current_metrics.get("fallback_rate", 0.0) or 0.0) > 0:
+        notes.append("Current provider cohort still contains mock fallback output and should be compared with caution.")
+    if int(current_metrics.get("real_proposal_count", 0) or 0) < 3:
+        notes.append("Current provider cohort is still thin; proposal quality comparisons are directional, not conclusive.")
+    if previous_metrics is None:
+        notes.append("No prior provider cohort is available in the current comparison window.")
+
+    if previous_metrics is not None:
+        summary = (
+            f"Current cohort runs on {current_provider} with "
+            f"{current_metrics['real_proposal_count']} real proposals, "
+            f"{round(float(current_metrics.get('promotion_rate', 0.0) or 0.0) * 100, 1)}% promotion rate, and "
+            f"{round(float(current_metrics.get('fallback_rate', 0.0) or 0.0) * 100, 1)}% fallback contamination."
+        )
+    else:
+        summary = (
+            f"Current cohort runs on {current_provider} with "
+            f"{current_metrics['real_proposal_count']} real proposals in the active comparison window."
+        )
+
+    return {
+        "comparison_window_days": window_days,
+        "current_provider": current_provider,
+        "current_cohort_started_at": current_metrics.get("cohort_started_at"),
+        "previous_provider": previous_metrics.get("provider") if previous_metrics is not None else None,
+        "switch_detected": previous_metrics is not None,
+        "summary": summary,
+        "notes": notes,
+        "current": current_metrics,
+        "previous": previous_metrics,
+        "deltas": deltas,
+    }
+
+
+def build_provider_migration_history(db: Session, *, window_days: int = 30) -> list[dict[str, object]]:
+    cohorts = _provider_cohort_windows(db, window_days=window_days)
+    if not cohorts:
+        return []
+    current_provider = str(get_current_llm_status(db).provider)
+    history: list[dict[str, object]] = []
+    for cohort in cohorts:
+        provider = str(cohort.get("provider"))
+        metrics = _build_provider_cohort_metrics(
+            db,
+            provider=provider,
+            cohort_started_at=cohort.get("cohort_started_at"),
+            cohort_closed_at=cohort.get("cohort_closed_at"),
+        )
+        started_at = metrics.get("cohort_started_at")
+        label = provider
+        if isinstance(started_at, str) and started_at:
+            label = f"{provider} @ {started_at[5:10]}"
+        history.append(
+            {
+                **metrics,
+                "label": label,
+                "is_current": provider == current_provider and metrics.get("cohort_closed_at") is None,
+            }
+        )
+    return history
 
 
 def sync_strategy_snapshots(db: Session) -> None:
@@ -535,6 +754,14 @@ def get_latest_paper_execution(db: Session, proposal: StrategyProposal | None) -
         signal = Signal.HOLD
     explanation_key = payload.get('explanation_key')
     explanation = payload.get('explanation')
+    skip_message = str(payload.get('message') or '')
+    if record.event_type == 'paper_execution_skipped' and (explanation_key is None or explanation is None):
+        if skip_message == 'market_closed_non_trading_day':
+            explanation_key = explanation_key or 'market_closed_non_trading_day'
+            explanation = explanation or 'Paper execution was skipped because today is not a trading day for this market.'
+        elif skip_message == 'market_closed_outside_session':
+            explanation_key = explanation_key or 'market_closed_outside_session'
+            explanation = explanation or 'Paper execution was skipped because the market is outside its trading session.'
     if explanation_key is None or explanation is None:
         derived_key, derived_explanation = _paper_execution_explanation(
             trade_qty=abs(order_quantity or 0),
@@ -750,6 +977,64 @@ def _market_lot_size(symbol: str) -> int:
     return 100 if market in {'hk', 'cn'} else 1
 
 
+def _market_scope_from_symbol_or_scope(*, symbol: str | None = None, market_scope: str | None = None) -> str:
+    resolved_scope = (market_scope or "").strip().upper()
+    if not resolved_scope and symbol:
+        market = detect_market(symbol)
+        resolved_scope = {"hk": "HK", "cn": "CN", "us": "US"}.get(market, "HK")
+    return resolved_scope or "HK"
+
+
+def _is_trading_day(*, current_time: datetime, symbol: str | None = None, market_scope: str | None = None) -> bool:
+    resolved_scope = _market_scope_from_symbol_or_scope(symbol=symbol, market_scope=market_scope)
+    return current_time.weekday() < 5 if resolved_scope in {"HK", "CN", "US"} else True
+
+
+def _paper_market_is_open(*, current_time: datetime, symbol: str | None = None, market_scope: str | None = None) -> tuple[bool, str]:
+    resolved_scope = _market_scope_from_symbol_or_scope(symbol=symbol, market_scope=market_scope)
+    if not _is_trading_day(current_time=current_time, market_scope=resolved_scope):
+        return False, 'market_closed_non_trading_day'
+    current_minutes = current_time.hour * 60 + current_time.minute
+    if resolved_scope == 'HK':
+        return (9 * 60 + 30) <= current_minutes < (16 * 60), 'market_closed_outside_session'
+    if resolved_scope == 'CN':
+        return (9 * 60 + 30) <= current_minutes < (15 * 60), 'market_closed_outside_session'
+    return True, 'market_open'
+
+
+def _append_daily_nav_if_needed(
+    conn: sqlite3.Connection,
+    *,
+    trade_date: str,
+    cash: float,
+    position_value: float,
+    total_equity: float,
+) -> bool:
+    latest_row = conn.execute(
+        """
+        SELECT trade_date, cash, position_value, total_equity
+        FROM daily_nav
+        ORDER BY trade_date DESC, rowid DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    if latest_row is not None:
+        same_trade_date = str(latest_row[0]) == trade_date
+        same_cash = abs(float(latest_row[1]) - cash) <= 1e-9
+        same_position_value = abs(float(latest_row[2]) - position_value) <= 1e-9
+        same_total_equity = abs(float(latest_row[3]) - total_equity) <= 1e-9
+        if same_trade_date and same_cash and same_position_value and same_total_equity:
+            return False
+    conn.execute(
+        """
+        INSERT INTO daily_nav (trade_date, cash, position_value, total_equity)
+        VALUES (?, ?, ?, ?)
+        """,
+        (trade_date, cash, position_value, total_equity),
+    )
+    return True
+
+
 def _paper_trade_already_bootstrapped(proposal_id: str, db: Session) -> bool:
     return (
         db.execute(
@@ -771,11 +1056,13 @@ def _latest_paper_nav_state() -> dict[str, float]:
     initial_equity = float(get_settings().portfolio.default_capital)
     if latest_nav is None:
         return {
+            'trade_date': None,
             'cash': initial_equity,
             'position_value': 0.0,
             'total_equity': initial_equity,
         }
     return {
+        'trade_date': latest_nav.get('trade_date'),
         'cash': float(latest_nav.get('cash', initial_equity) or initial_equity),
         'position_value': float(latest_nav.get('position_value', 0.0) or 0.0),
         'total_equity': float(latest_nav.get('total_equity', initial_equity) or initial_equity),
@@ -909,6 +1196,11 @@ def execute_active_paper_cycle(
     latest_price = float(latest_bar['close'])
     latest_price_as_of = latest_bar_index.to_pydatetime().isoformat() if hasattr(latest_bar_index, 'to_pydatetime') else str(latest_bar_index)
     price_age_hours = _quote_age_hours(current_time=current_time, as_of=latest_price_as_of)
+    market_open, market_message = _paper_market_is_open(
+        current_time=current_time,
+        symbol=proposal.symbol,
+        market_scope=proposal.market_scope,
+    )
     nav_state = _latest_paper_nav_state()
     current_position = _latest_paper_position(proposal.symbol)
     current_qty = int(current_position.get('quantity', 0) or 0) if current_position else 0
@@ -939,6 +1231,72 @@ def execute_active_paper_cycle(
             latest_buy_at = None
         if latest_buy_at is not None and (current_time.date() - latest_buy_at.date()).days < min_holding_days:
             target_qty = current_qty
+
+    if not market_open:
+        new_cash = float(nav_state['cash'])
+        new_position_value = round(current_qty * latest_price, 2)
+        new_total_equity = round(new_cash + new_position_value, 2)
+        previous_price = float(previous_execution['latest_price']) if previous_execution and previous_execution.get('latest_price') is not None else None
+        previous_total_equity = float(previous_execution['total_equity']) if previous_execution and previous_execution.get('total_equity') is not None else float(nav_state['total_equity'])
+        price_changed = previous_price is None or abs(previous_price - latest_price) > 1e-9
+        equity_changed = abs(previous_total_equity - new_total_equity) > 1e-9
+        trade_date = current_time.date().isoformat()
+        nav_written = False
+        if equity_changed or str(nav_state.get('trade_date') or '') != trade_date:
+            for db_path in _paper_snapshot_db_paths():
+                _ensure_paper_snapshot_tables(db_path)
+                conn = _open_sqlite(db_path)
+                try:
+                    nav_written = _append_daily_nav_if_needed(
+                        conn,
+                        trade_date=trade_date,
+                        cash=new_cash,
+                        position_value=new_position_value,
+                        total_equity=new_total_equity,
+                    ) or nav_written
+                    conn.commit()
+                finally:
+                    conn.close()
+
+        _record_paper_execution_audit(
+            db,
+            proposal=proposal,
+            current_time=current_time,
+            event_type='paper_execution_skipped',
+            payload={
+                'reason': reason,
+                'message': market_message,
+                'symbol': proposal.symbol,
+                'latest_price': latest_price,
+                'latest_price_as_of': latest_price_as_of,
+                'price_age_hours': price_age_hours,
+                'price_changed': price_changed,
+                'equity_changed': equity_changed,
+                'rebalance_triggered': False,
+                'current_quantity': current_qty,
+                'target_quantity': current_qty,
+                'order_quantity': 0,
+                'cash': new_cash,
+                'position_value': new_position_value,
+                'total_equity': new_total_equity,
+                'nav_written': nav_written,
+            },
+        )
+        return {
+            'executed': False,
+            'reason': market_message,
+            'latest_price': latest_price,
+            'latest_price_as_of': latest_price_as_of,
+            'price_age_hours': price_age_hours,
+            'price_changed': price_changed,
+            'equity_changed': equity_changed,
+            'rebalance_triggered': False,
+            'current_quantity': current_qty,
+            'target_quantity': current_qty,
+            'cash': new_cash,
+            'position_value': new_position_value,
+            'total_equity': new_total_equity,
+        }
 
     order_qty = target_qty - current_qty
     order_side = 'buy' if order_qty > 0 else 'sell' if order_qty < 0 else None
@@ -995,12 +1353,12 @@ def execute_active_paper_cycle(
                     """,
                     (proposal.symbol, target_qty, new_avg_cost, new_position_value, created_at),
                 )
-            conn.execute(
-                """
-                INSERT INTO daily_nav (trade_date, cash, position_value, total_equity)
-                VALUES (?, ?, ?, ?)
-                """,
-                (trade_date, new_cash, new_position_value, new_total_equity),
+            _append_daily_nav_if_needed(
+                conn,
+                trade_date=trade_date,
+                cash=new_cash,
+                position_value=new_position_value,
+                total_equity=new_total_equity,
             )
             conn.commit()
         finally:
@@ -1061,6 +1419,33 @@ def _bootstrap_paper_trade_for_proposal(
     reason: str,
 ) -> bool:
     if _paper_trade_already_bootstrapped(proposal.id, db):
+        return False
+
+    market_open, market_message = _paper_market_is_open(
+        current_time=current_time,
+        symbol=proposal.symbol,
+        market_scope=proposal.market_scope,
+    )
+    if not market_open:
+        db.add(
+            AuditRecord(
+                run_id=proposal.run_id,
+                decision_id=decision_id or f"paper-trade-skip-{stable_hash([proposal.id, reason, current_time.isoformat()])}",
+                event_type='paper_trade_bootstrap_skipped',
+                entity_type='paper_runtime',
+                entity_id=proposal.id,
+                strategy_dsl_hash=stable_hash(proposal.strategy_dsl),
+                market_snapshot_hash=proposal.market_snapshot_hash,
+                event_digest_hash=proposal.event_digest_hash,
+                payload={
+                    'symbol': proposal.symbol,
+                    'reason': reason,
+                    'message': market_message,
+                },
+                created_at=current_time,
+            )
+        )
+        db.flush()
         return False
 
     source_manager = get_source_manager()
@@ -1127,12 +1512,12 @@ def _bootstrap_paper_trade_for_proposal(
                 """,
                 (proposal.symbol, quantity, latest_price, amount, created_at),
             )
-            conn.execute(
-                """
-                INSERT INTO daily_nav (trade_date, cash, position_value, total_equity)
-                VALUES (?, ?, ?, ?)
-                """,
-                (trade_date, remaining_cash, amount, round(remaining_cash + amount, 2)),
+            _append_daily_nav_if_needed(
+                conn,
+                trade_date=trade_date,
+                cash=remaining_cash,
+                position_value=amount,
+                total_equity=round(remaining_cash + amount, 2),
             )
             conn.commit()
             written_paths.append(db_path)
@@ -1194,6 +1579,8 @@ def _static_universe_selection() -> dict[str, object]:
         "candidate_count": 1,
         "top_n_limit": 1,
         "min_turnover_millions": None,
+        "account_capital_hkd": float(get_settings().portfolio.default_capital),
+        "max_lot_cost_ratio": float(get_settings().universe.max_lot_cost_ratio),
         "benchmark_symbol": benchmark_symbol,
         "benchmark_gap": 0.0 if symbol == benchmark_symbol else None,
         "candidates": [
@@ -1254,6 +1641,8 @@ def get_universe_selection(db: Session, *, refresh: bool = False, current_time: 
         existing.setdefault("candidate_count", len(candidates))
         existing.setdefault("top_n_limit", int(settings.universe.top_n))
         existing.setdefault("min_turnover_millions", float(settings.universe.min_turnover_millions))
+        existing.setdefault("account_capital_hkd", float(settings.portfolio.default_capital))
+        existing.setdefault("max_lot_cost_ratio", float(settings.universe.max_lot_cost_ratio))
         existing.setdefault("benchmark_symbol", benchmark_symbol)
         existing.setdefault("benchmark_candidate", benchmark_candidate)
         if existing.get("benchmark_gap") is None and benchmark_candidate is not None:
@@ -1270,6 +1659,8 @@ def get_universe_selection(db: Session, *, refresh: bool = False, current_time: 
         candidates = fetch_hk_universe_candidates(
             top_n=max(1, int(settings.universe.top_n)),
             min_turnover_millions=float(settings.universe.min_turnover_millions),
+            account_capital_hkd=float(settings.portfolio.default_capital),
+            max_lot_cost_ratio=float(settings.universe.max_lot_cost_ratio),
         )
     except Exception as exc:
         fallback = _static_universe_selection()
@@ -1304,6 +1695,8 @@ def get_universe_selection(db: Session, *, refresh: bool = False, current_time: 
         "candidate_count": len(candidates),
         "top_n_limit": int(settings.universe.top_n),
         "min_turnover_millions": float(settings.universe.min_turnover_millions),
+        "account_capital_hkd": float(settings.portfolio.default_capital),
+        "max_lot_cost_ratio": float(settings.universe.max_lot_cost_ratio),
         "benchmark_symbol": benchmark_symbol,
         "benchmark_gap": (
             round(float(selected_candidate.get("score", 0.0)) - float(benchmark_candidate.get("score", 0.0)), 2)
@@ -2869,6 +3262,7 @@ def build_acceptance_report(db: Session, *, window_days: int = 30) -> dict[str, 
         'next_actions': next_actions,
         'quality': {
             'quality_band': verdict.get('quality_band'),
+            'verdict': verdict,
             'track_record': track_record,
             'oos_validation': dict(quality_report.get('oos_validation', {})),
             'pool_comparison': dict(quality_report.get('pool_comparison', {})),
@@ -2902,6 +3296,246 @@ def build_acceptance_report(db: Session, *, window_days: int = 30) -> dict[str, 
             'fallback_events_30d': fallback_count,
             'macro_degraded_30d': macro_degraded_count,
         },
+    }
+
+
+def build_live_readiness(db: Session, *, window_days: int = 30) -> dict[str, object]:
+    acceptance = build_acceptance_report(db, window_days=window_days)
+    provider_comparison = build_provider_migration_summary(db, window_days=window_days)
+    quality = dict(acceptance.get('quality', {}))
+    operations = dict(acceptance.get('operations', {}))
+    macro = dict(acceptance.get('macro', {}))
+    governance = dict(acceptance.get('governance', {}))
+    verdict = dict(quality.get('verdict', {}))
+    track_record = dict(quality.get('track_record', {}))
+    oos_validation = dict(quality.get('oos_validation', {}))
+
+    blockers: list[str] = []
+    next_actions: list[str] = []
+
+    quality_score = 30
+    if track_record.get('trend') == 'weakening':
+        quality_score -= 8
+        blockers.append('quality_trend_weakening')
+    if not bool(oos_validation.get('passed', False)):
+        quality_score -= 8
+        blockers.append('oos_validation_not_passed')
+    if not bool(verdict.get('replaceable', False)):
+        quality_score -= 6
+        blockers.append('not_consistently_replaceable')
+    if int(track_record.get('stable_streak', 0) or 0) < 20:
+        quality_score -= 8
+        blockers.append('stable_streak_too_short')
+    if float(track_record.get('replaceable_ratio', 0.0) or 0.0) < 0.6:
+        quality_score -= 5
+        blockers.append('replaceable_ratio_below_threshold')
+    quality_score = max(0, quality_score)
+
+    operations_score = 25
+    if operations.get('status') != 'accepted':
+        operations_score -= 8
+        blockers.append('paper_acceptance_not_accepted')
+    if int(operations.get('live_days', 0) or 0) < 20:
+        operations_score -= 7
+        blockers.append('paper_live_days_below_threshold')
+    if int(operations.get('rollback_events_30d', 0) or 0) > 0:
+        operations_score -= 10
+        blockers.append('rollback_seen_in_30d')
+    if int(operations.get('pause_events_30d', 0) or 0) > 2:
+        operations_score -= 5
+        blockers.append('too_many_pause_events')
+    if float(operations.get('operational_score', 0.0) or 0.0) < 0.75:
+        operations_score -= 5
+        blockers.append('operational_score_below_threshold')
+    operations_score = max(0, operations_score)
+
+    runtime_score = 25
+    if str(acceptance.get('status')) == 'attention':
+        runtime_score -= 8
+    if str(macro.get('status')) == 'degraded':
+        runtime_score -= 7
+        blockers.append('macro_pipeline_degraded')
+    if float(macro.get('health_score_30d', 0.0) or 0.0) < 0.8:
+        runtime_score -= 5
+        blockers.append('macro_health_history_too_weak')
+    if int(governance.get('fallback_events_30d', 0) or 0) > 3:
+        runtime_score -= 5
+        blockers.append('too_many_fallback_events')
+    runtime_score = max(0, runtime_score)
+
+    explainability_score = 20
+    if not governance.get('phase'):
+        explainability_score -= 5
+        blockers.append('governance_phase_missing')
+    if not governance.get('next_step'):
+        explainability_score -= 4
+        blockers.append('governance_next_step_missing')
+    if not isinstance(governance.get('resume_conditions', []), list):
+        explainability_score -= 4
+        blockers.append('resume_conditions_missing')
+    if not acceptance.get('strategy_title'):
+        explainability_score -= 7
+        blockers.append('no_active_strategy')
+    explainability_score = max(0, explainability_score)
+
+    score = quality_score + operations_score + runtime_score + explainability_score
+    if score >= 85 and not blockers:
+        status = 'ready_candidate'
+    elif score >= 65:
+        status = 'paper_building_evidence'
+    else:
+        status = 'not_ready'
+
+    if 'paper_live_days_below_threshold' in blockers:
+        next_actions.append('accumulate_more_paper_days')
+    if 'stable_streak_too_short' in blockers or 'replaceable_ratio_below_threshold' in blockers:
+        next_actions.append('accumulate_longer_quality_history')
+    if 'macro_pipeline_degraded' in blockers or 'macro_health_history_too_weak' in blockers:
+        next_actions.append('stabilize_macro_pipeline')
+    if 'rollback_seen_in_30d' in blockers or 'too_many_pause_events' in blockers:
+        next_actions.append('reduce_operational_incidents')
+    if not next_actions:
+        next_actions.append('keep_collecting_evidence')
+
+    if status == 'ready_candidate':
+        summary = 'Live candidate is eligible for human review.'
+    elif status == 'paper_building_evidence':
+        summary = 'Paper evidence is improving but still below live admission thresholds.'
+    else:
+        summary = 'System should remain in paper mode until quality, operations, and runtime evidence improve.'
+
+    return {
+        'status': status,
+        'score': score,
+        'summary': summary,
+        'approved_for_live': False,
+        'blockers': blockers,
+        'next_actions': next_actions,
+        'dimensions': {
+            'quality': quality_score,
+            'operations': operations_score,
+            'runtime': runtime_score,
+            'explainability': explainability_score,
+        },
+        'evidence': {
+            'window_days': window_days,
+            'strategy_title': acceptance.get('strategy_title'),
+            'quality_trend': track_record.get('trend'),
+            'stable_streak': track_record.get('stable_streak'),
+            'replaceable_ratio': track_record.get('replaceable_ratio'),
+            'oos_passed': oos_validation.get('passed'),
+            'live_days': operations.get('live_days'),
+            'operational_status': operations.get('status'),
+            'operational_score': operations.get('operational_score'),
+            'macro_status': macro.get('status'),
+            'macro_health_score_30d': macro.get('health_score_30d'),
+            'fallback_events_30d': governance.get('fallback_events_30d'),
+            'governance_phase': governance.get('phase'),
+            'provider_comparison': provider_comparison,
+        },
+    }
+
+
+def build_live_readiness_history(db: Session, *, limit: int = 8) -> list[dict[str, object]]:
+    rows = list(
+        db.execute(
+            select(AuditRecord)
+            .where(AuditRecord.event_type == 'live_readiness_evaluated')
+            .order_by(AuditRecord.created_at.desc(), AuditRecord.id.desc())
+            .limit(limit)
+        ).scalars()
+    )
+    history: list[dict[str, object]] = []
+    for audit in rows:
+        payload = dict(audit.payload or {})
+        dimensions = {str(key): int(value) for key, value in dict(payload.get('dimensions', {}) or {}).items()}
+        history.append({
+            'status': str(payload.get('status', 'not_ready')),
+            'score': int(payload.get('score', 0) or 0),
+            'summary': str(payload.get('summary', '')),
+            'approved_for_live': bool(payload.get('approved_for_live', False)),
+            'blockers': [str(item) for item in list(payload.get('blockers', []) or [])],
+            'next_actions': [str(item) for item in list(payload.get('next_actions', []) or [])],
+            'dimensions': dimensions,
+            'evidence': dict(payload.get('evidence', {}) or {}),
+            'created_at': audit.created_at,
+        })
+    return history
+
+
+def build_live_readiness_change(db: Session, history: list[dict[str, object]] | None = None) -> dict[str, object] | None:
+    history = history or build_live_readiness_history(db, limit=8)
+    if len(history) < 2:
+        return None
+    latest = history[0]
+    previous = history[1]
+    latest_blockers = {str(item) for item in list(latest.get('blockers', []) or [])}
+    previous_blockers = {str(item) for item in list(previous.get('blockers', []) or [])}
+    score_delta = float(latest.get('score', 0) or 0) - float(previous.get('score', 0) or 0)
+    trend = 'improved' if score_delta > 0 else 'weakened' if score_delta < 0 else 'flat'
+
+    linked_changes: list[str] = []
+    previous_created_at = previous.get('created_at')
+    latest_created_at = latest.get('created_at')
+    if isinstance(previous_created_at, datetime) and isinstance(latest_created_at, datetime):
+        events = list(
+            db.execute(
+                select(AuditRecord)
+                .where(
+                    AuditRecord.created_at > previous_created_at,
+                    AuditRecord.created_at <= latest_created_at,
+                    AuditRecord.event_type.in_([
+                        'universe_selection_changed',
+                        'llm_provider_switched',
+                        'provider_cohort_started',
+                        'provider_comparison_window_closed',
+                        'macro_provider_degraded',
+                        'macro_provider_recovered',
+                        'proposal_created',
+                        'risk_decision_recorded',
+                    ]),
+                )
+                .order_by(AuditRecord.created_at.desc(), AuditRecord.id.desc())
+                .limit(10)
+            ).scalars()
+        )
+        for event in events:
+            payload = dict(event.payload or {})
+            if event.event_type == 'universe_selection_changed':
+                linked_changes.append(f"Universe shifted to {payload.get('selected_symbol', event.entity_id)}.")
+            elif event.event_type == 'llm_provider_switched':
+                linked_changes.append(
+                    f"LLM provider switched from {payload.get('old_provider', 'unknown')} to {payload.get('new_provider', event.entity_id)}."
+                )
+            elif event.event_type == 'provider_cohort_started':
+                linked_changes.append(f"Started a new provider cohort on {payload.get('cohort_provider', event.entity_id)}.")
+            elif event.event_type == 'provider_comparison_window_closed':
+                linked_changes.append(
+                    f"Closed the previous provider comparison window for {payload.get('provider', event.entity_id)}."
+                )
+            elif event.event_type == 'macro_provider_degraded':
+                linked_changes.append('Macro pipeline degraded and entered fallback handling.')
+            elif event.event_type == 'macro_provider_recovered':
+                linked_changes.append('Macro pipeline recovered to a healthier provider state.')
+            elif event.event_type == 'proposal_created':
+                linked_changes.append(f"A new proposal was created: {event.entity_id}.")
+            elif event.event_type == 'risk_decision_recorded':
+                linked_changes.append(f"A new risk decision was recorded for {event.entity_id}.")
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for item in linked_changes:
+            if item in seen:
+                continue
+            seen.add(item)
+            deduped.append(item)
+        linked_changes = deduped[:4]
+
+    return {
+        'trend': trend,
+        'score_delta': round(score_delta, 1),
+        'added_blockers': sorted(latest_blockers - previous_blockers),
+        'cleared_blockers': sorted(previous_blockers - latest_blockers),
+        'linked_changes': linked_changes,
     }
 
 
@@ -3622,6 +4256,18 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 last_duration_ms=max(0, int((current_time - started_at).total_seconds() * 1000)),
                 last_trigger=trigger,
                 degraded=bool(macro_status.get('degraded')),
+            )
+            readiness = build_live_readiness(db)
+            _record_system_audit(
+                db,
+                event_type='live_readiness_evaluated',
+                entity_type='live_readiness',
+                entity_id=str(dict(readiness.get('evidence', {})).get('strategy_title') or 'current'),
+                payload={
+                    'trigger': trigger,
+                    **readiness,
+                },
+                created_at=current_time,
             )
             db.commit()
         except Exception as exc:

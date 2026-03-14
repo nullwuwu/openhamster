@@ -183,7 +183,7 @@ const currencyFormatter = computed(
   () =>
     new Intl.NumberFormat(locale.value, {
       style: 'currency',
-      currency: 'USD',
+      currency: 'HKD',
       maximumFractionDigits: 0,
     }),
 )
@@ -192,7 +192,7 @@ const compactCurrencyFormatter = computed(
   () =>
     new Intl.NumberFormat(locale.value, {
       style: 'currency',
-      currency: 'USD',
+      currency: 'HKD',
       notation: 'compact',
       maximumFractionDigits: 1,
     }),

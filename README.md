@@ -220,6 +220,14 @@ Default local endpoints:
 - Frontend: `http://127.0.0.1:5173`
 - Backend: `http://127.0.0.1:8000`
 
+Production-style local run on a Mac mini:
+```bash
+bash scripts/start_local_daemon.sh
+```
+
+Production-style local endpoint:
+- Dashboard + API: `http://127.0.0.1:8000`
+
 ## Configuration
 
 Configuration precedence:
@@ -258,6 +266,14 @@ Reference files:
 - Script:
   - `python scripts/generate_acceptance_report.py`
   - `python scripts/generate_acceptance_report.py --window-days 30 --format json`
+
+## Mac mini Deployment
+- Long-running single-node deployment is documented in:
+  - `docs/MAC_MINI_DEPLOYMENT.md`
+- Recommended production-style shape:
+  - run `bash scripts/start_local_daemon.sh`
+  - let FastAPI serve `apps/web/dist`
+  - keep the API alive with `launchd`
 
 ## Validation Baseline
 
