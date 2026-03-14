@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
 from goby_shrimp.api.db import SessionLocal, init_database
 from goby_shrimp.api.models import AuditRecord, EventRecord, EventType
 from goby_shrimp.api.services import (
+    _set_pipeline_runtime_stage,
+    _set_pipeline_runtime_status,
     get_macro_pipeline_status,
     get_pipeline_runtime_status,
     get_universe_selection,
@@ -97,6 +99,51 @@ def test_pipeline_runtime_status_defaults_to_idle() -> None:
         assert status['current_state'] == 'idle'
         assert status['consecutive_failures'] == 0
         assert status['stalled'] is False
+
+
+def test_pipeline_stage_durations_reset_for_new_run() -> None:
+    init_database()
+    delete_runtime_state_keys(["pipeline.runtime.status"])
+    with SessionLocal() as db:
+        started_at = now_tz()
+        _set_pipeline_runtime_status(
+            db,
+            current_state='running',
+            status_message='run-1',
+            current_time=started_at,
+            current_stage='sync_event_stream',
+            last_trigger='scheduler',
+        )
+        _set_pipeline_runtime_stage(
+            db,
+            stage='strategy_agent',
+            current_time=started_at + timedelta(seconds=2),
+            status_message='run-1-stage',
+            trigger='scheduler',
+        )
+        _set_pipeline_runtime_status(
+            db,
+            current_state='idle',
+            status_message='done',
+            current_time=started_at + timedelta(seconds=3),
+            last_success_at=(started_at + timedelta(seconds=3)).isoformat(),
+            last_trigger='scheduler',
+        )
+        first_run = get_pipeline_runtime_status(db)
+        assert first_run['stage_durations_ms'].get('sync_event_stream') == 2000
+        assert first_run['stage_durations_ms'].get('strategy_agent') == 1000
+
+        second_started_at = started_at + timedelta(minutes=10)
+        _set_pipeline_runtime_status(
+            db,
+            current_state='running',
+            status_message='run-2',
+            current_time=second_started_at,
+            current_stage='sync_event_stream',
+            last_trigger='scheduler',
+        )
+        second_run = get_pipeline_runtime_status(db)
+        assert second_run['stage_durations_ms'] == {}
 
 
 def test_dynamic_hk_universe_selection_picks_hk_symbol(monkeypatch) -> None:

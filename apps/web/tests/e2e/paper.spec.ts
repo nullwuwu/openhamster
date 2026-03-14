@@ -12,5 +12,5 @@ test('paper page shows latest execution evidence', async ({ page }) => {
   await expect(page.getByText(/Latest Execution|最近一次执行/)).toBeVisible()
   await expect(page.getByText(/Execution Explanation|执行解释/)).toBeVisible()
   await expect(page.getByText(/Signal|信号/).first()).toBeVisible()
-  await expect(page.getByText(/Price As Of|价格时间/)).toBeVisible()
+  await expect(page.getByText(/Price As Of|价格时间/).first()).toBeVisible()
 })

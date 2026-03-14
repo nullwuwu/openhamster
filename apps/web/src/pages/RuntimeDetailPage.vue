@@ -3,11 +3,18 @@ import { useQuery } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
+import { use } from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
 
 import Badge from '@/components/ui/Badge.vue'
 import Card from '@/components/ui/Card.vue'
 import { api } from '@/lib/api'
 import { displayLabel } from '@/lib/display'
+
+use([CanvasRenderer, GridComponent, TooltipComponent, LegendComponent, LineChart])
 
 const { t, locale } = useI18n()
 const logStream = ref<'out' | 'err'>('out')
@@ -25,9 +32,67 @@ const runtimeLogsQuery = useQuery({
 
 const command = computed(() => commandQuery.data.value)
 const runtimeStatus = computed(() => command.value?.runtime_status)
+const runtimeSyncHistory = computed(() => command.value?.runtime_sync_history ?? [])
 const llmStatus = computed(() => command.value?.llm_status)
 const macroStatus = computed(() => command.value?.market_snapshot.macro_status)
 const runtimeLogs = computed(() => runtimeLogsQuery.data.value)
+
+const sortedRuntimeHistory = computed(() =>
+  [...runtimeSyncHistory.value].sort((left, right) => left.created_at.localeCompare(right.created_at)),
+)
+const runtimeDurationOption = computed(() => ({
+  tooltip: { trigger: 'axis' },
+  legend: { bottom: 0 },
+  grid: { left: 48, right: 18, top: 24, bottom: 48 },
+  xAxis: {
+    type: 'category',
+    data: sortedRuntimeHistory.value.map((item) => formatDateTime(item.created_at)),
+  },
+  yAxis: { type: 'value' },
+  series: [
+    {
+      name: t('runtimeDetail.totalDuration'),
+      type: 'line',
+      smooth: true,
+      data: sortedRuntimeHistory.value.map((item) => item.total_duration_ms ?? null),
+      lineStyle: { color: '#0f766e', width: 2.5 },
+      itemStyle: { color: '#0f766e' },
+    },
+    {
+      name: pipelineStageLabel('strategy_agent'),
+      type: 'line',
+      smooth: true,
+      data: sortedRuntimeHistory.value.map((item) => item.stage_durations_ms.strategy_agent ?? null),
+      lineStyle: { color: '#ea580c', width: 2 },
+      itemStyle: { color: '#ea580c' },
+    },
+    {
+      name: pipelineStageLabel('materialize_decisions'),
+      type: 'line',
+      smooth: true,
+      data: sortedRuntimeHistory.value.map((item) => item.stage_durations_ms.materialize_decisions ?? null),
+      lineStyle: { color: '#7c3aed', width: 2 },
+      itemStyle: { color: '#7c3aed' },
+    },
+    {
+      name: pipelineStageLabel('paper_execution'),
+      type: 'line',
+      smooth: true,
+      data: sortedRuntimeHistory.value.map((item) => item.stage_durations_ms.paper_execution ?? null),
+      lineStyle: { color: '#2563eb', width: 2 },
+      itemStyle: { color: '#2563eb' },
+    },
+  ],
+}))
+const averageRecentSyncDuration = computed(() => {
+  const values = sortedRuntimeHistory.value
+    .map((item) => item.total_duration_ms)
+    .filter((item): item is number => typeof item === 'number' && item > 0)
+  if (!values.length) return null
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+})
+const latestRuntimeHistoryItem = computed(() => sortedRuntimeHistory.value[sortedRuntimeHistory.value.length - 1] ?? null)
+const recentRuntimeFailures = computed(() => sortedRuntimeHistory.value.filter((item) => item.state === 'failed').length)
 
 function setLogStream(stream: 'out' | 'err'): void {
   logStream.value = stream
@@ -114,6 +179,21 @@ function formatDurationMs(value?: number): string {
       </Card>
     </div>
 
+    <div class="grid gap-4 lg:grid-cols-3">
+      <Card>
+        <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('runtimeDetail.averageRecentSyncDuration') }}</p>
+        <p class="mt-2 text-lg font-semibold text-slate-900">{{ formatDurationMs(averageRecentSyncDuration ?? undefined) }}</p>
+      </Card>
+      <Card>
+        <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('runtimeDetail.recentSyncFailures') }}</p>
+        <p class="mt-2 text-2xl font-semibold text-slate-900">{{ recentRuntimeFailures }}</p>
+      </Card>
+      <Card>
+        <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('runtimeDetail.latestSyncTrigger') }}</p>
+        <p class="mt-2 text-lg font-semibold text-slate-900">{{ latestRuntimeHistoryItem?.trigger ?? '--' }}</p>
+      </Card>
+    </div>
+
     <div class="grid gap-4 xl:grid-cols-[1fr,0.9fr]">
       <Card class="space-y-4">
         <div>
@@ -194,6 +274,31 @@ function formatDurationMs(value?: number): string {
         </div>
       </Card>
     </div>
+
+    <Card class="space-y-4">
+      <div>
+        <h3 class="text-sm font-semibold">{{ t('runtimeDetail.recentSyncTrend') }}</h3>
+        <p class="mt-1 text-sm text-slate-600">{{ t('runtimeDetail.recentSyncTrendBody') }}</p>
+      </div>
+      <div v-if="sortedRuntimeHistory.length" class="space-y-4">
+        <VChart class="h-[280px] w-full" :option="runtimeDurationOption" autoresize />
+        <div class="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+          <div
+            v-for="item in [...sortedRuntimeHistory].reverse().slice(0, 4)"
+            :key="item.created_at"
+            class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-slate-500">{{ formatDateTime(item.created_at) }}</p>
+              <Badge :variant="runtimeVariant(item.state, item.degraded, false)">{{ runtimeStateLabel(item.state) }}</Badge>
+            </div>
+            <p class="mt-2 font-semibold text-slate-900">{{ formatDurationMs(item.total_duration_ms ?? undefined) }}</p>
+            <p class="mt-1 text-slate-500">{{ item.trigger ?? '--' }}</p>
+          </div>
+        </div>
+      </div>
+      <p v-else class="text-sm text-slate-500">{{ t('runtimeDetail.recentSyncTrendEmpty') }}</p>
+    </Card>
 
     <Card class="space-y-4">
       <div class="flex flex-wrap items-start justify-between gap-4">

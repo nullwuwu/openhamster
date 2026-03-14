@@ -80,6 +80,8 @@ def test_command_center_includes_llm_status() -> None:
         assert 'process_uptime_seconds' in data['runtime_status']
         assert 'startup_mode' in data['runtime_status']
         assert 'local_logs_available' in data['runtime_status']
+        assert 'runtime_sync_history' in data
+        assert isinstance(data['runtime_sync_history'], list)
         assert 'provider_migration' in data
         assert 'provider_migration_history' in data
         assert data['provider_migration']['current_provider'] in {'minimax', 'mock'}

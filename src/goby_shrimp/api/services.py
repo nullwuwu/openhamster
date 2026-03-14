@@ -297,7 +297,10 @@ def _set_pipeline_runtime_status(
     previous_state = str(previous.get('current_state', 'idle'))
     previous_stage = previous.get('current_stage')
     previous_stage_started_at = previous.get('stage_started_at')
-    stage_durations = dict(previous.get('stage_durations_ms', {}) or {})
+    if current_state == 'running' and previous_state != 'running':
+        stage_durations: dict[str, int] = {}
+    else:
+        stage_durations = dict(previous.get('stage_durations_ms', {}) or {})
 
     if isinstance(previous_stage, str) and isinstance(previous_stage_started_at, str):
         try:
@@ -608,6 +611,35 @@ def build_provider_migration_history(db: Session, *, window_days: int = 30) -> l
                 "is_current": provider == current_provider and metrics.get("cohort_closed_at") is None,
             }
         )
+    return history
+
+
+def build_runtime_sync_history(db: Session, *, limit: int = 8) -> list[dict[str, object]]:
+    rows = list(
+        db.execute(
+            select(AuditRecord)
+            .where(AuditRecord.event_type.in_(['pipeline_sync_completed', 'pipeline_sync_failed']))
+            .order_by(AuditRecord.created_at.desc(), AuditRecord.id.desc())
+            .limit(limit)
+        ).scalars()
+    )
+    history: list[dict[str, object]] = []
+    for audit in rows:
+        payload = dict(audit.payload or {})
+        stage_durations = {
+            str(key): int(value)
+            for key, value in dict(payload.get('stage_durations_ms', {}) or {}).items()
+        }
+        history.append({
+            'created_at': audit.created_at,
+            'state': 'failed' if audit.event_type == 'pipeline_sync_failed' else str(payload.get('state', 'idle')),
+            'trigger': str(payload.get('trigger')) if payload.get('trigger') is not None else None,
+            'total_duration_ms': int(payload['last_duration_ms']) if payload.get('last_duration_ms') is not None else None,
+            'stage_durations_ms': stage_durations,
+            'current_stage': str(payload.get('current_stage')) if payload.get('current_stage') is not None else None,
+            'status_message': str(payload.get('status_message')) if payload.get('status_message') is not None else None,
+            'degraded': bool(payload.get('degraded', False)),
+        })
     return history
 
 
@@ -4257,6 +4289,23 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 last_trigger=trigger,
                 degraded=bool(macro_status.get('degraded')),
             )
+            completed_runtime_status = get_pipeline_runtime_status(db)
+            _record_system_audit(
+                db,
+                event_type='pipeline_sync_completed',
+                entity_type='pipeline_runtime',
+                entity_id='agent_sync',
+                payload={
+                    'trigger': trigger,
+                    'state': completed_runtime_status.get('current_state'),
+                    'current_stage': completed_runtime_status.get('current_stage'),
+                    'status_message': completed_runtime_status.get('status_message'),
+                    'last_duration_ms': completed_runtime_status.get('last_duration_ms'),
+                    'stage_durations_ms': dict(completed_runtime_status.get('stage_durations_ms', {}) or {}),
+                    'degraded': bool(completed_runtime_status.get('degraded', False)),
+                },
+                created_at=current_time,
+            )
             readiness = build_live_readiness(db)
             _record_system_audit(
                 db,
@@ -4285,6 +4334,7 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 last_trigger=trigger,
                 degraded=True,
             )
+            failed_runtime_status = get_pipeline_runtime_status(db)
             _record_system_audit(
                 db,
                 event_type='pipeline_sync_failed',
@@ -4294,6 +4344,12 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                     'trigger': trigger,
                     'error': str(exc),
                     'consecutive_failures': failure_count,
+                    'state': failed_runtime_status.get('current_state'),
+                    'current_stage': failed_runtime_status.get('current_stage'),
+                    'status_message': failed_runtime_status.get('status_message'),
+                    'last_duration_ms': failed_runtime_status.get('last_duration_ms'),
+                    'stage_durations_ms': dict(failed_runtime_status.get('stage_durations_ms', {}) or {}),
+                    'degraded': bool(failed_runtime_status.get('degraded', False)),
                 },
                 created_at=failed_at,
             )

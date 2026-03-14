@@ -101,5 +101,52 @@ def parse_json_payload(text: str) -> dict[str, Any]:
         try:
             return json.loads(payload)
         except json.JSONDecodeError:
+            extracted = _extract_balanced_json(payload)
+            if extracted is not None:
+                try:
+                    return json.loads(extracted)
+                except json.JSONDecodeError:
+                    pass
             logger.warning("LLM JSON parse failed: %s | payload=%s", first_error, payload[:300])
             raise
+
+
+def _extract_balanced_json(text: str) -> str | None:
+    start = None
+    opening = ""
+    closing = ""
+    for index, char in enumerate(text):
+        if char == "{":
+            start = index
+            opening, closing = "{", "}"
+            break
+        if char == "[":
+            start = index
+            opening, closing = "[", "]"
+            break
+    if start is None:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return text[start:index + 1]
+    return None

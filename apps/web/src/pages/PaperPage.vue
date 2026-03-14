@@ -90,6 +90,17 @@ const latestEquityChange = computed(() => {
   if (!latestNav.value || !previousNav.value) return null
   return latestNav.value.total_equity - previousNav.value.total_equity
 })
+const firstNav = computed(() => sortedNavRows.value[0] ?? null)
+const equityChangeFromStart = computed(() => {
+  if (!latestNav.value || !firstNav.value) return null
+  return latestNav.value.total_equity - firstNav.value.total_equity
+})
+const navRange = computed(() => {
+  if (!sortedNavRows.value.length) return null
+  const equities = sortedNavRows.value.map((item) => item.total_equity)
+  return Math.max(...equities) - Math.min(...equities)
+})
+const flatCurve = computed(() => (navRange.value ?? 0) < 0.01)
 
 const latestCashRatio = computed(() => {
   if (!latestNav.value || latestNav.value.total_equity <= 0) return null
@@ -133,6 +144,27 @@ const rollbackThreshold = computed(() => {
 const rebalanceTriggered = computed(() => (latestExecution.value?.order_quantity ?? 0) > 0)
 const priceChanged = computed(() => latestExecution.value?.price_changed ?? false)
 const equityChanged = computed(() => latestExecution.value?.equity_changed ?? false)
+const markFreshnessLabel = computed(() => {
+  const age = latestExecution.value?.price_age_hours
+  if (age === null || age === undefined) return '--'
+  if (age < 2) return t('paper.markFreshnessLive')
+  if (age < 24) return t('paper.markFreshnessSameDay')
+  return t('paper.markFreshnessStale')
+})
+const navSummary = computed(() => {
+  if (awaitingFirstSnapshot.value) return t('paper.awaitingFirstSnapshot')
+  if (!latestExecution.value) return t('paper.navSummaryNoExecution')
+  if (latestExecution.value.status === 'skipped') {
+    return latestExecution.value.explanation ?? t('paper.navSummarySkipped')
+  }
+  if (flatCurve.value && !priceChanged.value && !equityChanged.value) {
+    return t('paper.navSummaryFlat')
+  }
+  if (equityChanged.value) {
+    return t('paper.navSummaryMoved')
+  }
+  return latestExecution.value.explanation ?? t('paper.navSummaryStable')
+})
 
 const executionPosture = computed(() => {
   const action = latestDecision.value?.action
@@ -367,6 +399,43 @@ function actionVariant(action?: string): 'neutral' | 'success' | 'warning' | 'da
         </p>
       </Card>
     </div>
+
+    <Card class="space-y-4">
+      <div>
+        <h3 class="text-sm font-semibold">{{ t('paper.trendSummary') }}</h3>
+        <p class="mt-1 text-sm text-slate-600">{{ navSummary }}</p>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.markFreshness') }}</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ markFreshnessLabel }}</p>
+          <p class="mt-2 text-sm text-slate-600">
+            {{ t('paper.priceAsOf') }}: {{ formatDateTime(latestExecution?.latest_price_as_of) }}
+          </p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.sinceStartChange') }}</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ formatCurrency(equityChangeFromStart) }}</p>
+          <p class="mt-2 text-sm text-slate-600">
+            {{ t('paper.navPoints') }}: {{ sortedNavRows.length }}
+          </p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.navRange') }}</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ formatCurrency(navRange) }}</p>
+          <p class="mt-2 text-sm text-slate-600">
+            {{ flatCurve ? t('paper.navTrendFlat') : t('paper.navTrendMoving') }}
+          </p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.latestMarkAge') }}</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ formatHours(latestExecution?.price_age_hours) }}</p>
+          <p class="mt-2 text-sm text-slate-600">
+            {{ t('paper.rebalanceTriggered') }}: {{ booleanStatusLabel(latestExecution?.rebalance_triggered) }}
+          </p>
+        </div>
+      </div>
+    </Card>
 
     <div class="grid gap-4 xl:grid-cols-2">
       <Card>

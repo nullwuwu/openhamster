@@ -74,6 +74,9 @@ Thumbs.db
 # Frontend
 apps/web/node_modules/
 apps/web/dist/
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/tsconfig.tsbuildinfo
 
 # Runtime artifacts (new layout)
 var/db/

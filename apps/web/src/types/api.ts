@@ -451,6 +451,17 @@ export interface PipelineRuntimeStatus {
   local_logs_available: boolean
 }
 
+export interface RuntimeSyncHistoryItem {
+  created_at: string
+  state: string
+  trigger?: string | null
+  total_duration_ms?: number | null
+  stage_durations_ms: Record<string, number>
+  current_stage?: string | null
+  status_message?: string | null
+  degraded: boolean
+}
+
 export interface ProviderCohort {
   provider: string
   cohort_started_at?: string | null
@@ -519,6 +530,7 @@ export interface CommandCenter {
   timezone: string
   llm_status: LLMStatus
   runtime_status: PipelineRuntimeStatus
+  runtime_sync_history: RuntimeSyncHistoryItem[]
   provider_migration: ProviderMigrationSummary
   provider_migration_history: ProviderCohortHistoryItem[]
   live_readiness: LiveReadiness

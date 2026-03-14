@@ -47,6 +47,7 @@ from .schemas import (
     PaperPositionDTO,
     PaperTradingDTO,
     PipelineRuntimeStatusDTO,
+    RuntimeSyncHistoryItemDTO,
     ProviderCohortDTO,
     ProviderCohortHistoryItemDTO,
     ProviderMigrationSummaryDTO,
@@ -65,6 +66,7 @@ from .services import (
     build_operational_acceptance,
     build_provider_migration_history,
     build_provider_migration_summary,
+    build_runtime_sync_history,
     build_market_snapshot,
     execute_backtest_run,
     execute_experiment_run,
@@ -352,6 +354,10 @@ def _to_provider_migration_history_dto(items: list[dict[str, object]]) -> list[P
     return [ProviderCohortHistoryItemDTO(**item) for item in items]
 
 
+def _to_runtime_sync_history_dto(items: list[dict[str, object]]) -> list[RuntimeSyncHistoryItemDTO]:
+    return [RuntimeSyncHistoryItemDTO(**item) for item in items]
+
+
 def _read_runtime_log(stream: str, *, lines: int = 120) -> RuntimeLogDTO:
     if stream not in RUNTIME_LOG_PATHS:
         raise HTTPException(status_code=400, detail="Unsupported log stream")
@@ -384,6 +390,7 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
     )
     latest_digest = snapshot["event_digest"]
     provider_migration = build_provider_migration_summary(db)
+    runtime_sync_history = build_runtime_sync_history(db)
     provider_migration_history = build_provider_migration_history(db)
     live_readiness = build_live_readiness(db)
     live_readiness_history = build_live_readiness_history(db, limit=8)
@@ -393,6 +400,7 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
         timezone="Asia/Shanghai",
         llm_status=_to_llm_status_dto(get_current_llm_status(db)),
         runtime_status=_to_pipeline_runtime_status_dto(get_pipeline_runtime_status(db)),
+        runtime_sync_history=_to_runtime_sync_history_dto(runtime_sync_history),
         provider_migration=_to_provider_migration_summary_dto(provider_migration),
         provider_migration_history=_to_provider_migration_history_dto(provider_migration_history),
         live_readiness=LiveReadinessDTO(**live_readiness),

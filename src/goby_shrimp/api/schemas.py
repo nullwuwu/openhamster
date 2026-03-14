@@ -379,6 +379,17 @@ class PipelineRuntimeStatusDTO(BaseModel):
     local_logs_available: bool = False
 
 
+class RuntimeSyncHistoryItemDTO(BaseModel):
+    created_at: datetime
+    state: str
+    trigger: str | None = None
+    total_duration_ms: int | None = None
+    stage_durations_ms: dict[str, int] = Field(default_factory=dict)
+    current_stage: str | None = None
+    status_message: str | None = None
+    degraded: bool = False
+
+
 class ProviderCohortDTO(BaseModel):
     provider: str
     cohort_started_at: str | None = None
@@ -447,6 +458,7 @@ class CommandCenterDTO(BaseModel):
     timezone: str
     llm_status: LLMStatusDTO
     runtime_status: PipelineRuntimeStatusDTO
+    runtime_sync_history: list[RuntimeSyncHistoryItemDTO] = Field(default_factory=list)
     provider_migration: ProviderMigrationSummaryDTO
     provider_migration_history: list[ProviderCohortHistoryItemDTO] = Field(default_factory=list)
     live_readiness: LiveReadinessDTO
