@@ -15,10 +15,37 @@ const proposalsQuery = useQuery({
   queryFn: api.getResearchProposals,
   refetchInterval: 15_000,
 })
+const commandQuery = useQuery({
+  queryKey: ['research-command-context'],
+  queryFn: api.getCommandCenter,
+  refetchInterval: 15_000,
+})
+const strategiesQuery = useQuery({
+  queryKey: ['strategy-snapshots'],
+  queryFn: api.getStrategies,
+  refetchInterval: 60_000,
+})
 
 const selectedId = ref<string>('')
 const proposals = computed(() => proposalsQuery.data.value ?? [])
-const current = computed(() => proposals.value.find((item) => item.id === selectedId.value) ?? proposals.value[0] ?? null)
+const strategyCatalog = computed(() => strategiesQuery.data.value ?? [])
+const command = computed(() => commandQuery.data.value)
+const universeSelection = computed(() => command.value?.market_snapshot.universe_selection)
+const universeCandidates = computed(() => universeSelection.value?.candidates?.slice(0, 3) ?? [])
+const selectedUniverseCandidate = computed(() =>
+  universeSelection.value?.candidates?.find((candidate) => candidate.symbol === universeSelection.value?.selected_symbol) ?? null,
+)
+const benchmarkUniverseCandidate = computed(() => universeSelection.value?.benchmark_candidate ?? null)
+const orderedProposals = computed(() => {
+  const items = [...proposals.value]
+  return items.sort((left, right) => {
+    const leftMock = left.source_kind === 'mock' ? 1 : 0
+    const rightMock = right.source_kind === 'mock' ? 1 : 0
+    if (leftMock !== rightMock) return leftMock - rightMock
+    return right.final_score - left.final_score
+  })
+})
+const current = computed(() => orderedProposals.value.find((item) => item.id === selectedId.value) ?? orderedProposals.value[0] ?? null)
 const isSampleMode = computed(() => current.value?.source_kind === 'mock')
 const leaderboard = computed(() =>
   [...proposals.value]
@@ -85,10 +112,19 @@ const riskRules = computed<unknown[]>(() => {
   const rules = current.value?.strategy_dsl?.risk_rules
   return Array.isArray(rules) ? rules : []
 })
+const currentMarketProfile = computed<Record<string, unknown>>(() => {
+  const profile = current.value?.evidence_pack?.governance_report?.market_profile
+  return profile && typeof profile === 'object' && !Array.isArray(profile) ? (profile as Record<string, unknown>) : {}
+})
+const currentBaselineStrategy = computed(() => String(strategyParams.value.base_strategy ?? ''))
+const currentBaselineMeta = computed(() => {
+  if (!currentBaselineStrategy.value) return null
+  return strategyCatalog.value.find((item) => item.strategy_name === currentBaselineStrategy.value) ?? null
+})
 
 watchEffect(() => {
-  if (!selectedId.value && proposals.value[0]) {
-    selectedId.value = proposals.value[0].id
+  if (!selectedId.value && orderedProposals.value[0]) {
+    selectedId.value = orderedProposals.value[0].id
   }
 })
 
@@ -141,6 +177,19 @@ function governanceNextStepLabel(value?: string): string {
 
 function lifecycleEtaKindLabel(value?: string): string {
   return displayLabel(t, 'lifecycleEtaKind', value)
+}
+
+function marketBiasLabel(value?: string): string {
+  return displayLabel(t, 'marketBias', value)
+}
+
+function universeReasonTagLabel(value?: string): string {
+  return displayLabel(t, 'universeReasonTag', value)
+}
+
+function formatSignedMetric(value?: number | null, suffix = ''): string {
+  if (value === null || value === undefined) return '--'
+  return `${value > 0 ? '+' : ''}${value}${suffix}`
 }
 
 function formatDateTime(value?: string | null): string {
@@ -339,6 +388,109 @@ function formatDateTime(value?: string | null): string {
           </div>
         </Card>
       </div>
+
+      <Card v-if="current">
+        <h3 class="text-sm font-semibold">{{ t('research.causalView') }}</h3>
+        <div class="mt-3 grid gap-4 text-sm md:grid-cols-3">
+          <div class="rounded-lg border border-slate-200/80 bg-white/60 p-3">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('research.marketLens') }}</p>
+            <p class="mt-2 font-semibold text-slate-900">{{ String(currentMarketProfile.label ?? current.market_scope) }}</p>
+            <p class="mt-1 text-slate-600">{{ String(currentMarketProfile.trading_style ?? t('common.noData')) }}</p>
+            <p class="mt-2 text-slate-500">{{ t('command.marketBenchmark') }}</p>
+            <p class="mt-1 font-semibold text-slate-900">{{ String(currentMarketProfile.benchmark_symbol ?? t('common.noData')) }}</p>
+            <p class="mt-3 text-slate-500">{{ t('command.selectedUniverseSymbol') }}</p>
+            <p class="mt-1 font-semibold text-slate-900">{{ universeSelection?.selected_symbol ?? t('common.noData') }}</p>
+            <p class="mt-2 text-slate-500">{{ t('command.selectionReason') }}</p>
+            <p class="mt-1 text-slate-700">{{ universeSelection?.selection_reason ?? t('common.noData') }}</p>
+            <div v-if="universeSelection?.top_factors?.length" class="mt-2 flex flex-wrap gap-2">
+              <Badge v-for="factor in universeSelection.top_factors" :key="`research-factor-${factor}`" variant="success">
+                {{ universeReasonTagLabel(factor) }}
+              </Badge>
+            </div>
+            <div v-if="selectedUniverseCandidate?.factor_scores" class="mt-3 grid gap-2">
+              <div
+                v-for="(value, key) in selectedUniverseCandidate.factor_scores"
+                :key="`research-selected-factor-${String(key)}`"
+                class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2"
+              >
+                <span class="text-slate-500">{{ humanizeLabel(String(key)) }}</span>
+                <span class="font-semibold text-slate-900">{{ formatSignedMetric(Number(value)) }}</span>
+              </div>
+            </div>
+            <div class="mt-3 grid gap-2">
+              <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2">
+                <span class="text-slate-500">{{ t('command.visibleUniverseCount') }}</span>
+                <span class="font-semibold text-slate-900">{{ universeSelection?.candidate_count ?? universeCandidates.length }}</span>
+              </div>
+              <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2">
+                <span class="text-slate-500">{{ t('command.turnoverThreshold') }}</span>
+                <span class="font-semibold text-slate-900">
+                  {{ universeSelection?.min_turnover_millions !== null && universeSelection?.min_turnover_millions !== undefined ? `${universeSelection.min_turnover_millions}M` : '--' }}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-white/60 p-3">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('research.baselineSelection') }}</p>
+            <p class="mt-2 font-semibold text-slate-900">{{ currentBaselineStrategy || t('common.noData') }}</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <Badge v-for="tag in currentBaselineMeta?.tags ?? []" :key="tag" variant="neutral">{{ tag }}</Badge>
+            </div>
+            <p class="mt-2 text-slate-500">{{ t('command.marketBias') }}</p>
+            <p class="mt-1 font-semibold text-slate-900">{{ marketBiasLabel(currentBaselineMeta?.market_bias) }}</p>
+            <div v-if="universeCandidates.length" class="mt-3 space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('research.universeRanking') }}</p>
+              <div
+                v-for="candidate in universeCandidates"
+                :key="`research-universe-${candidate.symbol}`"
+                class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <p class="font-medium text-slate-900">#{{ candidate.rank ?? '--' }} · {{ candidate.symbol }}</p>
+                  <span class="text-xs text-slate-500">{{ t('command.selectionScore') }}: {{ candidate.score ?? '--' }}</span>
+                </div>
+                <p class="mt-1 text-slate-600">{{ candidate.selection_reason ?? t('common.noData') }}</p>
+                <p class="mt-1 text-xs text-slate-500">
+                  20D: {{ formatSignedMetric(candidate.return_20d_pct, '%') }} · 60D: {{ formatSignedMetric(candidate.return_60d_pct, '%') }} · 20D Vol: {{ formatSignedMetric(candidate.volatility_20d_pct, '%') }}
+                </p>
+              </div>
+            </div>
+            <div v-if="currentMarketProfile.benchmark_symbol" class="mt-3 rounded-lg border border-slate-200/80 bg-slate-50/80 p-3">
+              <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.benchmarkComparison') }}</p>
+              <p class="mt-2 text-slate-700">
+                {{
+                  benchmarkUniverseCandidate
+                    ? t('command.benchmarkGapMessage', {
+                        selected: universeSelection?.selected_symbol ?? '--',
+                        benchmark: String(currentMarketProfile.benchmark_symbol),
+                        gap: universeSelection?.benchmark_gap ?? '--',
+                      })
+                    : t('command.benchmarkNotInView', { benchmark: String(currentMarketProfile.benchmark_symbol) })
+                }}
+              </p>
+            </div>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-white/60 p-3">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('research.gatingOutcome') }}</p>
+            <p class="mt-2 font-semibold text-slate-900">{{ proposalStatusLabel(current.status) }}</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <Badge
+                v-for="reason in current.evidence_pack?.governance_report?.promotion_gate?.blocked_reasons ?? []"
+                :key="`causal-${String(reason)}`"
+                variant="warning"
+              >
+                {{ governanceReasonLabel(String(reason)) }}
+              </Badge>
+            </div>
+            <p
+              v-if="!(current.evidence_pack?.governance_report?.promotion_gate?.blocked_reasons ?? []).length"
+              class="mt-2 text-slate-600"
+            >
+              {{ t('research.noGovernanceBlocks') }}
+            </p>
+          </div>
+        </div>
+      </Card>
 
       <div class="grid gap-4 lg:grid-cols-[1.05fr,0.95fr]">
         <Card v-if="current">

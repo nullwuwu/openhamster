@@ -57,6 +57,9 @@ export interface StrategySnapshot {
   description: string
   enabled: boolean
   default_params: Record<string, unknown>
+  tags: string[]
+  supported_markets: string[]
+  market_bias: string
   updated_at: string
 }
 
@@ -107,6 +110,54 @@ export interface MacroPipelineStatus {
   recovery_count_30d?: number
 }
 
+export interface MarketProfile {
+  market_scope: string
+  label: string
+  timezone: string
+  benchmark_symbol: string
+  trading_style: string
+  structure_notes: string[]
+  preferred_baseline_tags: string[]
+  discouraged_baseline_tags: string[]
+  execution_constraints: string[]
+  governance: Record<string, unknown>
+}
+
+export interface UniverseCandidate {
+  rank?: number | null
+  symbol: string
+  name: string
+  latest_price?: number | null
+  change_pct?: number | null
+  amplitude_pct?: number | null
+  return_20d_pct?: number | null
+  return_60d_pct?: number | null
+  volatility_20d_pct?: number | null
+  turnover_millions?: number | null
+  score?: number | null
+  factor_scores?: Record<string, number>
+  reason_tags?: string[]
+  selection_reason?: string | null
+  source: string
+}
+
+export interface UniverseSelection {
+  mode: string
+  market_scope: string
+  selected_symbol: string
+  source: string
+  generated_at?: string | null
+  selection_reason?: string | null
+  top_factors?: string[]
+  candidate_count?: number
+  top_n_limit?: number | null
+  min_turnover_millions?: number | null
+  benchmark_symbol?: string | null
+  benchmark_gap?: number | null
+  benchmark_candidate?: UniverseCandidate | null
+  candidates: UniverseCandidate[]
+}
+
 export interface MarketSnapshot {
   regime: string
   confidence: number
@@ -115,6 +166,8 @@ export interface MarketSnapshot {
   symbol: string
   price_context: Record<string, unknown>
   event_lane_sources: Record<string, string>
+  market_profile: MarketProfile
+  universe_selection: UniverseSelection
   macro_status: MacroPipelineStatus
   event_digest: DailyEventDigest
   event_stream_preview: EventRecord[]
@@ -128,6 +181,7 @@ export interface DebateReport {
 
 export interface GovernanceReport {
   version?: string
+  market_profile?: Record<string, unknown>
   thresholds?: Record<string, unknown>
   promotion_gate?: {
     eligible?: boolean
@@ -308,10 +362,34 @@ export interface PaperPosition {
   updated_at: string
 }
 
+export interface PaperExecution {
+  status: string
+  executed_at?: string | null
+  reason?: string | null
+  signal?: string | null
+  target_quantity?: number | null
+  current_quantity?: number | null
+  order_side?: string | null
+  order_quantity?: number | null
+  latest_price?: number | null
+  latest_price_as_of?: string | null
+  price_age_hours?: number | null
+  price_changed?: boolean
+  equity_changed?: boolean
+  rebalance_triggered?: boolean
+  explanation_key?: string | null
+  explanation?: string | null
+  cash?: number | null
+  position_value?: number | null
+  total_equity?: number | null
+  message?: string | null
+}
+
 export interface PaperTrading {
   nav: PaperNavPoint[]
   orders: PaperOrder[]
   positions: PaperPosition[]
+  latest_execution?: PaperExecution | null
 }
 
 export interface ActiveStrategy {
@@ -351,6 +429,9 @@ export interface LLMStatus {
 export interface PipelineRuntimeStatus {
   current_state: string
   status_message: string
+  current_stage?: string
+  stage_started_at?: string
+  stage_durations_ms: Record<string, number>
   last_run_at?: string
   last_success_at?: string
   last_failure_at?: string

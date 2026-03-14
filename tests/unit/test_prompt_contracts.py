@@ -18,29 +18,33 @@ from goby_shrimp.prompts import (
 
 def test_market_analyst_prompt_contract() -> None:
     payload = build_market_analyst_payload(
-        symbol="000300.SH",
+        symbol="2800.HK",
         timezone="Asia/Shanghai",
         deterministic_snapshot={"regime": "balanced", "confidence": 0.63},
         event_digest={"macro_summary": "macro"},
+        market_profile={"market_scope": "HK", "label": "Hong Kong"},
     )
 
     assert payload["prompt_version"] == MARKET_ANALYST_PROMPT_VERSION
+    assert payload["market_profile"]["market_scope"] == "HK"
     assert payload["output_schema"]["event_bias"] == "bullish|neutral|defensive"
     assert MARKET_ANALYST_SCHEMA_HINT["summary"] == ""
 
 
 def test_strategy_agent_prompt_contract() -> None:
     payload = build_strategy_agent_payload(
-        symbol="000300.SH",
-        market_scope="CN",
+        symbol="2800.HK",
+        market_scope="HK",
         timezone="Asia/Shanghai",
         market_snapshot={"regime": "defensive"},
+        market_profile={"market_scope": "HK", "preferred_baseline_tags": ["trend"]},
         baseline_strategies=[{"strategy_name": "ma_cross"}],
         hard_limits=["long-only", "no leverage"],
     )
 
     proposal_schema = payload["output_schema"]["proposals"][0]
     assert payload["prompt_version"] == STRATEGY_AGENT_PROMPT_VERSION
+    assert payload["market_profile"]["market_scope"] == "HK"
     assert proposal_schema["base_strategy"].endswith("novel_composite")
     assert isinstance(STRATEGY_AGENT_SCHEMA_HINT["proposals"], list)
 
@@ -49,10 +53,12 @@ def test_research_debate_prompt_contract() -> None:
     payload = build_research_debate_payload(
         proposal={"title": "test"},
         market_snapshot={"regime": "balanced"},
+        market_profile={"market_scope": "HK"},
         event_digest={"macro_summary": "macro"},
     )
 
     assert payload["prompt_version"] == RESEARCH_DEBATE_PROMPT_VERSION
+    assert payload["market_profile"]["market_scope"] == "HK"
     assert payload["output_schema"]["stance_for"] == ["string"]
     assert RESEARCH_DEBATE_SCHEMA_HINT["synthesis"] == ""
 
@@ -63,9 +69,11 @@ def test_risk_manager_prompt_contract() -> None:
         debate_report={"stance_for": [], "stance_against": [], "synthesis": "none"},
         evidence_pack={"bottom_line_report": {"drawdown_ok": True}},
         market_snapshot={"regime": "balanced"},
+        market_profile={"market_scope": "HK"},
         event_digest={"macro_summary": "macro"},
     )
 
     assert payload["prompt_version"] == RISK_MANAGER_LLM_PROMPT_VERSION
+    assert payload["market_profile"]["market_scope"] == "HK"
     assert payload["output_schema"]["llm_score"] == "number between 0 and 100"
     assert RISK_MANAGER_LLM_SCHEMA_HINT["llm_explanation"] == ""

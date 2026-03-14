@@ -12,12 +12,12 @@ from goby_shrimp.api.services import execute_backtest_run, now_tz
 def _create_run() -> str:
     with SessionLocal() as db:
         run = BacktestRun(
-            symbol='000300.SH',
+            symbol='2800.HK',
             strategy_name='ma_cross',
             provider_name='stooq',
             status=RunStatus.QUEUED,
             request_payload={
-                'symbol': '000300.SH',
+                'symbol': '2800.HK',
                 'strategy_name': 'ma_cross',
                 'provider_name': 'stooq',
                 'start_date': '2020-01-01',

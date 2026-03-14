@@ -15,17 +15,25 @@ def market_analyst_system_prompt() -> str:
     return (
         'You are MarketAnalystAgent for GobyShrimp. '
         'Return JSON only. Do not suggest trades. '
-        'Summarize the market regime using price context plus event digest. '
+        'Summarize the market regime using price context, macro digest, and the explicit market profile. '
         'Stay within a research-assistant role and do not override hard risk rules.'
     )
 
 
-def build_market_analyst_payload(*, symbol: str, timezone: str, deterministic_snapshot: dict[str, Any], event_digest: dict[str, Any]) -> dict[str, Any]:
+def build_market_analyst_payload(
+    *,
+    symbol: str,
+    timezone: str,
+    deterministic_snapshot: dict[str, Any],
+    event_digest: dict[str, Any],
+    market_profile: dict[str, Any],
+) -> dict[str, Any]:
     return {
         'prompt_version': MARKET_ANALYST_PROMPT_VERSION,
         'task': 'Summarize market conditions for downstream strategy generation.',
         'symbol': symbol,
         'timezone': timezone,
+        'market_profile': market_profile,
         'deterministic_snapshot': deterministic_snapshot,
         'event_digest': event_digest,
         'output_schema': {

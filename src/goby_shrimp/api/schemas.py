@@ -9,7 +9,7 @@ from .models import EventType, ExperimentKind, ProposalStatus, RiskDecisionActio
 
 
 class BacktestRunCreate(BaseModel):
-    symbol: str = Field(default="000300.SH", min_length=1, max_length=32)
+    symbol: str = Field(default="2800.HK", min_length=1, max_length=32)
     strategy_name: str = Field(default="ma_cross", min_length=1, max_length=64)
     provider_name: str = Field(default="stooq", min_length=1, max_length=64)
     start_date: str = "2020-01-01"
@@ -20,7 +20,7 @@ class BacktestRunCreate(BaseModel):
 
 
 class ExperimentRunCreate(BaseModel):
-    symbol: str = Field(default="000300.SH", min_length=1, max_length=32)
+    symbol: str = Field(default="2800.HK", min_length=1, max_length=32)
     strategy_name: str = Field(default="ma_cross", min_length=1, max_length=64)
     provider_name: str = Field(default="stooq", min_length=1, max_length=64)
     start_date: str = "2020-01-01"
@@ -79,6 +79,9 @@ class StrategySnapshotDTO(BaseModel):
     description: str
     enabled: bool
     default_params: dict[str, Any]
+    tags: list[str] = Field(default_factory=list)
+    supported_markets: list[str] = Field(default_factory=list)
+    market_bias: str = 'balanced'
     updated_at: datetime
 
 
@@ -109,10 +112,34 @@ class PaperPositionDTO(BaseModel):
     updated_at: str
 
 
+class PaperExecutionDTO(BaseModel):
+    status: str
+    executed_at: str | None = None
+    reason: str | None = None
+    signal: str | None = None
+    target_quantity: int | None = None
+    current_quantity: int | None = None
+    order_side: str | None = None
+    order_quantity: int | None = None
+    latest_price: float | None = None
+    latest_price_as_of: str | None = None
+    price_age_hours: float | None = None
+    price_changed: bool = False
+    equity_changed: bool = False
+    rebalance_triggered: bool = False
+    explanation_key: str | None = None
+    explanation: str | None = None
+    cash: float | None = None
+    position_value: float | None = None
+    total_equity: float | None = None
+    message: str | None = None
+
+
 class PaperTradingDTO(BaseModel):
     nav: list[PaperNavPointDTO] = Field(default_factory=list)
     orders: list[PaperOrderDTO] = Field(default_factory=list)
     positions: list[PaperPositionDTO] = Field(default_factory=list)
+    latest_execution: PaperExecutionDTO | None = None
 
 
 class CreatedRunResponse(BaseModel):
@@ -167,6 +194,54 @@ class MacroPipelineStatusDTO(BaseModel):
     recovery_count_30d: int | None = None
 
 
+class MarketProfileDTO(BaseModel):
+    market_scope: str
+    label: str
+    timezone: str
+    benchmark_symbol: str
+    trading_style: str
+    structure_notes: list[str] = Field(default_factory=list)
+    preferred_baseline_tags: list[str] = Field(default_factory=list)
+    discouraged_baseline_tags: list[str] = Field(default_factory=list)
+    execution_constraints: list[str] = Field(default_factory=list)
+    governance: dict[str, Any] = Field(default_factory=dict)
+
+
+class UniverseCandidateDTO(BaseModel):
+    rank: int | None = None
+    symbol: str
+    name: str
+    latest_price: float | None = None
+    change_pct: float | None = None
+    amplitude_pct: float | None = None
+    return_20d_pct: float | None = None
+    return_60d_pct: float | None = None
+    volatility_20d_pct: float | None = None
+    turnover_millions: float | None = None
+    score: float | None = None
+    factor_scores: dict[str, float] = Field(default_factory=dict)
+    reason_tags: list[str] = Field(default_factory=list)
+    selection_reason: str | None = None
+    source: str
+
+
+class UniverseSelectionDTO(BaseModel):
+    mode: str
+    market_scope: str
+    selected_symbol: str
+    source: str
+    generated_at: str | None = None
+    selection_reason: str | None = None
+    top_factors: list[str] = Field(default_factory=list)
+    candidate_count: int = 0
+    top_n_limit: int | None = None
+    min_turnover_millions: float | None = None
+    benchmark_symbol: str | None = None
+    benchmark_gap: float | None = None
+    benchmark_candidate: UniverseCandidateDTO | None = None
+    candidates: list[UniverseCandidateDTO] = Field(default_factory=list)
+
+
 class MarketSnapshotDTO(BaseModel):
     regime: str
     confidence: float
@@ -175,6 +250,8 @@ class MarketSnapshotDTO(BaseModel):
     symbol: str
     price_context: dict[str, Any] = Field(default_factory=dict)
     event_lane_sources: dict[str, str] = Field(default_factory=dict)
+    market_profile: MarketProfileDTO
+    universe_selection: UniverseSelectionDTO
     macro_status: MacroPipelineStatusDTO
     event_digest: DailyEventDigestDTO
     event_stream_preview: list[EventRecordDTO] = Field(default_factory=list)
@@ -280,6 +357,9 @@ class RuntimeLLMUpdate(BaseModel):
 class PipelineRuntimeStatusDTO(BaseModel):
     current_state: str
     status_message: str
+    current_stage: str | None = None
+    stage_started_at: str | None = None
+    stage_durations_ms: dict[str, int] = Field(default_factory=dict)
     last_run_at: str | None = None
     last_success_at: str | None = None
     last_failure_at: str | None = None

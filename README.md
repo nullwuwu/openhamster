@@ -1,36 +1,191 @@
 # GobyShrimp
 
-GobyShrimp is an auditable strategy factory for quantitative research and paper trading. The system is being reshaped around a small agent team: `MarketAnalystAgent`, `StrategyAgent`, `ResearchDebateAgent`, `RiskManagerAgent`, a deterministic `ExecutionAgent`, and an `AuditService` that records every state transition.
+GobyShrimp is an auditable strategy factory for HK market research and paper trading.
+It combines market-aware LLM research, deterministic governance, a paper ledger, and an operator dashboard into one reviewable workflow.
 
-## Current shape
-- Backend package: `src/goby_shrimp`
-- Frontend dashboard: `apps/web`
-- Runtime artifacts: `var/db`, `var/logs`, `var/cache`
-- Database layer: SQLAlchemy 2.0 + Alembic, defaulting to SQLite through `DATABASE_URL`
-- Event layer: macro inputs stored as `EventStream` plus `DailyEventDigest`
+The current delivery is focused on one narrow, defensible path:
+- HK-only market scope
+- dynamic HK universe selection
+- MiniMax as the default live LLM provider
+- macro-only context pipeline
+- local paper trading ledger with audit trail
 
-## Dashboard routes
-- `/command`: command center with active strategy, market snapshot, risk decision, and event digest
-- `/candidates`: candidate ladder and promotion context
-- `/research`: proposal detail, debate report, evidence pack, and strategy DSL
-- `/paper`: paper trading NAV, positions, orders, and current approved strategy
-- `/audit`: risk decisions, audit ledger, daily digests, and event drill-down
+## Why GobyShrimp
 
-## Operational report
-- API: `GET /api/v1/ops/acceptance-report?window_days=30`
-- Local script:
-  - `python scripts/generate_acceptance_report.py`
-  - `python scripts/generate_acceptance_report.py --window-days 30 --format json`
+Most agent trading demos optimize for novelty.
+GobyShrimp optimizes for control.
 
-The acceptance report summarizes:
-- quality track record
+The system is built to answer questions that matter before any real capital path exists:
+- What symbol is the system researching right now, and why?
+- What strategy was proposed, by which provider, under which prompt contract?
+- Why was a proposal rejected, kept as candidate, or promoted to paper?
+- If paper NAV is flat, was that because price did not move, because no rebalance was needed, or because execution stalled?
+- Is the macro pipeline healthy, degraded, or running on last known context?
+
+## Current Product Shape
+
+### Backend
+- FastAPI API under `src/goby_shrimp/api`
+- SQLAlchemy + Alembic for business data
+- dedicated runtime state store for high-frequency status
+- runtime scheduler under `src/goby_shrimp/runtime`
+
+### Frontend
+- Vue 3 dashboard under `apps/web`
+- operator views:
+  - `/command`
+  - `/candidates`
+  - `/research`
+  - `/paper`
+  - `/audit`
+
+### Runtime Artifacts
+- `var/db` for SQLite stores
+- `var/cache` for data cache
+- `var/logs` for local runtime logs
+
+## What It Does Today
+
+### 1. Selects an HK symbol from the market
+GobyShrimp no longer runs on a single hardcoded instrument.
+The current universe mode is `dynamic_hk`.
+
+Selection flow:
+1. load HK spot candidates
+2. filter for valid symbols and minimum turnover
+3. rank by liquidity, momentum, stability, price quality
+4. enrich top candidates with multi-day factors
+5. penalize missing history windows
+6. select the top-ranked symbol as the current research target
+
+The selected symbol, top factors, and ranking rationale are exposed in the dashboard and audit trail.
+
+### 2. Builds a market-aware research context
+The system constructs a `market_snapshot` with:
+- HK market profile
+- selected symbol and universe rationale
+- macro digest
+- regime and volatility context
+- preferred and discouraged strategy tags for the current market
+
+### 3. Generates structured strategy proposals with MiniMax
+The LLM path is routed through a single `LLM Gateway`.
+
+Current runtime providers:
+- `minimax`
+- `mock`
+
+Prompt contracts live under `src/goby_shrimp/prompts`:
+- `market_analyst`
+- `strategy_agent`
+- `research_debate`
+- `risk_manager_llm`
+
+The system does not let the model emit arbitrary executable code.
+It produces structured strategy proposals and governance artifacts instead.
+
+### 4. Applies deterministic governance
+A proposal must clear:
+- hard risk gates
+- score thresholds
+- challenger delta rules
+- cooldown rules
+- macro lane health requirements
+- paper acceptance rules
+
+Governance outputs include:
+- `phase`
+- `next_step`
+- `resume_conditions`
+- promotion ETA
+- blocked reasons
+
+### 5. Runs a local paper ledger
+When a proposal is promoted to paper, GobyShrimp:
+- initializes NAV
+- boots a first paper trade using live market price
+- records orders, positions, and NAV updates locally
+- keeps evaluating the active strategy on each runtime cycle
+
+Important boundary:
+- prices come from live market data providers
+- orders, positions, and NAV are simulated in a local paper ledger
+- this is not broker execution
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A["HK Universe Selection"] --> B["Market Snapshot"]
+    M["Macro Chain\nFRED -> World Bank -> Last Known Context"] --> B
+    B --> C["StrategyAgent\nMiniMax via LLM Gateway"]
+    C --> D["ResearchDebateAgent"]
+    D --> E["Risk Governance"]
+    E -->|"keep_candidate"| F["Candidate Pool"]
+    E -->|"promote_to_paper"| G["Active Strategy"]
+    G --> H["Paper Execution Cycle"]
+    H --> I["Orders / Positions / NAV"]
+    E --> J["Audit Trail"]
+    F --> J
+    G --> J
+    H --> J
+```
+
+## Dashboard Views
+
+### `/command`
+Operator command center for:
+- runtime heartbeat and pipeline stage
+- active strategy and latest execution result
+- current HK universe selection and factor breakdown
+- macro lane health
+- candidate pool distribution
+- baseline strategy catalog
+
+### `/candidates`
+Candidate ladder for:
+- ranking
+- governance phase
+- cooldown state
+- promotion eligibility
+- pool comparison
+
+### `/research`
+Proposal review view for:
+- market understanding
+- universe selection rationale
+- baseline fit
+- strategy DSL
+- debate report
+- evidence pack
+- quality report
+- promotion blockers
+
+### `/paper`
+Paper trading view for:
+- NAV curve
+- positions
+- orders
+- active strategy
 - operational acceptance
-- macro pipeline health
-- governance phase, next step, and resume conditions
+- latest execution explanation
+- price freshness and rebalance reason
 
-## Runtime status
-The command center now exposes pipeline heartbeat fields so the dashboard can show whether the system is still running as expected:
+### `/audit`
+Audit ledger for:
+- decision timeline
+- universe selection events
+- macro degradation / recovery
+- provider fallback events
+- governance cause chain
+
+## Runtime Status
+
+The command center exposes runtime heartbeat fields so operators can see whether the system is actively progressing:
 - `current_state`
+- `current_stage`
+- `stage_started_at`
+- `stage_durations_ms`
 - `last_run_at`
 - `last_success_at`
 - `last_failure_at`
@@ -38,79 +193,138 @@ The command center now exposes pipeline heartbeat fields so the dashboard can sh
 - `expected_next_run_at`
 - `last_trigger`
 
-The dashboard also exposes governance ETA fields so you can see when a candidate may be eligible to challenge the active strategy:
-- `eta_kind`
-- `estimated_next_eligible_at`
+The pipeline currently reports stage-level progress across:
+- event sync
+- digest sync
+- market snapshot build
+- market analyst
+- strategy generation
+- decision materialization
+- paper execution
 
-Supported ETA modes:
-- `next_sync_window`
-- `cooldown_window`
-- `quality_revalidation`
-- `review_pending`
+## Market and Data Scope
 
-The periodic scheduler is now a dedicated runtime module instead of inline app glue:
-- `src/goby_shrimp/runtime/scheduler.py`
+### Current market scope
+- HK-only
+- default benchmark context anchored to HK market profile
+- dynamic universe selection instead of a fixed symbol list
 
-You can also trigger research manually:
-- API: `POST /api/v1/runtime/sync`
-- Dashboard: `Run Now`
+### Price data routing
+HK price data currently routes through:
+- `tencent`
+- `akshare`
+- `yfinance`
+- `stooq`
 
-## Quick start
+### Macro data routing
+Macro context currently routes through:
+- `FRED`
+- `World Bank`
+- last known context fallback
+
+### What is intentionally excluded
+- news and announcement pipelines
+- real broker execution
+- multi-market live trading
+- automatic production trading
+
+## Quick Start
+
+### Backend
 ```bash
 pip install -e .[dev]
 alembic upgrade head
 gobyshrimp-api
+```
+
+### Frontend
+```bash
 npm install --prefix apps/web
 npm run dev --prefix apps/web
 ```
 
+Default local endpoints:
+- Frontend: `http://127.0.0.1:5173`
+- Backend: `http://127.0.0.1:8000`
+
 ## Configuration
-Configuration is loaded in a fixed precedence order:
-`defaults < config/base.yaml < config/local.yaml < .env < .env.local < environment variables`
 
-Source tracking remains available through `goby_shrimp.config.get_setting_source`.
-For local secrets, copy [`.env.example`](/Users/a1/.openclaw/workspace/projects/quant-trader/.env.example) to `.env.local`.
-The active repository config files are documented in [`config/README.md`](/Users/a1/.openclaw/workspace/projects/quant-trader/config/README.md).
+Configuration precedence:
 
-## Event input status
-This iteration now runs a macro-only event pipeline:
-- `FRED -> World Bank -> last known context` for the macro lane
+```text
+defaults < config/base.yaml < config/local.yaml < .env < .env.local < environment variables
+```
 
-The macro lane feeds `EventStream`, `DailyEventDigest`, `MarketSnapshot`, and the LLM soft-score context. If upstream providers fail, GobyShrimp keeps running, surfaces macro reliability state in the command center, and can reuse the last known macro context as a controlled fallback.
-
-## LLM integration
-MiniMax is now the default real LLM provider in configuration, behind the `LLM Gateway`.
-
-Required env var:
+Recommended local secrets in `.env.local`:
 - `MINIMAX_API_KEY`
+- `FRED_API_KEY`
 
-Useful overrides:
+Useful runtime-related environment overrides:
 - `LLM_PROVIDER=minimax`
 - `LLM_MODEL=MiniMax-M2.5`
 - `LLM_TEMPERATURE=0.3`
-- `FRED_API_KEY=...`
+- `DATABASE_URL=sqlite:///var/db/gobyshrimp.db`
 
-The dashboard can switch the runtime provider between `minimax` and `mock`. If the key is missing or the provider call fails, GobyShrimp records the fallback and drops to `mock`.
+Reference files:
+- `config/base.yaml`
+- `config/local.yaml`
+- `.env.example`
+- `docs/configuration.md`
 
-## Agent prompting
-Prompt contracts now live under [`src/goby_shrimp/prompts`](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts):
-- `market_analyst`
-- `strategy_agent`
-- `research_debate`
-- `risk_manager_llm`
+## Manual Operations
 
-Each prompt module owns its `system_prompt`, payload builder, schema hint, and `prompt_version`. Business code no longer hardcodes prompt text in the API service layer.
+### Trigger research immediately
+- API: `POST /api/v1/runtime/sync`
+- Dashboard: `Run Now`
 
-## Strategy plugins
-Built-in baseline strategies are now declared as plugins under [`src/goby_shrimp/strategy/plugins.py`](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/strategy/plugins.py). The registry and prompt layer both read from the same plugin catalog, so adding a new baseline no longer requires editing the factory and prompt contract separately.
+### Runtime LLM status
+- API: `GET /api/v1/runtime/llm`
 
-## Database migration path
-SQLite stays as the default delivery path for speed. PostgreSQL migration remains straightforward because the project already uses:
-- `DATABASE_URL`
-- SQLAlchemy ORM
-- Alembic schema management
+### Acceptance report
+- API: `GET /api/v1/ops/acceptance-report?window_days=30`
+- Script:
+  - `python scripts/generate_acceptance_report.py`
+  - `python scripts/generate_acceptance_report.py --window-days 30 --format json`
 
-A future export/import path can be built on top of `scripts/sqlite_to_postgres.py`.
+## Validation Baseline
+
+Current local baseline:
+- `pytest tests -q` -> `122 passed, 8 skipped`
+- `npm run build --prefix apps/web` -> passed
+
+## Release Status
+
+Current implementation status:
+- engineering refactor: `92%`
+- product readiness: `98%`
+- auditable strategy factory target: `94%`
+
+What is already true:
+- HK-only market-aware research path is active
+- MiniMax live path is integrated
+- runtime scheduler is real, not fake status only
+- paper ledger records orders, positions, and NAV
+- governance, ETA, and audit trail are visible in the dashboard
+
+What still needs time, not a redesign:
+- longer live operating history
+- thicker long-horizon quality statistics
+- more mature provider health history
+
+## Project Layout
+
+```text
+apps/web/                 Vue dashboard
+config/                   tracked system config
+src/goby_shrimp/api/      FastAPI app, DTOs, services
+src/goby_shrimp/data/     market data providers and universe logic
+src/goby_shrimp/events/   macro provider chain
+src/goby_shrimp/prompts/  agent prompt contracts
+src/goby_shrimp/risk/     risk models and review helpers
+src/goby_shrimp/runtime/  scheduler and runtime control
+src/goby_shrimp/strategy/ strategy registry and plugins
+var/db/                   local business DB + runtime state DB
+```
 
 ## Documentation
 - `docs/ARCHITECTURE.md`
@@ -120,6 +334,21 @@ A future export/import path can be built on top of `scripts/sqlite_to_postgres.p
 - `docs/configuration.md`
 - `docs/RUNBOOK.md`
 
-## Current validation baseline
-- `pytest tests -q` -> `122 passed, 8 skipped`
-- `npm run build --prefix apps/web` -> passed
+## Known Limits
+- SQLite is still the delivery default, not the final operating database
+- paper execution is simulated, not routed to a broker
+- macro context is intentionally narrow and excludes news and announcements
+- long-horizon validation still depends on accumulating more live runtime history
+
+## Roadmap
+
+### Near term
+- accumulate longer operating history
+- improve long-horizon quality statistics
+- harden provider health history and recovery semantics
+- continue tightening paper execution explanations and audit drill-down
+
+### Later
+- PostgreSQL migration when operating load justifies it
+- richer market-aware strategy catalog
+- stronger runtime operations history and reporting

@@ -7,3 +7,5 @@
 - `configuration.md`：配置分层、来源、覆盖规则
 - `CONFIG_BOUNDARIES.md`：哪些进 `.env`、哪些进 YAML、哪些进 runtime、哪些根本不是配置
 - `RUNBOOK.md`：本地启动、故障语义、runtime 切换和日常排障
+- `RELEASE_CHECKLIST.md`：发布前检查清单
+- `releases/v0.1.0.md`：`v0.1.0` 发布说明草稿

@@ -141,12 +141,24 @@ class DataSourceManager:
         return self.cache.fetch_or_load(symbol=symbol, start=start, end=end_date, loader=loader)
 
     def fetch_latest_price(self, ticker: str) -> Optional[float]:
+        quote = self.fetch_latest_quote(ticker)
+        if quote is None:
+            return None
+        return float(quote["price"])
+
+    def fetch_latest_quote(self, ticker: str) -> Optional[dict[str, object]]:
         now = datetime.now()
         start = (now - timedelta(days=10)).strftime("%Y-%m-%d")
         end = now.strftime("%Y-%m-%d")
         df = self.fetch_ohlcv(ticker, start, end)
         if df is not None and not df.empty:
-            return float(df.iloc[-1]["close"])
+            last_row = df.iloc[-1]
+            last_index = df.index[-1]
+            as_of = last_index.to_pydatetime().isoformat() if hasattr(last_index, "to_pydatetime") else str(last_index)
+            return {
+                "price": float(last_row["close"]),
+                "as_of": as_of,
+            }
         return None
 
     fetchLatestPrice = fetch_latest_price

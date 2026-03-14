@@ -95,7 +95,7 @@ def test_worldbank_macro_provider_normalizes_events(monkeypatch) -> None:
 
 def test_chained_macro_provider_uses_secondary_when_primary_fails(monkeypatch) -> None:
     class _FailingFRED(FREDMacroProvider):
-        def fetch(self, now: datetime, symbol_scope: str = '000300.SH', market_scope: str = 'CN'):
+        def fetch(self, now: datetime, symbol_scope: str = '2800.HK', market_scope: str = 'HK'):
             raise RuntimeError("fred down")
 
     monkeypatch.setattr("goby_shrimp.events.providers.httpx.Client", _FakeClient)

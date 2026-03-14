@@ -27,6 +27,7 @@ const active = computed(() => activeStrategyQuery.data.value)
 const navRows = computed(() => active.value?.paper_trading.nav ?? [])
 const orders = computed(() => active.value?.paper_trading.orders ?? [])
 const positions = computed(() => active.value?.paper_trading.positions ?? [])
+const latestExecution = computed(() => active.value?.paper_trading.latest_execution ?? null)
 const latestDecision = computed(() => active.value?.latest_decision ?? null)
 const governanceReport = computed(
   () => latestDecision.value?.evidence_pack?.governance_report ?? null,
@@ -66,6 +67,13 @@ const sortedPositions = computed(() =>
 )
 const sortedOrders = computed(() =>
   [...orders.value].sort((left, right) => right.created_at.localeCompare(left.created_at)),
+)
+const awaitingFirstSnapshot = computed(() =>
+  !!active.value?.proposal
+  && active.value.proposal.status === 'active'
+  && sortedNavRows.value.length === 0
+  && sortedOrders.value.length === 0
+  && sortedPositions.value.length === 0,
 )
 
 const latestNav = computed(() => {
@@ -122,6 +130,9 @@ const rollbackThreshold = computed(() => {
   const value = activeHealth.value.rollback_threshold
   return typeof value === 'number' ? value : null
 })
+const rebalanceTriggered = computed(() => (latestExecution.value?.order_quantity ?? 0) > 0)
+const priceChanged = computed(() => latestExecution.value?.price_changed ?? false)
+const equityChanged = computed(() => latestExecution.value?.equity_changed ?? false)
 
 const executionPosture = computed(() => {
   const action = latestDecision.value?.action
@@ -231,12 +242,31 @@ function riskActionLabel(action?: string): string {
   return displayLabel(t, 'riskAction', action)
 }
 
-function orderSideLabel(side?: string): string {
+function orderSideLabel(side?: string | null): string {
   return displayLabel(t, 'orderSide', side?.toLowerCase())
 }
 
 function orderStatusLabel(status?: string): string {
   return displayLabel(t, 'orderStatus', status?.toLowerCase())
+}
+
+function paperExecutionStatusLabel(status?: string): string {
+  return status === 'executed' ? t('paper.executionRecorded') : status === 'skipped' ? t('paper.executionSkipped') : '--'
+}
+
+function signalLabel(signal?: string | null): string {
+  if (!signal) return '--'
+  return signal
+}
+
+function booleanStatusLabel(value?: boolean): string {
+  if (value === undefined || value === null) return '--'
+  return value ? t('common.yes') : t('common.no')
+}
+
+function formatHours(value?: number | null): string {
+  if (value === null || value === undefined) return '--'
+  return `${value.toFixed(1)}h`
 }
 
 function governanceReasonLabel(reason?: string): string {
@@ -286,6 +316,7 @@ function actionVariant(action?: string): 'neutral' | 'success' | 'warning' | 'da
             <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.activeStrategy') }}</p>
             <h3 class="mt-2 text-2xl font-semibold text-slate-900">{{ active?.proposal?.title ?? '--' }}</h3>
             <p class="mt-2 text-sm text-slate-600">{{ active?.proposal?.thesis ?? t('common.noData') }}</p>
+            <p v-if="awaitingFirstSnapshot" class="mt-3 text-sm text-amber-700">{{ t('paper.awaitingFirstSnapshot') }}</p>
           </div>
           <Badge variant="success">{{ proposalStatusLabel(active?.proposal?.status) }}</Badge>
         </div>
@@ -349,6 +380,55 @@ function actionVariant(action?: string): 'neutral' | 'success' | 'warning' | 'da
     </div>
 
     <div class="grid gap-4 xl:grid-cols-2">
+      <Card>
+        <h3 class="text-sm font-semibold">{{ t('paper.latestExecution') }}</h3>
+        <div class="mt-3 grid gap-3 sm:grid-cols-2">
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.executionStatus') }}</p>
+            <p class="mt-2 text-lg font-semibold text-slate-900">{{ paperExecutionStatusLabel(latestExecution?.status) }}</p>
+            <p class="mt-2 text-sm text-slate-600">{{ formatDateTime(latestExecution?.executed_at) }}</p>
+          </div>
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.signal') }}</p>
+            <p class="mt-2 text-lg font-semibold text-slate-900">{{ signalLabel(latestExecution?.signal) }}</p>
+            <p class="mt-2 text-sm text-slate-600">
+              {{ t('paper.targetQuantity') }}: {{ latestExecution?.target_quantity ?? '--' }}
+            </p>
+          </div>
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.rebalanceAction') }}</p>
+            <p class="mt-2 text-lg font-semibold text-slate-900">
+              {{ rebalanceTriggered ? orderSideLabel(latestExecution?.order_side) : t('paper.noRebalance') }}
+            </p>
+            <p class="mt-2 text-sm text-slate-600">
+              {{ t('paper.orderQuantity') }}: {{ latestExecution?.order_quantity ?? 0 }}
+            </p>
+          </div>
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.executionPrice') }}</p>
+            <p class="mt-2 text-lg font-semibold text-slate-900">{{ formatCurrency(latestExecution?.latest_price) }}</p>
+            <p class="mt-2 text-sm text-slate-600">
+              {{ t('paper.currentQuantity') }}: {{ latestExecution?.current_quantity ?? '--' }}
+            </p>
+            <p class="mt-2 text-sm text-slate-600">
+              {{ t('paper.priceAsOf') }}: {{ formatDateTime(latestExecution?.latest_price_as_of) }}
+            </p>
+            <p class="mt-2 text-sm text-slate-600">
+              {{ t('paper.priceFreshness') }}: {{ formatHours(latestExecution?.price_age_hours) }}
+            </p>
+          </div>
+        </div>
+        <div class="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+          <p class="font-medium text-slate-900">{{ t('paper.executionExplanation') }}</p>
+          <p class="mt-2">{{ latestExecution?.explanation ?? t('common.noData') }}</p>
+          <div class="mt-3 grid gap-2 sm:grid-cols-3">
+            <p>{{ t('paper.priceChanged') }}: <span class="font-semibold text-slate-900">{{ booleanStatusLabel(priceChanged) }}</span></p>
+            <p>{{ t('paper.equityMoved') }}: <span class="font-semibold text-slate-900">{{ booleanStatusLabel(equityChanged) }}</span></p>
+            <p>{{ t('paper.rebalanceTriggered') }}: <span class="font-semibold text-slate-900">{{ booleanStatusLabel(latestExecution?.rebalance_triggered) }}</span></p>
+          </div>
+        </div>
+      </Card>
+
       <Card>
         <h3 class="text-sm font-semibold">{{ t('paper.executionHealth') }}</h3>
         <div class="mt-3 grid gap-3 sm:grid-cols-2">

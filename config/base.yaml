@@ -20,6 +20,9 @@ storage:
   # [Source 来源] base.yaml, can be overridden by env PAPER_DB_PATH
   # [Purpose 用途] legacy-compatible paper snapshot database path still read by the dashboard
   paper_db_path: var/db/paper_trading.db
+  # [Source 来源] base.yaml, can be overridden by env RUNTIME_STATE_DB_PATH
+  # [Purpose 用途] high-frequency runtime state store for heartbeat, llm status, and universe selection
+  runtime_state_db_path: var/db/runtime_state.db
   # [Source 来源] base.yaml, can be overridden by env MARKET_CACHE_PATH
   # [Purpose 用途] local market data cache sqlite file
   market_cache_path: var/cache/market_data_cache.db
@@ -70,26 +73,25 @@ strategy:
 # [Source 来源] repository default
 # [Purpose 用途] stock universe selection policy
 universe:
-  mode: dynamic_cn
+  mode: dynamic_hk
   top_n: 20
   min_list_days: 120
   exclude_st: true
   include_gem: true
+  min_turnover_millions: 200.0
 
 # [Source 来源] repository default
 # [Purpose 用途] execution safety boundaries for the B-level autonomy model
 execution_rules:
   allow_short: false
   cn_lot_size: 100
-  cn_t_plus_one: true
+  cn_t_plus_one: false
 
 # [Source 来源] repository default
 # [Purpose 用途] fallback static portfolio used when dynamic universe is unavailable
 portfolio:
   symbols:
-    - "000300.SH"
-    - "510300.SH"
-    - "159915.SZ"
+    - "2800.HK"
   default_capital: 1000000
 
 # [Source 来源] repository default

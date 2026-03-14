@@ -43,6 +43,13 @@
   - `deterministic evidence merge`
   - `risk decision`
   - `candidate / active materialization`
+- 系统已进入 HK-only 市场主线，并具备市场感知型研究骨架：
+  - `market_profile` 已进入 `MarketSnapshot`
+  - prompt 链已显式消费 HK 市场画像、偏好 baseline 标签与执行约束
+  - baseline 策略目录已带 `supported_markets / market_bias / tags`
+  - governance 阈值已按市场画像取值，不再完全共用统一阈值
+  - universe 已升级为 `dynamic_hk`，会按 HK 全市场候选的流动性、动量、波动约束和价格质量做排序
+  - universe selection 会保留 `selection_reason / top_factors`，并进入审计历史
 - 风控治理已进入 `v1.5`：
   - 晋级阈值
   - 挑战最小优势
@@ -91,6 +98,9 @@
   - 当前覆盖质量、运营、宏观、治理四个视角
 - dashboard 已可观察持续运行状态：
   - `runtime_status.current_state`
+  - `runtime_status.current_stage`
+  - `runtime_status.stage_started_at`
+  - `runtime_status.stage_durations_ms`
   - `last_run_at / last_success_at / last_failure_at`
   - `consecutive_failures`
   - `expected_next_run_at`

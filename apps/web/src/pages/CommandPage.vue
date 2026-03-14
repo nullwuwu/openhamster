@@ -49,10 +49,17 @@ const llmStatus = computed(() => command.value?.llm_status)
 const runtimeStatus = computed(() => command.value?.runtime_status)
 const eventLaneSources = computed(() => command.value?.market_snapshot.event_lane_sources ?? {})
 const macroStatus = computed(() => command.value?.market_snapshot.macro_status)
+const marketProfile = computed(() => command.value?.market_snapshot.market_profile)
+const universeSelection = computed(() => command.value?.market_snapshot.universe_selection)
+const selectedUniverseCandidate = computed(() =>
+  universeSelection.value?.candidates?.find((candidate) => candidate.symbol === universeSelection.value?.selected_symbol) ?? null,
+)
+const benchmarkUniverseCandidate = computed(() => universeSelection.value?.benchmark_candidate ?? null)
 const operationalAcceptance = computed(
   () => (command.value?.active_strategy.operational_acceptance as Record<string, unknown> | undefined) ?? {},
 )
 const activeProposal = computed(() => command.value?.active_strategy.proposal ?? null)
+const latestPaperExecution = computed(() => command.value?.active_strategy.paper_trading.latest_execution ?? null)
 const previousVisibleActive = ref<typeof activeProposal.value | null>(null)
 const previousVisibleCandidates = ref<typeof candidates.value>([])
 
@@ -114,12 +121,14 @@ const candidateSummary = computed(() => {
   return summary
 })
 const topCandidates = computed(() => visibleCandidates.value.slice(0, 3))
+const topUniverseCandidates = computed(() => universeSelection.value?.candidates?.slice(0, 5) ?? [])
 const visibleCandidateCount = computed(() => Math.max(command.value?.candidate_count ?? 0, visibleCandidates.value.length))
 const isSampleMode = computed(() => {
-  const sourceKind = command.value?.active_strategy.proposal?.source_kind
+  if (!commandQuery.isSuccess.value || !command.value) return false
+  const sourceKind = visibleActiveProposal.value?.source_kind ?? command.value?.active_strategy.proposal?.source_kind
   const laneValues = Object.values(eventLaneSources.value)
   const degradedLanes = laneValues.some((value) => value === 'unavailable' || value.startsWith('demo_'))
-  return !sourceKind || sourceKind === 'mock' || degradedLanes || !!llmStatus.value?.using_mock_fallback
+  return sourceKind === 'mock' || degradedLanes || !!llmStatus.value?.using_mock_fallback || llmStatus.value?.provider === 'mock'
 })
 
 const switchProviderMutation = useMutation({
@@ -217,12 +226,25 @@ function laneLabel(lane?: string): string {
   return displayLabel(t, 'eventLane', lane)
 }
 
+function universeReasonTagLabel(tag?: string): string {
+  return displayLabel(t, 'universeReasonTag', tag)
+}
+
+function formatSignedMetric(value?: number | null, suffix = ''): string {
+  if (value === null || value === undefined) return '--'
+  return `${value > 0 ? '+' : ''}${value}${suffix}`
+}
+
 function proposalStatusLabel(status?: string): string {
   return displayLabel(t, 'proposalStatus', status)
 }
 
 function sourceKindLabel(sourceKind?: string): string {
   return displayLabel(t, 'sourceKind', sourceKind)
+}
+
+function orderSideLabel(side?: string | null): string {
+  return displayLabel(t, 'orderSide', side?.toLowerCase())
 }
 
 function boolLabel(value?: boolean): string {
@@ -253,8 +275,31 @@ function runtimeStateLabel(value?: string): string {
   return displayLabel(t, 'runtimeState', value)
 }
 
+function pipelineStageLabel(value?: string): string {
+  return displayLabel(t, 'pipelineStage', value)
+}
+
+function paperExecutionStatusLabel(status?: string): string {
+  return status === 'executed' ? t('paper.executionRecorded') : status === 'skipped' ? t('paper.executionSkipped') : '--'
+}
+
+function yesNoLabel(value?: boolean): string {
+  if (value === undefined || value === null) return '--'
+  return value ? t('common.yes') : t('common.no')
+}
+
 function governancePhaseLabel(value?: string): string {
   return displayLabel(t, 'governancePhase', value)
+}
+
+function marketBiasLabel(value?: string): string {
+  return displayLabel(t, 'marketBias', value)
+}
+
+function formatDurationMs(value?: number): string {
+  if (value === undefined || value === null) return '--'
+  if (value < 1000) return `${value} ms`
+  return `${(value / 1000).toFixed(1)} s`
 }
 
 function governanceNextStepLabel(value?: string): string {
@@ -280,6 +325,11 @@ function formatDateTime(value?: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(parsed)
+}
+
+function formatHours(value?: number | null): string {
+  if (value === null || value === undefined) return '--'
+  return `${value.toFixed(1)}h`
 }
 
 function formatMetricLabel(key: string): string {
@@ -330,6 +380,16 @@ function formatMetricLabel(key: string): string {
           </Badge>
         </div>
         <p class="mt-2 text-sm text-slate-600">{{ runtimeStatus?.status_message ?? t('common.noData') }}</p>
+        <div class="mt-3 grid gap-2 text-sm">
+          <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/60 px-3 py-2">
+            <span class="text-slate-500">{{ t('command.currentStage') }}</span>
+            <span class="font-semibold text-slate-900">{{ pipelineStageLabel(runtimeStatus?.current_stage) }}</span>
+          </div>
+          <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/60 px-3 py-2">
+            <span class="text-slate-500">{{ t('command.stageStartedAt') }}</span>
+            <span class="font-semibold text-slate-900">{{ runtimeStatus?.stage_started_at ?? '--' }}</span>
+          </div>
+        </div>
       </Card>
       <Card>
         <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.lastRunAt') }}</p>
@@ -356,6 +416,9 @@ function formatMetricLabel(key: string): string {
             </Badge>
           </div>
           <p class="mt-1 text-sm text-slate-600">{{ runtimeStatus?.expected_next_run_at ?? t('common.noData') }}</p>
+          <p class="mt-2 text-sm text-slate-600">
+            {{ t('command.currentStage') }}: {{ pipelineStageLabel(runtimeStatus?.current_stage) }}
+          </p>
         </div>
 
         <div>
@@ -404,6 +467,19 @@ function formatMetricLabel(key: string): string {
           </p>
         </div>
       </div>
+      <div
+        v-if="runtimeStatus?.stage_durations_ms && Object.keys(runtimeStatus.stage_durations_ms).length"
+        class="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4"
+      >
+        <div
+          v-for="(value, key) in runtimeStatus.stage_durations_ms"
+          :key="key"
+          class="rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-2"
+        >
+          <p class="text-slate-500">{{ pipelineStageLabel(String(key)) }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ formatDurationMs(Number(value)) }}</p>
+        </div>
+      </div>
     </Card>
 
     <div class="grid gap-4 xl:grid-cols-[1.45fr,1fr]">
@@ -437,6 +513,144 @@ function formatMetricLabel(key: string): string {
               </div>
               <span v-if="signalContext.length === 0" class="text-sm text-slate-500">{{ t('common.noData') }}</span>
             </div>
+          </div>
+        </div>
+        <div class="grid gap-3 rounded-xl border border-slate-200/80 bg-slate-50/80 p-4 lg:grid-cols-2">
+          <div>
+            <h3 class="text-sm font-semibold">{{ t('command.marketProfile') }}</h3>
+            <p class="mt-1 text-sm text-slate-600">{{ marketProfile?.label ?? t('common.noData') }}</p>
+            <p class="mt-2 text-xs text-slate-500">
+              {{ t('command.marketBenchmark') }}: {{ marketProfile?.benchmark_symbol ?? '--' }}
+            </p>
+            <p class="mt-1 text-xs text-slate-500">
+              {{ t('command.marketTradingStyle') }}: {{ marketProfile?.trading_style ?? '--' }}
+            </p>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{{ t('command.preferredBaselineTags') }}</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <Badge v-for="tag in marketProfile?.preferred_baseline_tags ?? []" :key="`preferred-${tag}`" variant="success">{{ tag }}</Badge>
+                <span v-if="!(marketProfile?.preferred_baseline_tags?.length)" class="text-sm text-slate-500">{{ t('common.noData') }}</span>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{{ t('command.discouragedBaselineTags') }}</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <Badge v-for="tag in marketProfile?.discouraged_baseline_tags ?? []" :key="`discouraged-${tag}`" variant="warning">{{ tag }}</Badge>
+                <span v-if="!(marketProfile?.discouraged_baseline_tags?.length)" class="text-sm text-slate-500">{{ t('common.noData') }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="rounded-xl border border-slate-200/80 bg-slate-50/80 p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-semibold">{{ t('command.universeSelection') }}</h3>
+              <p class="mt-1 text-sm text-slate-600">
+                {{ t('command.selectedUniverseSymbol') }}: {{ universeSelection?.selected_symbol ?? command?.market_snapshot.symbol ?? '--' }}
+              </p>
+              <p class="mt-1 text-xs text-slate-500">
+                {{ t('command.selectionReason') }}: {{ universeSelection?.selection_reason ?? t('common.noData') }}
+              </p>
+            </div>
+            <Badge variant="info">{{ humanizeLabel(universeSelection?.mode) }}</Badge>
+          </div>
+          <div v-if="universeSelection?.top_factors?.length" class="mt-3 flex flex-wrap gap-2">
+            <Badge v-for="factor in universeSelection.top_factors" :key="`factor-${factor}`" variant="success">
+              {{ universeReasonTagLabel(factor) }}
+            </Badge>
+          </div>
+          <div v-if="selectedUniverseCandidate?.factor_scores" class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+            <div
+              v-for="(value, key) in selectedUniverseCandidate.factor_scores"
+              :key="`selected-factor-${String(key)}`"
+              class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2"
+            >
+              <span class="text-slate-500">{{ humanizeLabel(String(key)) }}</span>
+              <span class="font-semibold text-slate-900">{{ formatSignedMetric(Number(value)) }}</span>
+            </div>
+          </div>
+          <div class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('command.visibleUniverseCount') }}</span>
+              <span class="font-semibold text-slate-900">{{ universeSelection?.candidate_count ?? topUniverseCandidates.length }}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('command.turnoverThreshold') }}</span>
+              <span class="font-semibold text-slate-900">
+                {{ universeSelection?.min_turnover_millions !== null && universeSelection?.min_turnover_millions !== undefined ? `${universeSelection.min_turnover_millions}M` : '--' }}
+              </span>
+            </div>
+          </div>
+          <div v-if="marketProfile?.benchmark_symbol" class="mt-3 rounded-lg border border-slate-200/80 bg-white/70 p-3 text-sm">
+            <div class="flex items-center justify-between gap-3">
+              <p class="font-medium text-slate-900">{{ t('command.benchmarkComparison') }}</p>
+              <Badge variant="neutral">{{ marketProfile.benchmark_symbol }}</Badge>
+            </div>
+            <p class="mt-2 text-slate-600">
+              {{
+                benchmarkUniverseCandidate
+                  ? t('command.benchmarkGapMessage', {
+                      selected: universeSelection?.selected_symbol ?? '--',
+                      benchmark: marketProfile.benchmark_symbol,
+                      gap: universeSelection?.benchmark_gap ?? '--',
+                    })
+                  : t('command.benchmarkNotInView', { benchmark: marketProfile.benchmark_symbol })
+              }}
+            </p>
+            <div v-if="benchmarkUniverseCandidate" class="mt-2 grid gap-2 sm:grid-cols-2">
+              <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2">
+                <p class="text-slate-500">{{ t('command.selectionScore') }}</p>
+                <p class="mt-1 font-semibold text-slate-900">{{ benchmarkUniverseCandidate.score ?? '--' }}</p>
+              </div>
+              <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2">
+                <p class="text-slate-500">{{ t('command.selectionReason') }}</p>
+                <p class="mt-1 text-slate-700">{{ benchmarkUniverseCandidate.selection_reason ?? t('common.noData') }}</p>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 grid gap-2">
+            <div
+              v-for="candidate in topUniverseCandidates"
+              :key="candidate.symbol"
+              class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2 text-sm"
+            >
+              <div>
+                <p class="font-medium text-slate-900">
+                  #{{ candidate.rank ?? '--' }} · {{ candidate.symbol }} · {{ candidate.name }}
+                </p>
+                <p class="text-xs text-slate-500">
+                  {{ t('command.turnoverMillions') }}: {{ candidate.turnover_millions ?? '--' }}
+                </p>
+                <p class="mt-1 text-xs text-slate-500">
+                  {{ t('command.selectionReason') }}: {{ candidate.selection_reason ?? t('common.noData') }}
+                </p>
+                <p class="mt-1 text-xs text-slate-500">
+                  20D: {{ formatSignedMetric(candidate.return_20d_pct, '%') }} · 60D: {{ formatSignedMetric(candidate.return_60d_pct, '%') }}
+                </p>
+                <div v-if="candidate.reason_tags?.length" class="mt-2 flex flex-wrap gap-1">
+                  <Badge
+                    v-for="tag in candidate.reason_tags"
+                    :key="`${candidate.symbol}-${tag}`"
+                    variant="neutral"
+                  >
+                    {{ universeReasonTagLabel(tag) }}
+                  </Badge>
+                </div>
+              </div>
+              <div class="text-right">
+                <p class="font-semibold text-slate-900">{{ candidate.change_pct !== null && candidate.change_pct !== undefined ? `${candidate.change_pct}%` : '--' }}</p>
+                <p class="text-xs text-slate-500">{{ t('command.selectionScore') }}: {{ candidate.score ?? '--' }}</p>
+                <p class="text-xs text-slate-500">
+                  {{ t('command.selectionAmplitude') }}: {{ candidate.amplitude_pct !== null && candidate.amplitude_pct !== undefined ? `${candidate.amplitude_pct}%` : '--' }}
+                </p>
+                <p class="text-xs text-slate-500">
+                  20D Vol: {{ candidate.volatility_20d_pct !== null && candidate.volatility_20d_pct !== undefined ? `${candidate.volatility_20d_pct}%` : '--' }}
+                </p>
+              </div>
+            </div>
+            <span v-if="topUniverseCandidates.length === 0" class="text-sm text-slate-500">{{ t('common.noData') }}</span>
           </div>
         </div>
       </Card>
@@ -583,6 +797,48 @@ function formatMetricLabel(key: string): string {
               {{ t('command.candidatePreviewEmpty') }}
             </p>
           </div>
+        </div>
+        <div v-if="latestPaperExecution">
+          <h3 class="text-sm font-semibold">{{ t('command.paperExecution') }}</h3>
+          <div class="mt-3 grid gap-2 text-sm">
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('paper.executionStatus') }}</span>
+              <span class="font-semibold text-slate-900">{{ paperExecutionStatusLabel(latestPaperExecution.status) }}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('paper.signal') }}</span>
+              <span class="font-semibold text-slate-900">{{ latestPaperExecution.signal ?? '--' }}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('paper.targetQuantity') }}</span>
+              <span class="font-semibold text-slate-900">{{ latestPaperExecution.target_quantity ?? '--' }}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('paper.rebalanceAction') }}</span>
+              <span class="font-semibold text-slate-900">
+                {{ (latestPaperExecution.order_quantity ?? 0) > 0 ? orderSideLabel(latestPaperExecution.order_side) : t('paper.noRebalance') }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('paper.priceAsOf') }}</span>
+              <span class="font-semibold text-slate-900">{{ formatDateTime(latestPaperExecution.latest_price_as_of) }}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('paper.priceFreshness') }}</span>
+              <span class="font-semibold text-slate-900">{{ formatHours(latestPaperExecution.price_age_hours) }}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('paper.priceChanged') }}</span>
+              <span class="font-semibold text-slate-900">{{ yesNoLabel(latestPaperExecution.price_changed) }}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+              <span class="text-slate-500">{{ t('paper.equityMoved') }}</span>
+              <span class="font-semibold text-slate-900">{{ yesNoLabel(latestPaperExecution.equity_changed) }}</span>
+            </div>
+          </div>
+          <p class="mt-3 rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3 text-sm text-slate-600">
+            {{ latestPaperExecution.explanation ?? t('common.noData') }}
+          </p>
         </div>
         <div v-if="acceptanceReport">
           <h3 class="text-sm font-semibold">{{ t('command.acceptanceReport') }}</h3>
@@ -875,6 +1131,15 @@ function formatMetricLabel(key: string): string {
             <p class="mt-2 text-sm text-slate-600">{{ strategy.description }}</p>
             <p class="mt-2 text-xs text-slate-500">
               {{ t('command.defaultParamsCount') }}: {{ Object.keys(strategy.default_params ?? {}).length }}
+            </p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <Badge v-for="tag in strategy.tags" :key="`${strategy.strategy_name}-${tag}`" variant="neutral">{{ tag }}</Badge>
+            </div>
+            <p class="mt-2 text-xs text-slate-500">
+              {{ t('command.supportedMarkets') }}: {{ strategy.supported_markets.join(', ') || '--' }}
+            </p>
+            <p class="mt-1 text-xs text-slate-500">
+              {{ t('command.marketBias') }}: {{ marketBiasLabel(strategy.market_bias) }}
             </p>
           </div>
         </div>

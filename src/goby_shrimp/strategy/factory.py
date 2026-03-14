@@ -104,6 +104,8 @@ class StrategyDefinition:
     vectorized_cls: type | None = None
     default_params: dict[str, Any] = field(default_factory=dict)
     tags: tuple[str, ...] = ()
+    supported_markets: tuple[str, ...] = ("HK", "CN")
+    market_bias: str = "balanced"
 
 
 class StrategyRegistry:
@@ -120,6 +122,8 @@ class StrategyRegistry:
         vectorized_cls: type | None = None,
         default_params: dict[str, Any] | None = None,
         tags: tuple[str, ...] | None = None,
+        supported_markets: tuple[str, ...] | None = None,
+        market_bias: str = "balanced",
     ) -> None:
         key = name.strip().lower()
         self._defs[key] = StrategyDefinition(
@@ -129,6 +133,8 @@ class StrategyRegistry:
             vectorized_cls=vectorized_cls,
             default_params=default_params or {},
             tags=tags or (),
+            supported_markets=supported_markets or ("HK", "CN"),
+            market_bias=market_bias,
         )
 
     def register_plugin(self, plugin: StrategyPlugin) -> None:
@@ -139,6 +145,8 @@ class StrategyRegistry:
             vectorized_cls=plugin.vectorized_cls,
             default_params=dict(plugin.default_params),
             tags=plugin.tags,
+            supported_markets=plugin.supported_markets,
+            market_bias=plugin.market_bias,
         )
 
     def get(self, name: str) -> StrategyDefinition:

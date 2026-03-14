@@ -8,12 +8,11 @@ from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 import httpx
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .llm import MiniMaxClient
-from .api.models import RuntimeSetting
+from .runtime_state import get_runtime_state_json, set_runtime_state_json
 
 logger = logging.getLogger("goby_shrimp.llm_gateway")
 
@@ -101,17 +100,13 @@ class LLMGateway:
         settings = get_settings()
         return datetime.now(ZoneInfo(settings.timezone))
 
-    def _get_runtime_setting(self, db: Session, key: str) -> RuntimeSetting | None:
-        return db.execute(select(RuntimeSetting).where(RuntimeSetting.key == key)).scalar_one_or_none()
+    def _get_runtime_setting(self, db: Session | None, key: str) -> dict[str, Any] | None:
+        del db
+        return get_runtime_state_json(key)
 
-    def _set_runtime_setting(self, db: Session, key: str, value_json: dict[str, Any]) -> None:
-        record = self._get_runtime_setting(db, key)
-        if record is None:
-            record = RuntimeSetting(key=key, value_json=value_json, updated_at=self._now())
-            db.add(record)
-        else:
-            record.value_json = value_json
-            record.updated_at = self._now()
+    def _set_runtime_setting(self, db: Session | None, key: str, value_json: dict[str, Any]) -> None:
+        del db
+        set_runtime_state_json(key, value_json, updated_at=self._now())
 
     def get_provider(self, db: Session | None = None) -> str:
         settings = get_settings()
@@ -121,7 +116,7 @@ class LLMGateway:
 
         record = self._get_runtime_setting(db, _RUNTIME_PROVIDER_KEY)
         if record is not None:
-            candidate = str(record.value_json.get("provider", provider)).lower()
+            candidate = str(record.get("provider", provider)).lower()
             if candidate in LLMProvider.ALL:
                 return candidate
         return provider if provider in LLMProvider.ALL else LLMProvider.MOCK
@@ -159,7 +154,6 @@ class LLMGateway:
         if db is None:
             return
         self._set_runtime_setting(db, _RUNTIME_STATUS_KEY, asdict(status))
-        db.flush()
 
     def get_status(self, db: Session | None = None) -> LLMStatus:
         provider = self.get_provider(db)
@@ -171,7 +165,7 @@ class LLMGateway:
         if record is None:
             return base
 
-        value = record.value_json
+        value = record
         if str(value.get("provider", provider)).lower() != provider:
             return base
 
@@ -195,8 +189,6 @@ class LLMGateway:
 
         self._set_runtime_setting(db, _RUNTIME_PROVIDER_KEY, {"provider": normalized})
         self._persist_status(db, status)
-        db.commit()
-        db.refresh(self._get_runtime_setting(db, _RUNTIME_PROVIDER_KEY))
         return status
 
     def _make_adapter(self, provider: str) -> LLMAdapter:

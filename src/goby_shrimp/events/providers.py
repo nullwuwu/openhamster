@@ -30,7 +30,7 @@ class EventProvider(ABC):
     event_type: str = 'macro'
 
     @abstractmethod
-    def fetch(self, now: datetime, symbol_scope: str = '000300.SH', market_scope: str = 'CN') -> list[EventSeed]:
+    def fetch(self, now: datetime, symbol_scope: str = '2800.HK', market_scope: str = 'HK') -> list[EventSeed]:
         pass
 
 
@@ -41,13 +41,13 @@ class MacroProvider(EventProvider):
 class DemoMacroProvider(MacroProvider):
     name = 'demo_macro'
 
-    def fetch(self, now: datetime, symbol_scope: str = '000300.SH', market_scope: str = 'CN') -> list[EventSeed]:
+    def fetch(self, now: datetime, symbol_scope: str = '2800.HK', market_scope: str = 'HK') -> list[EventSeed]:
         return [
             EventSeed(
                 event_id=f'macro-{market_scope}-0',
                 event_type=self.event_type,
                 market_scope=market_scope,
-                symbol_scope='*',
+                symbol_scope=symbol_scope,
                 published_at=now - timedelta(hours=10),
                 source=self.name,
                 title='政策面维持宽松基调',
@@ -60,7 +60,7 @@ class DemoMacroProvider(MacroProvider):
                 event_id=f'macro-{market_scope}-1',
                 event_type=self.event_type,
                 market_scope=market_scope,
-                symbol_scope='*',
+                symbol_scope=symbol_scope,
                 published_at=now - timedelta(hours=20),
                 source=self.name,
                 title='波动率回落但趋势斜率放缓',
@@ -86,7 +86,7 @@ class FREDMacroProvider(MacroProvider):
         settings = get_settings()
         self.api_key = api_key or settings.integrations.fred_api_key
 
-    def fetch(self, now: datetime, symbol_scope: str = '000300.SH', market_scope: str = 'CN') -> list[EventSeed]:
+    def fetch(self, now: datetime, symbol_scope: str = '2800.HK', market_scope: str = 'HK') -> list[EventSeed]:
         if not self.api_key:
             raise ValueError('FRED_API_KEY is not configured')
 
@@ -126,7 +126,7 @@ class FREDMacroProvider(MacroProvider):
                         event_id=f'fred-{series_id}-{latest.get("date")}',
                         event_type=self.event_type,
                         market_scope=market_scope,
-                        symbol_scope='*',
+                        symbol_scope=symbol_scope,
                         published_at=published_at,
                         source=self.name,
                         title=title,
@@ -157,11 +157,12 @@ class WorldBankMacroProvider(MacroProvider):
 
     COUNTRY_BY_MARKET = {
         'CN': 'CN',
+        'HK': 'HKG',
         'US': 'US',
     }
 
-    def fetch(self, now: datetime, symbol_scope: str = '000300.SH', market_scope: str = 'CN') -> list[EventSeed]:
-        country = self.COUNTRY_BY_MARKET.get(market_scope.upper(), 'CN')
+    def fetch(self, now: datetime, symbol_scope: str = '2800.HK', market_scope: str = 'HK') -> list[EventSeed]:
+        country = self.COUNTRY_BY_MARKET.get(market_scope.upper(), 'HKG')
         events: list[EventSeed] = []
         with httpx.Client(timeout=20.0) as client:
             for indicator, label, direction, importance in self.SERIES:
@@ -194,7 +195,7 @@ class WorldBankMacroProvider(MacroProvider):
                         event_id=f'worldbank-{country}-{indicator}-{latest.get("date")}',
                         event_type=self.event_type,
                         market_scope=market_scope,
-                        symbol_scope='*',
+                        symbol_scope=symbol_scope,
                         published_at=published_at,
                         source=self.name,
                         title=title,
@@ -223,7 +224,7 @@ class ChainedMacroProvider(MacroProvider):
         self.provider_name = self.name
         self.provider_message = ''
 
-    def fetch(self, now: datetime, symbol_scope: str = '000300.SH', market_scope: str = 'CN') -> list[EventSeed]:
+    def fetch(self, now: datetime, symbol_scope: str = '2800.HK', market_scope: str = 'HK') -> list[EventSeed]:
         errors: list[str] = []
         preferred = self.providers[0].name if self.providers else self.name
         for index, provider in enumerate(self.providers):

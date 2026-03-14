@@ -41,6 +41,29 @@ const audits = computed(() => auditEventQuery.data.value ?? [])
 const proposals = computed(() => proposalQuery.data.value ?? [])
 const digests = computed(() => eventDigestQuery.data.value ?? [])
 const events = computed(() => eventStreamQuery.data.value ?? [])
+const universeSelectionHistory = computed(() =>
+  audits.value
+    .filter((audit) => ['universe_selection_evaluated', 'universe_selection_changed'].includes(audit.event_type))
+    .map((audit) => {
+      const payload = audit.payload as Record<string, unknown>
+      const selectedCandidate = (payload.selected_candidate as Record<string, unknown> | undefined) ?? {}
+      const topCandidates = Array.isArray(payload.top_candidates)
+        ? payload.top_candidates.map((candidate) => candidate as Record<string, unknown>)
+        : []
+      const topFactors = Array.isArray(payload.top_factors) ? payload.top_factors.map((item) => String(item)) : []
+      return {
+        ...audit,
+        selectedSymbol: String(payload.selected_symbol ?? audit.entity_id),
+        previousSymbol: payload.previous_symbol ? String(payload.previous_symbol) : '--',
+        candidateCount: payload.candidate_count ?? '--',
+        selectionReason: String(payload.selection_reason ?? ''),
+        selectedCandidate,
+        topCandidates,
+        topFactors,
+      }
+    })
+    .slice(0, 10),
+)
 
 const proposalsById = computed(
   () =>
@@ -205,6 +228,10 @@ function qualityBandLabel(value?: string): string {
 
 function poolSelectionLabel(value?: string): string {
   return displayLabel(t, 'poolSelection', value)
+}
+
+function universeReasonTagLabel(value?: string): string {
+  return displayLabel(t, 'universeReasonTag', value)
 }
 
 function actionVariant(action?: string): 'neutral' | 'success' | 'warning' | 'danger' | 'info' {
@@ -390,6 +417,56 @@ function chainCauseLabel(chain: (typeof timelineChains.value)[number]): string {
     </div>
 
     <div class="grid gap-4 xl:grid-cols-[1.1fr,1fr]">
+      <Card>
+        <div class="mb-3 flex items-center justify-between">
+          <h3 class="text-sm font-semibold">{{ t('audit.universeHistory') }}</h3>
+          <Badge variant="info">{{ universeSelectionHistory.length }}</Badge>
+        </div>
+        <div class="space-y-3">
+          <div v-for="audit in universeSelectionHistory" :key="`universe-${audit.id}`" class="rounded-lg border border-slate-200/80 bg-white/60 p-3">
+            <div class="flex items-center justify-between gap-3">
+              <p class="font-medium text-slate-900">{{ audit.selectedSymbol }}</p>
+              <Badge :variant="audit.event_type === 'universe_selection_changed' ? 'success' : 'info'">
+                {{ auditEventLabel(audit.event_type) }}
+              </Badge>
+            </div>
+            <p class="mt-1 text-xs text-slate-500">{{ formatDateTime(audit.created_at) }}</p>
+            <p class="mt-2 text-sm text-slate-700">{{ audit.selectionReason || t('common.noData') }}</p>
+            <div class="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+              <p>{{ t('audit.previousSymbol') }}: {{ audit.previousSymbol }}</p>
+              <p>{{ t('audit.candidateCount') }}: {{ String(audit.candidateCount) }}</p>
+              <p>{{ t('command.selectionScore') }}: {{ String(audit.selectedCandidate.score ?? '--') }}</p>
+              <p>{{ t('command.turnoverMillions') }}: {{ String(audit.selectedCandidate.turnover_millions ?? '--') }}</p>
+            </div>
+            <div v-if="audit.topFactors.length" class="mt-3 flex flex-wrap gap-2">
+              <Badge v-for="factor in audit.topFactors" :key="`${audit.id}-${factor}`" variant="success">
+                {{ universeReasonTagLabel(String(factor)) }}
+              </Badge>
+            </div>
+            <div v-if="audit.topCandidates.length" class="mt-3 space-y-2">
+              <div
+                v-for="candidate in audit.topCandidates"
+                :key="`${audit.id}-${String(candidate.symbol)}`"
+                class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <p class="font-medium text-slate-900">
+                    #{{ candidate.rank ?? '--' }} · {{ candidate.symbol }}
+                  </p>
+                  <span class="text-xs text-slate-500">{{ t('command.selectionScore') }}: {{ candidate.score ?? '--' }}</span>
+                </div>
+                <p class="mt-1 text-sm text-slate-600">{{ candidate.selection_reason ?? t('common.noData') }}</p>
+                <div v-if="Array.isArray(candidate.reason_tags) && candidate.reason_tags.length" class="mt-2 flex flex-wrap gap-2">
+                  <Badge v-for="tag in candidate.reason_tags" :key="`${audit.id}-${String(candidate.symbol)}-${String(tag)}`" variant="neutral">
+                    {{ universeReasonTagLabel(String(tag)) }}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
       <Card>
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-sm font-semibold">{{ t('audit.riskDecisions') }}</h3>

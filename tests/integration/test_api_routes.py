@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import importlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
 
 from goby_shrimp.api.app import app
-from goby_shrimp.api.db import SessionLocal
-from goby_shrimp.api.models import RuntimeSetting
 from goby_shrimp.config import get_settings
+from goby_shrimp.runtime_state import delete_runtime_state_keys, get_runtime_state_json, set_runtime_state_json
 
 
 @pytest.fixture(autouse=True)
@@ -22,23 +20,23 @@ def reset_runtime_state(monkeypatch) -> None:
     services_module = importlib.import_module("goby_shrimp.api.services")
 
     monkeypatch.setattr(app_module, "sync_strategy_snapshots", lambda db: None)
-    monkeypatch.setattr(app_module, "sync_agent_state", lambda db, trigger="manual": None)
-    monkeypatch.setattr(services_module, "sync_agent_state", lambda db, force_refresh=False, trigger="manual": None)
+    monkeypatch.setattr(app_module, "sync_agent_state", lambda db, **kwargs: None)
+    monkeypatch.setattr(services_module, "sync_agent_state", lambda db, **kwargs: None)
 
-    with SessionLocal() as db:
-        db.execute(
-            delete(RuntimeSetting).where(
-                RuntimeSetting.key.in_(["llm.provider", "llm.status", "pipeline.runtime.status"])
-            )
-        )
-        db.add(
-            RuntimeSetting(
-                key="llm.provider",
-                value_json={"provider": "mock"},
-                updated_at=now,
-            )
-        )
-        db.commit()
+    runtime_keys = ["llm.provider", "llm.status", "pipeline.runtime.status"]
+    previous_records = {
+        key: get_runtime_state_json(key)
+        for key in runtime_keys
+        if get_runtime_state_json(key) is not None
+    }
+    delete_runtime_state_keys(runtime_keys)
+    set_runtime_state_json("llm.provider", {"provider": "mock"}, updated_at=now)
+    try:
+        yield
+    finally:
+        delete_runtime_state_keys(runtime_keys)
+        for key, value in previous_records.items():
+            set_runtime_state_json(key, value, updated_at=now)
 
 
 def test_healthz() -> None:
@@ -52,7 +50,11 @@ def test_strategy_list() -> None:
     with TestClient(app) as client:
         response = client.get('/api/v1/strategies')
         assert response.status_code == 200
-        assert isinstance(response.json(), list)
+        data = response.json()
+        assert isinstance(data, list)
+        assert data
+        assert 'supported_markets' in data[0]
+        assert 'market_bias' in data[0]
 
 
 def test_command_center_includes_llm_status() -> None:
@@ -64,15 +66,35 @@ def test_command_center_includes_llm_status() -> None:
         assert 'runtime_status' in data
         assert data['runtime_status']['current_state'] in {'idle', 'running', 'degraded', 'stalled', 'failed'}
         assert 'consecutive_failures' in data['runtime_status']
+        assert 'current_stage' in data['runtime_status']
+        assert 'stage_durations_ms' in data['runtime_status']
         assert data['llm_status']['provider'] in {'minimax', 'mock'}
         assert 'event_lane_sources' in data['market_snapshot']
         assert set(data['market_snapshot']['event_lane_sources']) == {'macro'}
+        assert data['market_snapshot']['market_profile']['market_scope'] == 'HK'
+        assert data['market_snapshot']['market_profile']['benchmark_symbol'] == '2800.HK'
+        assert data['market_snapshot']['universe_selection']['market_scope'] == 'HK'
+        assert data['market_snapshot']['universe_selection']['selected_symbol'].endswith('.HK')
+        assert 'selection_reason' in data['market_snapshot']['universe_selection']
+        assert 'top_factors' in data['market_snapshot']['universe_selection']
         assert 'macro_status' in data['market_snapshot']
         assert data['market_snapshot']['macro_status']['provider']
         assert 'reliability_score' in data['market_snapshot']['macro_status']
         assert 'provider_chain' in data['market_snapshot']['macro_status']
         assert 'freshness_tier' in data['market_snapshot']['macro_status']
+        assert data['latest_event_digest']['market_scope'] == data['market_snapshot']['event_digest']['market_scope']
+        assert data['latest_event_digest']['symbol_scope'] == data['market_snapshot']['event_digest']['symbol_scope']
         assert 'operational_acceptance' in data['active_strategy']
+        if data['active_strategy']['proposal'] is not None:
+            assert 'latest_execution' in data['active_strategy']['paper_trading']
+            latest_execution = data['active_strategy']['paper_trading']['latest_execution']
+            if latest_execution is not None:
+                assert 'latest_price_as_of' in latest_execution
+                assert 'price_age_hours' in latest_execution
+                assert 'price_changed' in latest_execution
+                assert 'equity_changed' in latest_execution
+                assert 'rebalance_triggered' in latest_execution
+                assert 'explanation' in latest_execution
 
 
 def test_risk_decisions_include_governance_report() -> None:
@@ -135,6 +157,19 @@ def test_runtime_llm_can_switch_to_mock() -> None:
         assert data['status'] == 'mock'
 
 
+def test_runtime_llm_switch_queues_background_sync(monkeypatch) -> None:
+    app_module = importlib.import_module("goby_shrimp.api.app")
+    calls: list[str] = []
+
+    monkeypatch.setattr(app_module, "_run_runtime_provider_switch_sync_job", lambda: calls.append("runtime_provider_switch"))
+
+    with TestClient(app) as client:
+        response = client.patch('/api/v1/runtime/llm', json={'provider': 'mock'})
+        assert response.status_code == 200
+
+    assert calls == ["runtime_provider_switch"]
+
+
 def test_runtime_sync_can_be_triggered(monkeypatch) -> None:
     app_module = importlib.import_module("goby_shrimp.api.app")
     calls: list[str] = []
@@ -145,6 +180,38 @@ def test_runtime_sync_can_be_triggered(monkeypatch) -> None:
         response = client.post('/api/v1/runtime/sync')
         assert response.status_code == 200
         assert response.json()['current_state'] in {'idle', 'running', 'degraded', 'failed', 'stalled'}
+
+    assert calls == ["manual_api"]
+
+
+def test_runtime_sync_can_be_triggered_when_previous_run_is_stalled(monkeypatch) -> None:
+    app_module = importlib.import_module("goby_shrimp.api.app")
+    calls: list[str] = []
+    now = datetime.now(ZoneInfo(get_settings().timezone))
+
+    monkeypatch.setattr(app_module, "_run_manual_sync_job", lambda: calls.append("manual_api"))
+
+    set_runtime_state_json(
+        "pipeline.runtime.status",
+        {
+            "current_state": "running",
+            "status_message": "stuck",
+            "last_run_at": (now.replace(microsecond=0) - timedelta(minutes=20)).isoformat(),
+            "last_success_at": None,
+            "last_failure_at": None,
+            "consecutive_failures": 0,
+            "expected_next_run_at": None,
+            "last_duration_ms": 0,
+            "last_trigger": "scheduler",
+            "degraded": False,
+        },
+        updated_at=now,
+    )
+
+    with TestClient(app) as client:
+        response = client.post('/api/v1/runtime/sync')
+        assert response.status_code == 200
+        assert response.json()['current_state'] == 'stalled'
 
     assert calls == ["manual_api"]
 
@@ -180,7 +247,7 @@ def test_create_backtest_run_queued(monkeypatch) -> None:
         response = client.post(
             '/api/v1/backtests/runs',
             json={
-                'symbol': '000300.SH',
+                'symbol': '2800.HK',
                 'strategy_name': 'ma_cross',
                 'provider_name': 'stooq',
                 'start_date': '2020-01-01',

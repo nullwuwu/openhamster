@@ -18,6 +18,8 @@ class StrategyPlugin:
     vectorized_cls: type | None = None
     default_params: dict[str, Any] = field(default_factory=dict)
     tags: tuple[str, ...] = ()
+    supported_markets: tuple[str, ...] = ("HK", "CN")
+    market_bias: str = "balanced"
 
 
 def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
@@ -28,6 +30,8 @@ def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
             stream_cls=MACrossStrategy,
             default_params={"short_window": 5, "long_window": 20},
             tags=("trend", "moving-average"),
+            supported_markets=("HK", "CN"),
+            market_bias="hk_preferred",
         ),
         StrategyPlugin(
             name="rsi",
@@ -35,6 +39,8 @@ def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
             stream_cls=RSIStrategy,
             default_params={"period": 14, "oversold": 30, "overbought": 70},
             tags=("momentum", "oscillator"),
+            supported_markets=("CN", "HK"),
+            market_bias="cn_preferred",
         ),
         StrategyPlugin(
             name="macd",
@@ -42,6 +48,8 @@ def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
             stream_cls=MACDStrategy,
             default_params={"fast_period": 12, "slow_period": 26, "signal_period": 9},
             tags=("momentum", "trend"),
+            supported_markets=("HK", "CN"),
+            market_bias="balanced",
         ),
         StrategyPlugin(
             name="mean_reversion",
@@ -49,6 +57,8 @@ def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
             vectorized_cls=MeanReversionStrategy,
             default_params={"z_window": 20, "entry_threshold": 2.0, "exit_threshold": 0.5, "use_short": False},
             tags=("reversion", "vectorized"),
+            supported_markets=("CN", "HK"),
+            market_bias="cn_preferred",
         ),
         StrategyPlugin(
             name="channel_breakout",
@@ -56,6 +66,8 @@ def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
             vectorized_cls=ChannelBreakoutStrategy,
             default_params={"channel_window": 20, "atr_window": 14, "atr_k": 2.0},
             tags=("breakout", "vectorized"),
+            supported_markets=("HK", "CN"),
+            market_bias="hk_preferred",
         ),
     ]
 

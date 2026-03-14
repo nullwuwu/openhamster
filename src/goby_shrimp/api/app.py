@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -8,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from ..runtime import build_pipeline_scheduler
+from ..strategy import get_strategy_registry
 from .db import SessionLocal, get_db, init_database
 from .models import BacktestRun, ExperimentRun, RunStatus, StrategyProposal, StrategySnapshot
 from .schemas import (
@@ -25,7 +28,11 @@ from .schemas import (
     ExperimentRunDTO,
     LLMStatusDTO,
     MacroPipelineStatusDTO,
+    MarketProfileDTO,
     MarketSnapshotDTO,
+    UniverseCandidateDTO,
+    UniverseSelectionDTO,
+    PaperExecutionDTO,
     PaperNavPointDTO,
     PaperOrderDTO,
     PaperPositionDTO,
@@ -47,6 +54,7 @@ from .services import (
     get_active_strategy,
     get_backtest_run_with_metrics,
     get_current_llm_status,
+    get_latest_paper_execution,
     get_pipeline_runtime_status,
     get_experiment_run_with_metrics,
     get_latest_risk_decision,
@@ -69,9 +77,21 @@ router = APIRouter(prefix="/api/v1")
 logger = logging.getLogger(__name__)
 
 
-def _run_manual_sync_job() -> None:
+def _run_sync_job(*, trigger: str, force_refresh: bool = True) -> None:
     with SessionLocal() as db:
-        sync_agent_state(db, force_refresh=True, trigger='manual_api')
+        sync_agent_state(db, force_refresh=force_refresh, trigger=trigger)
+
+
+def _run_manual_sync_job() -> None:
+    _run_sync_job(trigger='manual_api', force_refresh=True)
+
+
+def _run_runtime_provider_switch_sync_job() -> None:
+    _run_sync_job(trigger='runtime_provider_switch', force_refresh=True)
+
+
+def _run_startup_sync_job() -> None:
+    _run_sync_job(trigger='startup', force_refresh=False)
 
 
 def _to_metric_dto(items: list) -> list[RunMetricSnapshotDTO]:
@@ -132,6 +152,7 @@ def _to_paper_dto(limit: int = 100) -> PaperTradingDTO:
         nav=[PaperNavPointDTO(**item) for item in paper["nav"]],
         orders=[PaperOrderDTO(**item) for item in paper["orders"]],
         positions=[PaperPositionDTO(**item) for item in paper["positions"]],
+        latest_execution=None,
     )
 
 
@@ -239,6 +260,7 @@ def _to_market_snapshot_dto(db: Session) -> MarketSnapshotDTO:
         symbol=str(snapshot["symbol"]),
         price_context=dict(snapshot["price_context"]),
         event_lane_sources={str(key): str(value) for key, value in dict(snapshot["event_lane_sources"]).items()},
+        market_profile=MarketProfileDTO(**dict(snapshot["market_profile"])),
         macro_status=MacroPipelineStatusDTO(**dict(snapshot["macro_status"])),
         event_digest=_to_digest_dto(snapshot["event_digest"]),
         event_stream_preview=[_to_event_dto(record) for record in snapshot["event_stream_preview"]],
@@ -260,6 +282,9 @@ def _to_pipeline_runtime_status_dto(status: dict[str, object]) -> PipelineRuntim
     return PipelineRuntimeStatusDTO(
         current_state=str(status.get('current_state', 'idle')),
         status_message=str(status.get('status_message', 'Pipeline status unavailable.')),
+        current_stage=str(status['current_stage']) if status.get('current_stage') is not None else None,
+        stage_started_at=status.get('stage_started_at'),
+        stage_durations_ms={str(key): int(value) for key, value in dict(status.get('stage_durations_ms', {}) or {}).items()},
         last_run_at=status.get('last_run_at'),
         last_success_at=status.get('last_success_at'),
         last_failure_at=status.get('last_failure_at'),
@@ -282,9 +307,9 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
         nav=[PaperNavPointDTO(**item) for item in paper_raw["nav"]],
         orders=[PaperOrderDTO(**item) for item in paper_raw["orders"]],
         positions=[PaperPositionDTO(**item) for item in paper_raw["positions"]],
+        latest_execution=PaperExecutionDTO(**latest_execution) if (latest_execution := get_latest_paper_execution(db, active)) else None,
     )
-    digests = list_event_digests(db, limit=1)
-    latest_digest = digests[0] if digests else snapshot["event_digest"]
+    latest_digest = snapshot["event_digest"]
     return CommandCenterDTO(
         generated_at=now_tz(),
         timezone="Asia/Shanghai",
@@ -298,6 +323,28 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
             symbol=str(snapshot["symbol"]),
             price_context=dict(snapshot["price_context"]),
             event_lane_sources={str(key): str(value) for key, value in dict(snapshot["event_lane_sources"]).items()},
+            market_profile=MarketProfileDTO(**dict(snapshot["market_profile"])),
+            universe_selection=UniverseSelectionDTO(
+                mode=str(dict(snapshot["universe_selection"]).get("mode", "static_hk")),
+                market_scope=str(dict(snapshot["universe_selection"]).get("market_scope", "HK")),
+                selected_symbol=str(dict(snapshot["universe_selection"]).get("selected_symbol", snapshot["symbol"])),
+                source=str(dict(snapshot["universe_selection"]).get("source", "static")),
+                generated_at=dict(snapshot["universe_selection"]).get("generated_at"),
+                selection_reason=dict(snapshot["universe_selection"]).get("selection_reason"),
+                top_factors=[str(item) for item in list(dict(snapshot["universe_selection"]).get("top_factors", []))],
+                candidate_count=int(dict(snapshot["universe_selection"]).get("candidate_count", 0) or 0),
+                top_n_limit=dict(snapshot["universe_selection"]).get("top_n_limit"),
+                min_turnover_millions=dict(snapshot["universe_selection"]).get("min_turnover_millions"),
+                benchmark_symbol=dict(snapshot["universe_selection"]).get("benchmark_symbol"),
+                benchmark_gap=dict(snapshot["universe_selection"]).get("benchmark_gap"),
+                benchmark_candidate=UniverseCandidateDTO(**dict(snapshot["universe_selection"]).get("benchmark_candidate"))
+                if dict(snapshot["universe_selection"]).get("benchmark_candidate")
+                else None,
+                candidates=[
+                    UniverseCandidateDTO(**candidate)
+                    for candidate in list(dict(snapshot["universe_selection"]).get("candidates", []))
+                ],
+            ),
             macro_status=MacroPipelineStatusDTO(**dict(snapshot["macro_status"])),
             event_digest=_to_digest_dto(snapshot["event_digest"]),
             event_stream_preview=[_to_event_dto(record) for record in snapshot["event_stream_preview"]],
@@ -312,6 +359,7 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
                 nav_rows=paper_raw["nav"],
                 orders=paper_raw["orders"],
                 macro_status=dict(snapshot["macro_status"]),
+                market_scope=str(snapshot["event_digest"].market_scope),
                 current_time=now_tz(),
             ) if active else {},
         ),
@@ -336,10 +384,17 @@ def get_runtime_llm(db: Session = Depends(get_db)) -> LLMStatusDTO:
 
 
 @router.patch("/runtime/llm", response_model=LLMStatusDTO)
-def patch_runtime_llm(payload: RuntimeLLMUpdate, db: Session = Depends(get_db)) -> LLMStatusDTO:
+def patch_runtime_llm(
+    payload: RuntimeLLMUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> LLMStatusDTO:
     status, changed = set_runtime_llm_provider(db, payload.provider)
     if not changed:
         raise HTTPException(status_code=400, detail=status.message)
+    runtime_status = get_pipeline_runtime_status(db)
+    if runtime_status.get('current_state') != 'running':
+        background_tasks.add_task(_run_runtime_provider_switch_sync_job)
     return _to_llm_status_dto(status)
 
 
@@ -389,6 +444,7 @@ def get_paper_active_strategy(db: Session = Depends(get_db)) -> ActiveStrategyDT
             nav=[PaperNavPointDTO(**item) for item in paper_raw["nav"]],
             orders=[PaperOrderDTO(**item) for item in paper_raw["orders"]],
             positions=[PaperPositionDTO(**item) for item in paper_raw["positions"]],
+            latest_execution=PaperExecutionDTO(**latest_execution) if (latest_execution := get_latest_paper_execution(db, active)) else None,
         ),
         operational_acceptance=build_operational_acceptance(
             proposal=active,
@@ -396,6 +452,7 @@ def get_paper_active_strategy(db: Session = Depends(get_db)) -> ActiveStrategyDT
             nav_rows=paper_raw["nav"],
             orders=paper_raw["orders"],
             macro_status=dict(snapshot["macro_status"]),
+            market_scope=str(snapshot["event_digest"].market_scope),
             current_time=now_tz(),
         ) if active else {},
     )
@@ -430,6 +487,9 @@ def list_strategies(db: Session = Depends(get_db)) -> list[StrategySnapshotDTO]:
             description=record.description,
             enabled=record.enabled,
             default_params=record.default_params,
+            tags=list(get_strategy_registry().get(record.strategy_name).tags),
+            supported_markets=list(get_strategy_registry().get(record.strategy_name).supported_markets),
+            market_bias=get_strategy_registry().get(record.strategy_name).market_bias,
             updated_at=record.updated_at,
         )
         for record in records
@@ -542,11 +602,14 @@ async def lifespan(_: FastAPI):
     scheduler = build_pipeline_scheduler()
     with SessionLocal() as db:
         sync_strategy_snapshots(db)
-        sync_agent_state(db, trigger='startup')
     scheduler.start()
+    startup_task = asyncio.create_task(asyncio.to_thread(_run_startup_sync_job))
     try:
         yield
     finally:
+        startup_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await startup_task
         await scheduler.stop()
 
 

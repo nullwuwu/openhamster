@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import sqlite3
 from datetime import datetime, timedelta
@@ -15,9 +16,12 @@ from ..backtest.backtest_engine import BacktestEngine
 from ..backtest.optimizer import MultiStrategyOptimizer
 from ..backtest.walk_forward import WalkForwardEngine
 from ..config import get_settings
-from ..data import get_provider
+from ..data import get_provider, get_source_manager
+from ..data.hk_universe import fetch_hk_universe_candidates
+from ..data.symbols import detect_market, normalize_symbol
 from ..events import EventSeed, get_event_providers
 from ..llm_gateway import LLMProvider, get_llm_gateway
+from ..market_profile import get_market_profile
 from ..prompts import (
     MARKET_ANALYST_PROMPT_VERSION,
     MARKET_ANALYST_SCHEMA_HINT,
@@ -37,7 +41,9 @@ from ..prompts import (
     strategy_agent_system_prompt,
 )
 from ..market_regime import Regime, get_market_regime
+from ..runtime_state import get_runtime_state_json, set_runtime_state_json
 from ..strategy import get_strategy_factory, get_strategy_registry
+from ..strategy.signals import Signal
 from .db import SessionLocal
 from .models import (
     AuditRecord,
@@ -52,13 +58,13 @@ from .models import (
     RiskDecisionAction,
     RunMetricSnapshot,
     RunStatus,
-    RuntimeSetting,
     StrategyProposal,
     StrategySnapshot,
 )
 
 _MACRO_STATUS_KEY = "events.macro.status"
 _PIPELINE_STATUS_KEY = "pipeline.runtime.status"
+_UNIVERSE_SELECTION_KEY = "universe.selection"
 _PIPELINE_SYNC_LOCK = Lock()
 
 
@@ -147,8 +153,8 @@ def _build_macro_health_history(db: Session) -> dict[str, object]:
 
 def get_macro_pipeline_status(db: Session) -> dict[str, object]:
     provider = get_settings().events.macro_provider
-    record = db.execute(select(RuntimeSetting).where(RuntimeSetting.key == _MACRO_STATUS_KEY)).scalar_one_or_none()
-    if record is None or not isinstance(record.value_json, dict):
+    record = get_runtime_state_json(_MACRO_STATUS_KEY)
+    if record is None:
         base_status = {
             "provider": provider,
             "active_provider": provider,
@@ -164,7 +170,7 @@ def get_macro_pipeline_status(db: Session) -> dict[str, object]:
             "reliability_tier": "primary_live",
         }
         return _enrich_macro_pipeline_status(base_status, db=db)
-    value = dict(record.value_json)
+    value = dict(record)
     status = {
         "provider": str(value.get("provider", provider)),
         "active_provider": str(value.get("active_provider", value.get("provider", provider))),
@@ -224,6 +230,9 @@ def get_pipeline_runtime_status(db: Session) -> dict[str, object]:
     status = _get_runtime_setting_json(db, _PIPELINE_STATUS_KEY) or {
         'current_state': 'idle',
         'status_message': 'Pipeline has not recorded a full sync yet.',
+        'current_stage': None,
+        'stage_started_at': None,
+        'stage_durations_ms': {},
         'last_run_at': None,
         'last_success_at': None,
         'last_failure_at': None,
@@ -236,6 +245,14 @@ def get_pipeline_runtime_status(db: Session) -> dict[str, object]:
     current_state = str(status.get('current_state', 'idle'))
     stalled = False
     expected_next_run_at = status.get('expected_next_run_at')
+    last_run_at = status.get('last_run_at')
+    if current_state == 'running' and isinstance(last_run_at, str) and last_run_at:
+        try:
+            last_run_dt = datetime.fromisoformat(last_run_at)
+            stale_after = timedelta(minutes=max(interval_minutes * 2, 15))
+            stalled = now_tz() - last_run_dt > stale_after
+        except ValueError:
+            stalled = False
     if current_state != 'running' and isinstance(expected_next_run_at, str) and expected_next_run_at:
         try:
             stalled = now_tz() > datetime.fromisoformat(expected_next_run_at)
@@ -246,6 +263,9 @@ def get_pipeline_runtime_status(db: Session) -> dict[str, object]:
     return {
         'current_state': current_state,
         'status_message': str(status.get('status_message', 'Pipeline status unavailable.')),
+        'current_stage': status.get('current_stage'),
+        'stage_started_at': status.get('stage_started_at'),
+        'stage_durations_ms': dict(status.get('stage_durations_ms', {}) or {}),
         'last_run_at': status.get('last_run_at'),
         'last_success_at': status.get('last_success_at'),
         'last_failure_at': status.get('last_failure_at'),
@@ -270,12 +290,44 @@ def _set_pipeline_runtime_status(
     last_duration_ms: int | None = None,
     last_trigger: str | None = None,
     degraded: bool | None = None,
+    current_stage: str | None = None,
 ) -> None:
     previous = _get_runtime_setting_json(db, _PIPELINE_STATUS_KEY) or {}
     interval_minutes = max(5, get_settings().events.expected_sync_interval_minutes)
+    previous_state = str(previous.get('current_state', 'idle'))
+    previous_stage = previous.get('current_stage')
+    previous_stage_started_at = previous.get('stage_started_at')
+    stage_durations = dict(previous.get('stage_durations_ms', {}) or {})
+
+    if isinstance(previous_stage, str) and isinstance(previous_stage_started_at, str):
+        try:
+            previous_stage_dt = datetime.fromisoformat(previous_stage_started_at)
+        except ValueError:
+            previous_stage_dt = None
+        if previous_stage_dt is not None:
+            if current_state == 'running' and current_stage and current_stage != previous_stage:
+                elapsed = max(0, int((current_time - previous_stage_dt).total_seconds() * 1000))
+                stage_durations[previous_stage] = int(stage_durations.get(previous_stage, 0) or 0) + elapsed
+            elif previous_state == 'running' and current_state != 'running':
+                elapsed = max(0, int((current_time - previous_stage_dt).total_seconds() * 1000))
+                stage_durations[previous_stage] = int(stage_durations.get(previous_stage, 0) or 0) + elapsed
+
+    if current_state == 'running':
+        effective_stage = current_stage if current_stage is not None else previous_stage
+        if current_stage is not None and current_stage != previous_stage:
+            stage_started_at = current_time.isoformat()
+        else:
+            stage_started_at = previous.get('stage_started_at') or current_time.isoformat()
+    else:
+        effective_stage = None
+        stage_started_at = None
+
     payload = {
         'current_state': current_state,
         'status_message': status_message,
+        'current_stage': effective_stage,
+        'stage_started_at': stage_started_at,
+        'stage_durations_ms': stage_durations,
         'last_run_at': current_time.isoformat(),
         'last_success_at': last_success_at if last_success_at is not None else previous.get('last_success_at'),
         'last_failure_at': last_failure_at if last_failure_at is not None else previous.get('last_failure_at'),
@@ -286,6 +338,26 @@ def _set_pipeline_runtime_status(
         'degraded': degraded if degraded is not None else bool(previous.get('degraded', False)),
     }
     _set_runtime_setting_json(db, _PIPELINE_STATUS_KEY, payload, current_time)
+
+
+def _set_pipeline_runtime_stage(
+    db: Session,
+    *,
+    stage: str,
+    current_time: datetime,
+    status_message: str,
+    trigger: str,
+) -> None:
+    _set_pipeline_runtime_status(
+        db,
+        current_state='running',
+        status_message=status_message,
+        current_time=current_time,
+        last_trigger=trigger,
+        degraded=False,
+        current_stage=stage,
+    )
+    db.commit()
 
 
 def set_runtime_llm_provider(db: Session, provider: str):
@@ -317,7 +389,6 @@ def set_runtime_llm_provider(db: Session, provider: str):
     db.commit()
     if status.provider == LLMProvider.MINIMAX and status.status == "missing_key":
         return status, False
-    sync_agent_state(db, force_refresh=True, trigger='runtime_provider_switch')
     return status, True
 
 
@@ -356,7 +427,7 @@ def _read_sqlite_rows(db_path: str, sql: str, params: tuple = ()) -> list[sqlite
     path = Path(db_path)
     if not path.exists():
         return []
-    conn = sqlite3.connect(path)
+    conn = _open_sqlite(path)
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(sql, params).fetchall()
@@ -365,6 +436,14 @@ def _read_sqlite_rows(db_path: str, sql: str, params: tuple = ()) -> list[sqlite
     finally:
         conn.close()
     return rows
+
+
+def _open_sqlite(db_path: str | Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(db_path), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
 
 
 def fetch_paper_data(limit: int = 100) -> dict[str, list[dict[str, object]]]:
@@ -378,7 +457,7 @@ def fetch_paper_data(limit: int = 100) -> dict[str, list[dict[str, object]]]:
         if not nav_rows:
             nav_rows = _read_sqlite_rows(
                 db_path,
-                "SELECT trade_date, cash, position_value, total_equity FROM daily_nav ORDER BY trade_date DESC LIMIT ?",
+                "SELECT trade_date, cash, position_value, total_equity FROM daily_nav ORDER BY trade_date DESC, rowid DESC LIMIT ?",
                 (limit,),
             )
         if not order_rows:
@@ -431,10 +510,905 @@ def fetch_paper_data(limit: int = 100) -> dict[str, list[dict[str, object]]]:
     }
 
 
-def _event_scope() -> tuple[str, str]:
+def get_latest_paper_execution(db: Session, proposal: StrategyProposal | None) -> dict[str, object] | None:
+    if proposal is None:
+        return None
+    record = db.execute(
+        select(AuditRecord)
+        .where(
+            AuditRecord.entity_type == 'paper_runtime',
+            AuditRecord.entity_id == proposal.id,
+            AuditRecord.event_type.in_(['paper_execution_cycle', 'paper_execution_skipped']),
+        )
+        .order_by(AuditRecord.created_at.desc(), AuditRecord.id.desc())
+    ).scalars().first()
+    if record is None:
+        return None
+    payload = dict(record.payload or {})
+    target_quantity = int(payload['target_quantity']) if payload.get('target_quantity') is not None else None
+    current_quantity = int(payload['current_quantity']) if payload.get('current_quantity') is not None else None
+    order_quantity = int(payload['order_quantity']) if payload.get('order_quantity') is not None else None
+    signal_value = str(payload.get('signal') or 'HOLD')
+    try:
+        signal = Signal[signal_value]
+    except KeyError:
+        signal = Signal.HOLD
+    explanation_key = payload.get('explanation_key')
+    explanation = payload.get('explanation')
+    if explanation_key is None or explanation is None:
+        derived_key, derived_explanation = _paper_execution_explanation(
+            trade_qty=abs(order_quantity or 0),
+            price_changed=bool(payload.get('price_changed', False)),
+            equity_changed=bool(payload.get('equity_changed', False)),
+            target_qty=target_quantity or 0,
+            current_qty=current_quantity or 0,
+            signal=signal,
+        )
+        explanation_key = explanation_key or derived_key
+        explanation = explanation or derived_explanation
+    return {
+        'status': 'skipped' if record.event_type == 'paper_execution_skipped' else 'executed',
+        'executed_at': record.created_at.isoformat(),
+        'reason': payload.get('reason'),
+        'signal': payload.get('signal'),
+        'target_quantity': target_quantity,
+        'current_quantity': current_quantity,
+        'order_side': payload.get('order_side'),
+        'order_quantity': order_quantity,
+        'latest_price': float(payload['latest_price']) if payload.get('latest_price') is not None else None,
+        'cash': float(payload['cash']) if payload.get('cash') is not None else None,
+        'position_value': float(payload['position_value']) if payload.get('position_value') is not None else None,
+        'total_equity': float(payload['total_equity']) if payload.get('total_equity') is not None else None,
+        'latest_price_as_of': payload.get('latest_price_as_of'),
+        'price_age_hours': float(payload['price_age_hours']) if payload.get('price_age_hours') is not None else None,
+        'price_changed': bool(payload.get('price_changed', False)),
+        'equity_changed': bool(payload.get('equity_changed', False)),
+        'rebalance_triggered': bool(payload.get('rebalance_triggered', False)),
+        'explanation_key': explanation_key,
+        'explanation': explanation,
+        'message': payload.get('message'),
+    }
+
+
+def _quote_age_hours(*, current_time: datetime, as_of: str | None) -> float | None:
+    if not as_of:
+        return None
+    try:
+        parsed = datetime.fromisoformat(as_of)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=ZoneInfo(get_settings().timezone))
+    return round(max(0.0, (current_time - parsed).total_seconds() / 3600), 2)
+
+
+def _paper_execution_explanation(
+    *,
+    trade_qty: int,
+    price_changed: bool,
+    equity_changed: bool,
+    target_qty: int,
+    current_qty: int,
+    signal: Signal,
+) -> tuple[str, str]:
+    if trade_qty > 0:
+        return (
+            'rebalance_executed',
+            'This cycle changed the target position and generated a paper trade.',
+        )
+    if target_qty == current_qty and not price_changed:
+        return (
+            'price_unchanged_position_held',
+            'No rebalance was required because both the target position and the latest mark price were unchanged.',
+        )
+    if target_qty == current_qty and price_changed and not equity_changed:
+        return (
+            'position_held_rounding_flat',
+            'The position stayed unchanged and the latest marked price did not change portfolio equity after rounding.',
+        )
+    if target_qty == current_qty:
+        return (
+            'signal_holds_position',
+            'The current signal keeps the existing position, so no new paper order was generated.',
+        )
+    return (
+        f'signal_{signal.value.lower()}_no_trade',
+        'The latest signal did not require a rebalance in this execution cycle.',
+    )
+
+
+def _paper_snapshot_db_paths() -> list[str]:
     settings = get_settings()
-    symbol = settings.portfolio.symbols[0] if settings.portfolio.symbols else "000300.SH"
-    return symbol, "CN"
+    paths = [settings.storage.runtime_db_path, settings.storage.paper_db_path]
+    unique_paths: list[str] = []
+    for path in paths:
+        if path not in unique_paths:
+            unique_paths.append(path)
+    return unique_paths
+
+
+def _ensure_paper_snapshot_tables(db_path: str) -> None:
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = _open_sqlite(path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_nav (
+                trade_date TEXT NOT NULL,
+                cash REAL NOT NULL,
+                position_value REAL NOT NULL,
+                total_equity REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                price REAL NOT NULL,
+                amount REAL NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                avg_cost REAL NOT NULL,
+                market_value REAL NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _proposal_has_paper_snapshot(proposal_id: str, db: Session) -> bool:
+    return (
+        db.execute(
+            select(func.count())
+            .select_from(AuditRecord)
+            .where(
+                AuditRecord.event_type == 'paper_snapshot_initialized',
+                AuditRecord.entity_type == 'paper_runtime',
+                AuditRecord.entity_id == proposal_id,
+            )
+        ).scalar_one()
+        > 0
+    )
+
+
+def _initialize_paper_snapshot_for_proposal(
+    db: Session,
+    *,
+    proposal: StrategyProposal,
+    current_time: datetime,
+    decision_id: str | None,
+    reason: str,
+) -> bool:
+    if _proposal_has_paper_snapshot(proposal.id, db):
+        return False
+
+    initial_equity = float(get_settings().portfolio.default_capital)
+    trade_date = current_time.date().isoformat()
+    written_paths: list[str] = []
+    for db_path in _paper_snapshot_db_paths():
+        _ensure_paper_snapshot_tables(db_path)
+        conn = _open_sqlite(db_path)
+        try:
+            conn.execute(
+                """
+                INSERT INTO daily_nav (trade_date, cash, position_value, total_equity)
+                VALUES (?, ?, ?, ?)
+                """,
+                (trade_date, initial_equity, 0.0, initial_equity),
+            )
+            conn.commit()
+            written_paths.append(db_path)
+        finally:
+            conn.close()
+
+    db.add(
+        AuditRecord(
+            run_id=proposal.run_id,
+            decision_id=decision_id or f"paper-snapshot-{stable_hash([proposal.id, trade_date, reason])}",
+            event_type='paper_snapshot_initialized',
+            entity_type='paper_runtime',
+            entity_id=proposal.id,
+            strategy_dsl_hash=stable_hash(proposal.strategy_dsl),
+            market_snapshot_hash=proposal.market_snapshot_hash,
+            event_digest_hash=proposal.event_digest_hash,
+            payload={
+                'title': proposal.title,
+                'symbol': proposal.symbol,
+                'trade_date': trade_date,
+                'cash': initial_equity,
+                'position_value': 0.0,
+                'total_equity': initial_equity,
+                'db_paths': written_paths,
+                'reason': reason,
+            },
+            created_at=current_time,
+        )
+    )
+    db.flush()
+    return True
+
+
+def _market_lot_size(symbol: str) -> int:
+    market = detect_market(symbol)
+    return 100 if market in {'hk', 'cn'} else 1
+
+
+def _paper_trade_already_bootstrapped(proposal_id: str, db: Session) -> bool:
+    return (
+        db.execute(
+            select(func.count())
+            .select_from(AuditRecord)
+            .where(
+                AuditRecord.event_type == 'paper_trade_bootstrapped',
+                AuditRecord.entity_type == 'paper_runtime',
+                AuditRecord.entity_id == proposal_id,
+            )
+        ).scalar_one()
+        > 0
+    )
+
+
+def _latest_paper_nav_state() -> dict[str, float]:
+    paper = fetch_paper_data(limit=1)
+    latest_nav = paper['nav'][0] if paper['nav'] else None
+    initial_equity = float(get_settings().portfolio.default_capital)
+    if latest_nav is None:
+        return {
+            'cash': initial_equity,
+            'position_value': 0.0,
+            'total_equity': initial_equity,
+        }
+    return {
+        'cash': float(latest_nav.get('cash', initial_equity) or initial_equity),
+        'position_value': float(latest_nav.get('position_value', 0.0) or 0.0),
+        'total_equity': float(latest_nav.get('total_equity', initial_equity) or initial_equity),
+    }
+
+
+def _latest_paper_position(symbol: str) -> dict[str, object] | None:
+    paper = fetch_paper_data(limit=50)
+    normalized_symbol = normalize_symbol(symbol, market=detect_market(symbol))
+    for position in paper['positions']:
+        if normalize_symbol(str(position.get('symbol', '')), market=detect_market(str(position.get('symbol', '')))) == normalized_symbol:
+            return position
+    return None
+
+
+def _sanitize_strategy_params(base_strategy: str, params: dict[str, object]) -> dict[str, object]:
+    registry = get_strategy_registry()
+    definition = registry.get(base_strategy)
+    candidate_cls = definition.stream_cls or definition.vectorized_cls
+    if candidate_cls is None:
+        return {}
+    try:
+        signature = inspect.signature(candidate_cls)
+    except (TypeError, ValueError):
+        return dict(params)
+    allowed = {
+        name
+        for name, parameter in signature.parameters.items()
+        if name != 'self' and parameter.kind in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+    }
+    return {key: value for key, value in params.items() if key in allowed}
+
+
+def _proposal_strategy_adapter(proposal: StrategyProposal):
+    params = proposal.strategy_dsl.get('params', {}) if isinstance(proposal.strategy_dsl, dict) else {}
+    base_strategy = _proposal_base_strategy(proposal)
+    strategy_params = dict(params) if isinstance(params, dict) else {}
+    strategy_params.pop('base_strategy', None)
+    strategy_params.pop('symbol', None)
+    sanitized = _sanitize_strategy_params(base_strategy, strategy_params)
+    return get_strategy_factory().create(name=base_strategy, mode="auto", params=sanitized)
+
+
+def _load_execution_history(symbol: str, current_time: datetime):
+    history_end = current_time.date().isoformat()
+    history_start = (current_time - timedelta(days=220)).date().isoformat()
+    return get_source_manager().fetch_ohlcv(symbol, history_start, history_end)
+
+
+def _current_target_quantity(
+    *,
+    proposal: StrategyProposal,
+    latest_price: float,
+    current_equity: float,
+    signal: Signal,
+) -> int:
+    if latest_price <= 0:
+        return 0
+    if signal == Signal.SELL:
+        return 0
+    if signal != Signal.BUY:
+        current_position = _latest_paper_position(proposal.symbol)
+        return int(current_position.get('quantity', 0) or 0) if current_position else 0
+
+    sizing = proposal.strategy_dsl.get('position_sizing', {}) if isinstance(proposal.strategy_dsl, dict) else {}
+    sizing_value = float(sizing.get('value', 0.25)) if isinstance(sizing, dict) else 0.25
+    sizing_value = max(0.05, min(0.5, sizing_value))
+    target_notional = max(0.0, current_equity) * sizing_value
+    lot_size = _market_lot_size(proposal.symbol)
+    quantity = int(target_notional // latest_price)
+    quantity = max(lot_size, (quantity // lot_size) * lot_size)
+    return max(0, quantity)
+
+
+def _record_paper_execution_audit(
+    db: Session,
+    *,
+    proposal: StrategyProposal,
+    current_time: datetime,
+    event_type: str,
+    payload: dict[str, object],
+) -> None:
+    db.add(
+        AuditRecord(
+            run_id=proposal.run_id,
+            decision_id=f"{event_type}-{stable_hash([proposal.id, current_time.isoformat(), payload])}",
+            event_type=event_type,
+            entity_type='paper_runtime',
+            entity_id=proposal.id,
+            strategy_dsl_hash=stable_hash(proposal.strategy_dsl),
+            market_snapshot_hash=proposal.market_snapshot_hash,
+            event_digest_hash=proposal.event_digest_hash,
+            payload=payload,
+            created_at=current_time,
+        )
+    )
+    db.flush()
+
+
+def execute_active_paper_cycle(
+    db: Session,
+    *,
+    proposal: StrategyProposal,
+    current_time: datetime,
+    reason: str,
+) -> dict[str, object]:
+    _initialize_paper_snapshot_for_proposal(
+        db,
+        proposal=proposal,
+        current_time=current_time,
+        decision_id=None,
+        reason=reason,
+    )
+    history = _load_execution_history(proposal.symbol, current_time)
+    if history is None or history.empty:
+        _record_paper_execution_audit(
+            db,
+            proposal=proposal,
+            current_time=current_time,
+            event_type='paper_execution_skipped',
+            payload={
+                'reason': reason,
+                'message': 'history_unavailable',
+                'symbol': proposal.symbol,
+            },
+        )
+        return {'executed': False, 'reason': 'history_unavailable'}
+
+    latest_bar = history.iloc[-1]
+    latest_bar_index = history.index[-1]
+    latest_price = float(latest_bar['close'])
+    latest_price_as_of = latest_bar_index.to_pydatetime().isoformat() if hasattr(latest_bar_index, 'to_pydatetime') else str(latest_bar_index)
+    price_age_hours = _quote_age_hours(current_time=current_time, as_of=latest_price_as_of)
+    nav_state = _latest_paper_nav_state()
+    current_position = _latest_paper_position(proposal.symbol)
+    current_qty = int(current_position.get('quantity', 0) or 0) if current_position else 0
+    current_avg_cost = float(current_position.get('avg_cost', latest_price) or latest_price) if current_position else latest_price
+    previous_execution = get_latest_paper_execution(db, proposal)
+    strategy = _proposal_strategy_adapter(proposal)
+    signal = strategy.generate_signal(history)
+    target_qty = _current_target_quantity(
+        proposal=proposal,
+        latest_price=latest_price,
+        current_equity=float(nav_state['total_equity']),
+        signal=signal,
+    )
+    holding_constraints = proposal.strategy_dsl.get('holding_constraints', {}) if isinstance(proposal.strategy_dsl, dict) else {}
+    min_holding_days = int(holding_constraints.get('min_holding_days', 0) or 0) if isinstance(holding_constraints, dict) else 0
+    latest_buy_order = next(
+        (
+            order for order in fetch_paper_data(limit=200)['orders']
+            if normalize_symbol(str(order.get('symbol', '')), market=detect_market(str(order.get('symbol', '')))) == normalize_symbol(proposal.symbol, market=detect_market(proposal.symbol))
+            and str(order.get('side', '')).lower() == 'buy'
+        ),
+        None,
+    )
+    if target_qty < current_qty and latest_buy_order and min_holding_days > 0:
+        try:
+            latest_buy_at = datetime.fromisoformat(str(latest_buy_order.get('created_at')))
+        except ValueError:
+            latest_buy_at = None
+        if latest_buy_at is not None and (current_time.date() - latest_buy_at.date()).days < min_holding_days:
+            target_qty = current_qty
+
+    order_qty = target_qty - current_qty
+    order_side = 'buy' if order_qty > 0 else 'sell' if order_qty < 0 else None
+    trade_qty = abs(order_qty)
+    amount = round(trade_qty * latest_price, 2)
+    new_cash = float(nav_state['cash'])
+    new_avg_cost = current_avg_cost
+    if order_side == 'buy':
+        new_cash = round(max(0.0, new_cash - amount), 2)
+        new_avg_cost = (
+            round(((current_qty * current_avg_cost) + amount) / max(target_qty, 1), 4)
+            if current_qty > 0 else latest_price
+        )
+    elif order_side == 'sell':
+        new_cash = round(new_cash + amount, 2)
+        if target_qty <= 0:
+            new_avg_cost = 0.0
+
+    new_position_value = round(target_qty * latest_price, 2)
+    new_total_equity = round(new_cash + new_position_value, 2)
+    previous_price = float(previous_execution['latest_price']) if previous_execution and previous_execution.get('latest_price') is not None else None
+    previous_total_equity = float(previous_execution['total_equity']) if previous_execution and previous_execution.get('total_equity') is not None else float(nav_state['total_equity'])
+    price_changed = previous_price is None or abs(previous_price - latest_price) > 1e-9
+    equity_changed = abs(previous_total_equity - new_total_equity) > 1e-9
+    explanation_key, explanation = _paper_execution_explanation(
+        trade_qty=trade_qty,
+        price_changed=price_changed,
+        equity_changed=equity_changed,
+        target_qty=target_qty,
+        current_qty=current_qty,
+        signal=signal,
+    )
+    trade_date = current_time.date().isoformat()
+    created_at = current_time.isoformat()
+
+    for db_path in _paper_snapshot_db_paths():
+        _ensure_paper_snapshot_tables(db_path)
+        conn = _open_sqlite(db_path)
+        try:
+            if order_side and trade_qty > 0:
+                conn.execute(
+                    """
+                    INSERT INTO orders (symbol, side, quantity, price, amount, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (proposal.symbol, order_side, trade_qty, latest_price, amount, 'filled', created_at),
+                )
+            conn.execute("DELETE FROM positions WHERE symbol = ?", (proposal.symbol,))
+            if target_qty > 0:
+                conn.execute(
+                    """
+                    INSERT INTO positions (symbol, quantity, avg_cost, market_value, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (proposal.symbol, target_qty, new_avg_cost, new_position_value, created_at),
+                )
+            conn.execute(
+                """
+                INSERT INTO daily_nav (trade_date, cash, position_value, total_equity)
+                VALUES (?, ?, ?, ?)
+                """,
+                (trade_date, new_cash, new_position_value, new_total_equity),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    _record_paper_execution_audit(
+        db,
+        proposal=proposal,
+        current_time=current_time,
+        event_type='paper_execution_cycle',
+        payload={
+            'reason': reason,
+            'signal': signal.value,
+            'symbol': proposal.symbol,
+            'latest_price': latest_price,
+            'latest_price_as_of': latest_price_as_of,
+            'price_age_hours': price_age_hours,
+            'price_changed': price_changed,
+            'equity_changed': equity_changed,
+            'rebalance_triggered': trade_qty > 0,
+            'explanation_key': explanation_key,
+            'explanation': explanation,
+            'current_quantity': current_qty,
+            'target_quantity': target_qty,
+            'order_side': order_side,
+            'order_quantity': trade_qty,
+            'cash': new_cash,
+            'position_value': new_position_value,
+            'total_equity': new_total_equity,
+        },
+    )
+    return {
+        'executed': True,
+        'signal': signal.value,
+        'target_quantity': target_qty,
+        'order_quantity': trade_qty,
+        'order_side': order_side,
+        'latest_price': latest_price,
+        'latest_price_as_of': latest_price_as_of,
+        'price_age_hours': price_age_hours,
+        'price_changed': price_changed,
+        'equity_changed': equity_changed,
+        'rebalance_triggered': trade_qty > 0,
+        'explanation_key': explanation_key,
+        'explanation': explanation,
+        'cash': new_cash,
+        'position_value': new_position_value,
+        'total_equity': new_total_equity,
+    }
+
+
+def _bootstrap_paper_trade_for_proposal(
+    db: Session,
+    *,
+    proposal: StrategyProposal,
+    current_time: datetime,
+    decision_id: str | None,
+    reason: str,
+) -> bool:
+    if _paper_trade_already_bootstrapped(proposal.id, db):
+        return False
+
+    source_manager = get_source_manager()
+    if hasattr(source_manager, 'fetch_latest_quote'):
+        latest_quote = source_manager.fetch_latest_quote(proposal.symbol)
+        latest_price = float(latest_quote['price']) if latest_quote is not None and latest_quote.get('price') is not None else None
+        latest_price_as_of = str(latest_quote.get('as_of')) if latest_quote is not None and latest_quote.get('as_of') is not None else None
+    else:
+        latest_price = source_manager.fetch_latest_price(proposal.symbol)
+        latest_price_as_of = None
+    if latest_price is None or latest_price <= 0:
+        db.add(
+            AuditRecord(
+                run_id=proposal.run_id,
+                decision_id=decision_id or f"paper-trade-skip-{stable_hash([proposal.id, reason, current_time.isoformat()])}",
+                event_type='paper_trade_bootstrap_skipped',
+                entity_type='paper_runtime',
+                entity_id=proposal.id,
+                strategy_dsl_hash=stable_hash(proposal.strategy_dsl),
+                market_snapshot_hash=proposal.market_snapshot_hash,
+                event_digest_hash=proposal.event_digest_hash,
+                payload={
+                    'symbol': proposal.symbol,
+                    'reason': reason,
+                    'message': 'latest_price_unavailable',
+                    'latest_price_as_of': latest_price_as_of,
+                },
+                created_at=current_time,
+            )
+        )
+        db.flush()
+        return False
+
+    sizing = proposal.strategy_dsl.get('position_sizing', {}) if isinstance(proposal.strategy_dsl, dict) else {}
+    sizing_value = float(sizing.get('value', 0.25)) if isinstance(sizing, dict) else 0.25
+    sizing_value = max(0.05, min(0.5, sizing_value))
+    initial_equity = float(get_settings().portfolio.default_capital)
+    target_notional = initial_equity * sizing_value
+    lot_size = _market_lot_size(proposal.symbol)
+    quantity = int(target_notional // latest_price)
+    quantity = max(lot_size, (quantity // lot_size) * lot_size)
+    amount = round(quantity * latest_price, 2)
+    remaining_cash = round(max(0.0, initial_equity - amount), 2)
+    trade_date = current_time.date().isoformat()
+    written_paths: list[str] = []
+
+    for db_path in _paper_snapshot_db_paths():
+        _ensure_paper_snapshot_tables(db_path)
+        conn = _open_sqlite(db_path)
+        try:
+            created_at = current_time.isoformat()
+            conn.execute(
+                """
+                INSERT INTO orders (symbol, side, quantity, price, amount, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (proposal.symbol, 'buy', quantity, latest_price, amount, 'filled', created_at),
+            )
+            conn.execute("DELETE FROM positions WHERE symbol = ?", (proposal.symbol,))
+            conn.execute(
+                """
+                INSERT INTO positions (symbol, quantity, avg_cost, market_value, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (proposal.symbol, quantity, latest_price, amount, created_at),
+            )
+            conn.execute(
+                """
+                INSERT INTO daily_nav (trade_date, cash, position_value, total_equity)
+                VALUES (?, ?, ?, ?)
+                """,
+                (trade_date, remaining_cash, amount, round(remaining_cash + amount, 2)),
+            )
+            conn.commit()
+            written_paths.append(db_path)
+        finally:
+            conn.close()
+
+    db.add(
+        AuditRecord(
+            run_id=proposal.run_id,
+            decision_id=decision_id or f"paper-trade-{stable_hash([proposal.id, reason, current_time.isoformat()])}",
+            event_type='paper_trade_bootstrapped',
+            entity_type='paper_runtime',
+            entity_id=proposal.id,
+            strategy_dsl_hash=stable_hash(proposal.strategy_dsl),
+            market_snapshot_hash=proposal.market_snapshot_hash,
+            event_digest_hash=proposal.event_digest_hash,
+            payload={
+                'symbol': proposal.symbol,
+                'quantity': quantity,
+                'price': latest_price,
+                'latest_price_as_of': latest_price_as_of,
+                'amount': amount,
+                'remaining_cash': remaining_cash,
+                'trade_date': trade_date,
+                'reason': reason,
+                'db_paths': written_paths,
+            },
+            created_at=current_time,
+        )
+    )
+    db.flush()
+    return True
+
+
+def _static_event_scope() -> tuple[str, str]:
+    settings = get_settings()
+    raw_symbol = settings.portfolio.symbols[0] if settings.portfolio.symbols else "2800.HK"
+    market = detect_market(raw_symbol)
+    normalized = normalize_symbol(raw_symbol, market=market)
+    market_scope = {
+        'hk': 'HK',
+        'cn': 'CN',
+        'us': 'US',
+    }.get(market, 'HK')
+    return normalized, market_scope
+
+
+def _static_universe_selection() -> dict[str, object]:
+    symbol, market_scope = _static_event_scope()
+    benchmark_symbol = get_market_profile(market_scope).benchmark_symbol
+    return {
+        "mode": get_settings().universe.mode,
+        "market_scope": market_scope,
+        "selected_symbol": symbol,
+        "source": "static",
+        "generated_at": now_tz().isoformat(),
+        "selection_reason": "Static universe mode keeps the configured benchmark symbol as the research anchor.",
+        "top_factors": ["static_anchor"],
+        "candidate_count": 1,
+        "top_n_limit": 1,
+        "min_turnover_millions": None,
+        "benchmark_symbol": benchmark_symbol,
+        "benchmark_gap": 0.0 if symbol == benchmark_symbol else None,
+        "candidates": [
+            {
+                "rank": 1,
+                "symbol": symbol,
+                "name": symbol,
+                "latest_price": None,
+                "change_pct": None,
+                "amplitude_pct": None,
+                "turnover_millions": None,
+                "score": None,
+                "factor_scores": {},
+                "reason_tags": ["static_anchor"],
+                "selection_reason": "Configured benchmark symbol retained because dynamic universe selection is disabled.",
+                "source": "static",
+            }
+        ],
+        "benchmark_candidate": {
+            "rank": 1,
+            "symbol": symbol,
+            "name": symbol,
+            "latest_price": None,
+            "change_pct": None,
+            "amplitude_pct": None,
+            "return_20d_pct": None,
+            "return_60d_pct": None,
+            "volatility_20d_pct": None,
+            "turnover_millions": None,
+            "score": None,
+            "factor_scores": {},
+            "reason_tags": ["static_anchor"],
+            "selection_reason": "Configured benchmark symbol retained because dynamic universe selection is disabled.",
+            "source": "static",
+        },
+    }
+
+
+def get_universe_selection(db: Session, *, refresh: bool = False, current_time: datetime | None = None) -> dict[str, object]:
+    settings = get_settings()
+    if settings.universe.mode != "dynamic_hk":
+        return _static_universe_selection()
+
+    current_time = current_time or now_tz()
+    existing = _get_runtime_setting_json(db, _UNIVERSE_SELECTION_KEY)
+    if not refresh and isinstance(existing, dict) and existing.get("selected_symbol"):
+        candidates = list(existing.get("candidates", [])) if isinstance(existing.get("candidates"), list) else []
+        selected_symbol = str(existing.get("selected_symbol"))
+        benchmark_symbol = get_market_profile("HK").benchmark_symbol
+        selected_candidate = next(
+            (item for item in candidates if str(item.get("symbol")) == selected_symbol),
+            candidates[0] if candidates else {},
+        )
+        benchmark_candidate = next(
+            (dict(item) for item in candidates if str(item.get("symbol")) == benchmark_symbol),
+            None,
+        )
+        existing.setdefault("candidate_count", len(candidates))
+        existing.setdefault("top_n_limit", int(settings.universe.top_n))
+        existing.setdefault("min_turnover_millions", float(settings.universe.min_turnover_millions))
+        existing.setdefault("benchmark_symbol", benchmark_symbol)
+        existing.setdefault("benchmark_candidate", benchmark_candidate)
+        if existing.get("benchmark_gap") is None and benchmark_candidate is not None:
+            selected_score = selected_candidate.get("score")
+            benchmark_score = benchmark_candidate.get("score")
+            if selected_score is not None and benchmark_score is not None:
+                existing["benchmark_gap"] = round(float(selected_score) - float(benchmark_score), 2)
+        has_enriched_candidate = bool(selected_candidate.get("selection_reason")) and selected_candidate.get("rank") is not None
+        if existing.get("selection_reason") and existing.get("top_factors") and has_enriched_candidate:
+            return existing
+
+    previous_symbol = str(existing.get("selected_symbol")) if isinstance(existing, dict) and existing.get("selected_symbol") else None
+    try:
+        candidates = fetch_hk_universe_candidates(
+            top_n=max(1, int(settings.universe.top_n)),
+            min_turnover_millions=float(settings.universe.min_turnover_millions),
+        )
+    except Exception as exc:
+        fallback = _static_universe_selection()
+        fallback["mode"] = settings.universe.mode
+        fallback["source"] = "dynamic_fallback_static"
+        fallback["generated_at"] = current_time.isoformat()
+        fallback["error"] = str(exc)
+        _set_runtime_setting_json(db, _UNIVERSE_SELECTION_KEY, fallback, current_time)
+        return fallback
+    if not candidates:
+        fallback = _static_universe_selection()
+        fallback["mode"] = settings.universe.mode
+        fallback["source"] = "dynamic_fallback_static"
+        fallback["generated_at"] = current_time.isoformat()
+        _set_runtime_setting_json(db, _UNIVERSE_SELECTION_KEY, fallback, current_time)
+        return fallback
+
+    selected_candidate = dict(candidates[0])
+    benchmark_symbol = get_market_profile("HK").benchmark_symbol
+    benchmark_candidate = next(
+        (dict(item) for item in candidates if str(item.get("symbol")) == benchmark_symbol),
+        None,
+    )
+    payload = {
+        "mode": settings.universe.mode,
+        "market_scope": "HK",
+        "selected_symbol": str(selected_candidate["symbol"]),
+        "source": "akshare",
+        "generated_at": current_time.isoformat(),
+        "selection_reason": str(selected_candidate.get("selection_reason") or "Selected as the strongest current HK candidate."),
+        "top_factors": [str(item) for item in list(selected_candidate.get("reason_tags", []))[:4]],
+        "candidate_count": len(candidates),
+        "top_n_limit": int(settings.universe.top_n),
+        "min_turnover_millions": float(settings.universe.min_turnover_millions),
+        "benchmark_symbol": benchmark_symbol,
+        "benchmark_gap": (
+            round(float(selected_candidate.get("score", 0.0)) - float(benchmark_candidate.get("score", 0.0)), 2)
+            if benchmark_candidate is not None and selected_candidate.get("score") is not None and benchmark_candidate.get("score") is not None
+            else None
+        ),
+        "benchmark_candidate": benchmark_candidate,
+        "candidates": candidates,
+    }
+    _set_runtime_setting_json(db, _UNIVERSE_SELECTION_KEY, payload, current_time)
+    top_candidates = [
+        {
+            "rank": item.get("rank"),
+            "symbol": item.get("symbol"),
+            "score": item.get("score"),
+            "selection_reason": item.get("selection_reason"),
+            "reason_tags": item.get("reason_tags", []),
+        }
+        for item in candidates[:3]
+    ]
+    _record_system_audit(
+        db,
+        event_type="universe_selection_evaluated",
+        entity_type="universe_selection",
+        entity_id="hk_dynamic",
+        payload={
+            "previous_symbol": previous_symbol,
+            "selected_symbol": payload["selected_symbol"],
+            "candidate_count": len(candidates),
+            "source": "akshare",
+            "selection_reason": payload["selection_reason"],
+            "top_factors": payload["top_factors"],
+            "selected_candidate": {
+                "symbol": selected_candidate.get("symbol"),
+                "name": selected_candidate.get("name"),
+                "score": selected_candidate.get("score"),
+                "turnover_millions": selected_candidate.get("turnover_millions"),
+                "change_pct": selected_candidate.get("change_pct"),
+                "amplitude_pct": selected_candidate.get("amplitude_pct"),
+                "factor_scores": selected_candidate.get("factor_scores", {}),
+                "reason_tags": selected_candidate.get("reason_tags", []),
+                "selection_reason": selected_candidate.get("selection_reason"),
+            },
+            "top_candidates": top_candidates,
+        },
+        created_at=current_time,
+    )
+    if previous_symbol != payload["selected_symbol"]:
+        _record_system_audit(
+            db,
+            event_type="universe_selection_changed",
+            entity_type="universe_selection",
+            entity_id="hk_dynamic",
+            payload={
+                "previous_symbol": previous_symbol,
+                "selected_symbol": payload["selected_symbol"],
+                "candidate_count": len(candidates),
+                "source": "akshare",
+                "selection_reason": payload["selection_reason"],
+                "top_factors": payload["top_factors"],
+                "selected_candidate": {
+                    "symbol": selected_candidate.get("symbol"),
+                    "name": selected_candidate.get("name"),
+                    "score": selected_candidate.get("score"),
+                    "turnover_millions": selected_candidate.get("turnover_millions"),
+                    "change_pct": selected_candidate.get("change_pct"),
+                    "amplitude_pct": selected_candidate.get("amplitude_pct"),
+                    "factor_scores": selected_candidate.get("factor_scores", {}),
+                    "reason_tags": selected_candidate.get("reason_tags", []),
+                    "selection_reason": selected_candidate.get("selection_reason"),
+                },
+                "top_candidates": top_candidates,
+            },
+            created_at=current_time,
+        )
+    return payload
+
+
+def _event_scope(db: Session | None = None, *, refresh: bool = False, current_time: datetime | None = None) -> tuple[str, str]:
+    if db is not None:
+        selection = get_universe_selection(db, refresh=refresh, current_time=current_time)
+        symbol = str(selection.get("selected_symbol") or _static_event_scope()[0])
+        market_scope = str(selection.get("market_scope") or "HK")
+        return symbol, market_scope
+    return _static_event_scope()
+
+
+def _current_market_profile(market_scope: str) -> dict[str, object]:
+    return get_market_profile(market_scope).to_dict()
+
+
+def _market_governance_profile(market_scope: str) -> dict[str, float | int]:
+    profile = get_market_profile(market_scope)
+    governance = profile.governance
+    return {
+        'promote_threshold': governance.promote_threshold,
+        'keep_threshold': governance.keep_threshold,
+        'challenger_min_delta': governance.challenger_min_delta,
+        'cooldown_days': governance.cooldown_days,
+        'live_drawdown_pause': governance.live_drawdown_pause,
+        'live_drawdown_rollback': governance.live_drawdown_rollback,
+        'acceptance_min_days': governance.acceptance_min_days,
+        'acceptance_min_fill_rate': governance.acceptance_min_fill_rate,
+        'acceptance_max_drawdown': governance.acceptance_max_drawdown,
+    }
 
 
 def _macro_fallback_seeds(
@@ -494,7 +1468,7 @@ def _macro_fallback_seeds(
 
 
 def sync_event_stream(db: Session) -> None:
-    symbol_scope, market_scope = _event_scope()
+    symbol_scope, market_scope = _event_scope(db)
     providers = get_event_providers()
     current_time = now_tz()
 
@@ -543,6 +1517,9 @@ def sync_event_stream(db: Session) -> None:
                 current_time=current_time,
             )
             using_last_known_context = bool(fallback_seeds)
+            fallback_last_success_at = previous_status.get("last_success_at")
+            if using_last_known_context:
+                fallback_last_success_at = max(seed.published_at for seed in fallback_seeds).isoformat()
             degraded_payload = {
                 "provider": provider_name,
                 "active_provider": provider_name if not using_last_known_context else f"{provider_name}_last_good",
@@ -557,7 +1534,7 @@ def sync_event_stream(db: Session) -> None:
                     )
                 ),
                 "degraded": True,
-                "last_success_at": previous_status.get("last_success_at"),
+                "last_success_at": fallback_last_success_at,
                 "fallback_mode": "reuse_last_good" if using_last_known_context else None,
                 "fallback_event_count": len(fallback_seeds),
                 "using_last_known_context": using_last_known_context,
@@ -674,23 +1651,55 @@ def sync_daily_event_digests(db: Session) -> None:
     db.commit()
 
 
+def purge_out_of_scope_event_history(db: Session, *, market_scope: str) -> None:
+    out_of_scope_digests = list(
+        db.execute(
+            select(DailyEventDigest).where(DailyEventDigest.market_scope != market_scope)
+        ).scalars()
+    )
+    for digest in out_of_scope_digests:
+        db.delete(digest)
+
+    out_of_scope_events = list(
+        db.execute(
+            select(EventRecord).where(EventRecord.market_scope != market_scope)
+        ).scalars()
+    )
+    for record in out_of_scope_events:
+        db.delete(record)
+    db.flush()
+
+
 def _latest_digest(db: Session) -> DailyEventDigest:
+    symbol_scope, market_scope = _event_scope(db)
     digest = db.execute(
-        select(DailyEventDigest).order_by(DailyEventDigest.trade_date.desc(), DailyEventDigest.id.desc()).limit(1)
+        select(DailyEventDigest)
+        .where(
+            DailyEventDigest.market_scope == market_scope,
+            DailyEventDigest.symbol_scope.in_([symbol_scope, '*']),
+        )
+        .order_by(DailyEventDigest.trade_date.desc(), DailyEventDigest.id.desc())
+        .limit(1)
     ).scalars().first()
     if digest is None:
         sync_event_stream(db)
         sync_daily_event_digests(db)
         digest = db.execute(
-            select(DailyEventDigest).order_by(DailyEventDigest.trade_date.desc(), DailyEventDigest.id.desc()).limit(1)
+            select(DailyEventDigest)
+            .where(
+                DailyEventDigest.market_scope == market_scope,
+                DailyEventDigest.symbol_scope.in_([symbol_scope, '*']),
+            )
+            .order_by(DailyEventDigest.trade_date.desc(), DailyEventDigest.id.desc())
+            .limit(1)
         ).scalars().first()
     if digest is None:
         created_at = now_tz()
         trade_date = created_at.date().isoformat()
         fallback_payload = {
             'trade_date': trade_date,
-            'market_scope': 'CN',
-            'symbol_scope': '000300.SH',
+            'market_scope': market_scope,
+            'symbol_scope': symbol_scope,
             'macro_summary': 'No macro events available.',
             'event_scores': {
                 'aggregate_sentiment': 0.0,
@@ -700,8 +1709,8 @@ def _latest_digest(db: Session) -> DailyEventDigest:
         }
         digest = DailyEventDigest(
             trade_date=trade_date,
-            market_scope='CN',
-            symbol_scope='000300.SH',
+            market_scope=market_scope,
+            symbol_scope=symbol_scope,
             macro_summary=str(fallback_payload['macro_summary']),
             event_scores=dict(fallback_payload['event_scores']),
             digest_hash=stable_hash(fallback_payload),
@@ -714,20 +1723,11 @@ def _latest_digest(db: Session) -> DailyEventDigest:
 
 
 def _get_runtime_setting_json(db: Session, key: str) -> dict[str, object] | None:
-    record = db.execute(select(RuntimeSetting).where(RuntimeSetting.key == key)).scalar_one_or_none()
-    if record is None or not isinstance(record.value_json, dict):
-        return None
-    return dict(record.value_json)
+    return get_runtime_state_json(key)
 
 
 def _set_runtime_setting_json(db: Session, key: str, value_json: dict[str, object], updated_at: datetime) -> None:
-    record = db.execute(select(RuntimeSetting).where(RuntimeSetting.key == key)).scalar_one_or_none()
-    if record is None:
-        db.add(RuntimeSetting(key=key, value_json=value_json, updated_at=updated_at))
-    else:
-        record.value_json = value_json
-        record.updated_at = updated_at
-    db.flush()
+    set_runtime_state_json(key, value_json, updated_at=updated_at)
 
 
 def _latest_events_for_digest(db: Session, digest: DailyEventDigest) -> list[EventRecord]:
@@ -826,6 +1826,8 @@ def _merge_market_snapshot(base_snapshot: dict[str, object], analyst_state: dict
 
 def build_market_snapshot(db: Session) -> dict[str, object]:
     digest = _latest_digest(db)
+    universe_selection = get_universe_selection(db)
+    market_profile = _current_market_profile(str(digest.market_scope))
     nav_rows = fetch_paper_data(limit=90)['nav']
     close = [float(item['total_equity']) for item in reversed(nav_rows)]
     regime_engine = get_market_regime()
@@ -859,6 +1861,7 @@ def build_market_snapshot(db: Session) -> dict[str, object]:
         lane_sources['macro'] = str(macro_status.get("provider", "unavailable"))
     snapshot_payload = {
         'symbol': digest.symbol_scope,
+        'market_scope': digest.market_scope,
         'regime': regime,
         'confidence': confidence,
         'event_digest_hash': digest.digest_hash,
@@ -866,7 +1869,7 @@ def build_market_snapshot(db: Session) -> dict[str, object]:
         'reason': reason,
     }
     summary = (
-        f"{digest.symbol_scope} is in {regime.lower()} mode with confidence {confidence:.2f}. "
+        f"{digest.symbol_scope} ({market_profile['label']}) is in {regime.lower()} mode with confidence {confidence:.2f}. "
         f"Aggregate event sentiment is {aggregate_sentiment:+.2f}; "
         f"macro pulse says '{digest.macro_summary}'."
     )
@@ -876,6 +1879,8 @@ def build_market_snapshot(db: Session) -> dict[str, object]:
         'summary': summary,
         'market_snapshot_hash': stable_hash(snapshot_payload),
         'symbol': digest.symbol_scope,
+        'market_profile': market_profile,
+        'universe_selection': universe_selection,
         'price_context': indicators,
         'event_digest': digest,
         'event_stream_preview': records[:6],
@@ -974,7 +1979,8 @@ def _normalize_strategy_agent_blueprints(
         'SMA', 'EMA', 'RSI', 'MACD', 'ATR', 'ADX', 'Bollinger', 'Donchian', 'ROC', 'Volume MA', 'volatility', 'drawdown', 'macro_summary',
     }
     normalized: list[dict[str, object]] = []
-    for index, proposal in enumerate(proposals[:3]):
+    # Keep each live cycle small so downstream debate/risk stages do not stall the whole runtime.
+    for index, proposal in enumerate(proposals[:2]):
         if not isinstance(proposal, dict):
             continue
         base_strategy = str(proposal.get('base_strategy', 'ma_cross'))
@@ -1011,6 +2017,7 @@ def run_market_analyst(db: Session, snapshot: dict[str, object], current_time: d
     payload = build_market_analyst_payload(
         symbol=str(snapshot['symbol']),
         timezone=get_settings().timezone,
+        market_profile=dict(snapshot['market_profile']),
         deterministic_snapshot={
             'regime': snapshot['regime'],
             'confidence': snapshot['confidence'],
@@ -1060,13 +2067,22 @@ def run_market_analyst(db: Session, snapshot: dict[str, object], current_time: d
 
 def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], current_time: datetime):
     digest: DailyEventDigest = snapshot['event_digest']
+    market_profile = dict(snapshot['market_profile'])
     baseline_strategies = [
-        {'strategy_name': item.strategy_name, 'default_params': item.default_params, 'description': item.description}
+        {
+            'strategy_name': item.strategy_name,
+            'default_params': item.default_params,
+            'description': item.description,
+            'tags': list(definition.tags),
+            'supported_markets': list(definition.supported_markets),
+            'market_bias': definition.market_bias,
+        }
         for item in db.execute(select(StrategySnapshot).order_by(StrategySnapshot.strategy_name.asc())).scalars()
+        if (definition := get_strategy_registry().get(item.strategy_name)).supported_markets and str(digest.market_scope) in definition.supported_markets
     ]
     payload = build_strategy_agent_payload(
         symbol=symbol,
-        market_scope='CN',
+        market_scope=str(digest.market_scope),
         timezone=get_settings().timezone,
         market_snapshot={
             'regime': snapshot['regime'],
@@ -1075,8 +2091,9 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
             'price_context': snapshot['price_context'],
             'event_lane_sources': snapshot['event_lane_sources'],
         },
+        market_profile=market_profile,
         baseline_strategies=baseline_strategies,
-        hard_limits=['long_only', 'no_leverage', 'daily_rebalance_only', 'single_active_strategy'],
+        hard_limits=['long_only', 'no_leverage', *list(market_profile.get('execution_constraints', []))],
     )
     result = get_llm_gateway().invoke_json(
         db=db,
@@ -1117,16 +2134,17 @@ def _proposal_context(proposal: StrategyProposal | None) -> dict[str, object] | 
         'title': proposal.title,
         'status': proposal.status.value,
         'final_score': proposal.final_score,
+        'source_kind': proposal.source_kind,
         'promoted_at': proposal.promoted_at.isoformat() if proposal.promoted_at else None,
     }
 
 
-def _cooldown_remaining_days(promoted_at: str | None, current_time: datetime) -> int:
+def _cooldown_remaining_days(promoted_at: str | None, current_time: datetime, cooldown_days: int) -> int:
     if not promoted_at:
         return 0
     promoted = datetime.fromisoformat(promoted_at)
     elapsed_days = max(0, (current_time.date() - promoted.date()).days)
-    remaining = get_settings().governance.cooldown_days - elapsed_days
+    remaining = cooldown_days - elapsed_days
     return max(0, remaining)
 
 
@@ -1176,47 +2194,62 @@ def _governance_action(
     bottom_line_passed: bool,
     active_context: dict[str, object] | None,
     macro_status: dict[str, object],
+    market_scope: str,
     current_time: datetime,
+    proposal_source_kind: str = 'mock',
 ) -> tuple[ProposalStatus, RiskDecisionAction, dict[str, object]]:
-    governance = get_settings().governance
+    settings_governance = get_settings().governance
+    market_governance = _market_governance_profile(market_scope)
     blocked_reasons: list[str] = []
     active_score = float(active_context['final_score']) if active_context else None
     score_delta = round(final_score - active_score, 1) if active_score is not None else None
     promoted_at = active_context.get('promoted_at') if active_context else None
+    active_source_kind = str(active_context.get('source_kind', 'mock')) if active_context else None
     cooldown_remaining_days = _cooldown_remaining_days(
         str(promoted_at) if promoted_at else None,
         current_time,
+        int(market_governance['cooldown_days']),
+    )
+    replacing_mock_active = (
+        active_context is not None
+        and active_source_kind == 'mock'
+        and proposal_source_kind != 'mock'
+        and active_score is not None
+        and final_score >= active_score
+        and final_score >= float(market_governance['promote_threshold'])
     )
     can_challenge_active = active_context is None or (
-        score_delta is not None and score_delta >= governance.challenger_min_delta and cooldown_remaining_days == 0
+        score_delta is not None and score_delta >= float(market_governance['challenger_min_delta']) and cooldown_remaining_days == 0
     )
+    if replacing_mock_active:
+        can_challenge_active = True
 
     if not bottom_line_passed:
         blocked_reasons.append('bottom_line_failed')
-    if final_score < governance.keep_threshold:
+    if final_score < float(market_governance['keep_threshold']):
         blocked_reasons.append('below_keep_threshold')
-    if final_score < governance.promote_threshold:
+    if final_score < float(market_governance['promote_threshold']):
         blocked_reasons.append('below_promote_threshold')
-    if active_context and score_delta is not None and score_delta < governance.challenger_min_delta:
+    if active_context and score_delta is not None and score_delta < float(market_governance['challenger_min_delta']) and not replacing_mock_active:
         blocked_reasons.append('delta_below_threshold')
-    if cooldown_remaining_days > 0:
+    if cooldown_remaining_days > 0 and not replacing_mock_active:
         blocked_reasons.append('cooldown_active')
-    if governance.block_promotion_on_macro_degrade and bool(macro_status.get('degraded')):
+    if settings_governance.block_promotion_on_macro_degrade and bool(macro_status.get('degraded')):
         blocked_reasons.append('macro_provider_degraded')
 
     promote_allowed = (
         bottom_line_passed
-        and final_score >= governance.promote_threshold
+        and final_score >= float(market_governance['promote_threshold'])
         and can_challenge_active
         and not (
-            governance.block_promotion_on_macro_degrade and bool(macro_status.get('degraded'))
+            settings_governance.block_promotion_on_macro_degrade and bool(macro_status.get('degraded'))
         )
     )
 
     if promote_allowed:
         status = ProposalStatus.ACTIVE
         action = RiskDecisionAction.PROMOTE_TO_PAPER
-    elif bottom_line_passed and final_score >= governance.keep_threshold:
+    elif bottom_line_passed and final_score >= float(market_governance['keep_threshold']):
         status = ProposalStatus.CANDIDATE
         action = RiskDecisionAction.KEEP_CANDIDATE
     else:
@@ -1240,10 +2273,11 @@ def _governance_action(
     governance_report = {
         'version': 'v1.5',
         'thresholds': {
-            'promote_threshold': governance.promote_threshold,
-            'keep_threshold': governance.keep_threshold,
-            'challenger_min_delta': governance.challenger_min_delta,
-            'cooldown_days': governance.cooldown_days,
+            'market_scope': market_scope,
+            'promote_threshold': market_governance['promote_threshold'],
+            'keep_threshold': market_governance['keep_threshold'],
+            'challenger_min_delta': market_governance['challenger_min_delta'],
+            'cooldown_days': market_governance['cooldown_days'],
         },
         'promotion_gate': {
             'eligible': action == RiskDecisionAction.PROMOTE_TO_PAPER,
@@ -1255,12 +2289,14 @@ def _governance_action(
             'score_delta': score_delta,
             'can_challenge_active': can_challenge_active,
             'cooldown_remaining_days': cooldown_remaining_days,
+            'replacing_mock_active': replacing_mock_active,
         },
         'macro_dependency': {
             'provider': macro_status.get('provider'),
             'status': macro_status.get('status'),
             'degraded': bool(macro_status.get('degraded')),
         },
+        'market_profile': _current_market_profile(market_scope),
         'lifecycle': {
             'phase': lifecycle_phase,
             'next_step': next_step,
@@ -1282,12 +2318,14 @@ def _governance_action(
 def _strategy_dsl(blueprint: dict[str, object], snapshot: dict[str, object], digest: DailyEventDigest) -> dict[str, object]:
     base_strategy = str(blueprint['base_strategy'])
     params = blueprint.get('params', {})
-    governance = get_settings().governance
+    market_profile = dict(snapshot.get('market_profile', _current_market_profile(str(digest.market_scope))))
+    market_governance = _market_governance_profile(str(digest.market_scope))
     return {
         'thesis': blueprint['thesis'],
         'market_regime_clause': {
             'required_regime': snapshot['regime'],
             'event_digest_hash': digest.digest_hash,
+            'market_scope': digest.market_scope,
         },
         'entry_rules': [
             {'indicator': 'SMA', 'operator': 'cross_above', 'lhs': 10, 'rhs': 30},
@@ -1301,9 +2339,10 @@ def _strategy_dsl(blueprint: dict[str, object], snapshot: dict[str, object], dig
             {'rule': 'long_only', 'value': True},
             {'rule': 'no_leverage', 'value': True},
             {'rule': 'daily_rebalance_only', 'value': True},
+            {'rule': 'market_execution_constraints', 'value': market_profile.get('execution_constraints', [])},
         ],
         'position_sizing': {'mode': 'fixed_fraction', 'value': 0.25},
-        'holding_constraints': {'min_holding_days': 5, 'cooldown_days': governance.cooldown_days},
+        'holding_constraints': {'min_holding_days': 5, 'cooldown_days': market_governance['cooldown_days']},
         'features_used': blueprint['features_used'],
         'params': {'base_strategy': base_strategy, 'symbol': digest.symbol_scope, **(params if isinstance(params, dict) else {})},
     }
@@ -1346,6 +2385,7 @@ def run_research_debate(db: Session, blueprint: dict[str, object], snapshot: dic
             'summary': snapshot['summary'],
             'price_context': snapshot['price_context'],
         },
+        market_profile=dict(snapshot['market_profile']),
         event_digest={
             'macro_summary': digest.macro_summary,
             'event_scores': digest.event_scores,
@@ -1685,17 +2725,18 @@ def build_operational_acceptance(
     nav_rows: list[dict[str, object]],
     orders: list[dict[str, object]],
     macro_status: dict[str, object],
+    market_scope: str,
     current_time: datetime,
 ) -> dict[str, object]:
-    governance = get_settings().governance
+    governance = _market_governance_profile(market_scope)
     live_drawdown = _paper_nav_drawdown(nav_rows)
     fill_rate = _order_fill_rate(orders)
     promoted_at = proposal.promoted_at if proposal else None
     live_days = max(0, (current_time.date() - promoted_at.date()).days) if promoted_at else 0
     checks = {
-        'minimum_live_days': live_days >= governance.acceptance_min_days,
-        'fill_rate_ok': fill_rate is None or fill_rate >= governance.acceptance_min_fill_rate,
-        'drawdown_within_acceptance': live_drawdown < governance.acceptance_max_drawdown,
+        'minimum_live_days': live_days >= int(governance['acceptance_min_days']),
+        'fill_rate_ok': fill_rate is None or fill_rate >= float(governance['acceptance_min_fill_rate']),
+        'drawdown_within_acceptance': live_drawdown < float(governance['acceptance_max_drawdown']),
         'macro_pipeline_ready': not bool(macro_status.get('degraded')),
     }
     failed_checks = [key for key, passed in checks.items() if not passed]
@@ -1729,9 +2770,9 @@ def build_operational_acceptance(
         )
         incident_free_days = max(0, (current_time.date() - latest_incident.date()).days) if latest_incident else live_days
     operational_score = 1.0
-    operational_score -= min(0.35, live_drawdown / max(governance.acceptance_max_drawdown, 0.0001) * 0.25)
+    operational_score -= min(0.35, live_drawdown / max(float(governance['acceptance_max_drawdown']), 0.0001) * 0.25)
     if fill_rate is not None:
-        operational_score -= max(0.0, governance.acceptance_min_fill_rate - fill_rate) * 0.5
+        operational_score -= max(0.0, float(governance['acceptance_min_fill_rate']) - fill_rate) * 0.5
     operational_score -= pause_events_30d * 0.08
     operational_score -= rollback_events_30d * 0.15
     if bool(macro_status.get('degraded')):
@@ -1740,17 +2781,18 @@ def build_operational_acceptance(
         'status': status,
         'accepted': status == 'accepted',
         'live_days': live_days,
-        'minimum_live_days': governance.acceptance_min_days,
+        'minimum_live_days': governance['acceptance_min_days'],
         'fill_rate': round(fill_rate, 3) if fill_rate is not None else None,
-        'minimum_fill_rate': governance.acceptance_min_fill_rate,
+        'minimum_fill_rate': governance['acceptance_min_fill_rate'],
         'drawdown': round(live_drawdown, 4),
-        'maximum_acceptance_drawdown': governance.acceptance_max_drawdown,
+        'maximum_acceptance_drawdown': governance['acceptance_max_drawdown'],
         'failed_checks': failed_checks,
         'latest_action': latest_decision.action.value if latest_decision else None,
         'pause_events_30d': pause_events_30d,
         'rollback_events_30d': rollback_events_30d,
         'incident_free_days': incident_free_days,
         'operational_score': round(max(0.0, min(1.0, operational_score)), 2),
+        'market_scope': market_scope,
     }
 
 
@@ -1766,6 +2808,7 @@ def build_acceptance_report(db: Session, *, window_days: int = 30) -> dict[str, 
         nav_rows=paper['nav'],
         orders=paper['orders'],
         macro_status=dict(snapshot['macro_status']),
+        market_scope=str(snapshot['event_digest'].market_scope),
         current_time=current_time,
     )
     quality_report = dict(active.evidence_pack.get('quality_report', {})) if active and isinstance(active.evidence_pack, dict) else {}
@@ -1902,6 +2945,7 @@ def run_risk_judgment(
             'summary': snapshot['summary'],
             'price_context': snapshot['price_context'],
         },
+        market_profile=dict(snapshot['market_profile']),
         event_digest={
             'macro_summary': digest.macro_summary,
             'event_scores': digest.event_scores,
@@ -1974,26 +3018,48 @@ def evaluate_active_strategy_health(db: Session, snapshot: dict[str, object], cu
     if active is None:
         return None
 
-    governance = get_settings().governance
+    market_scope = str(snapshot['event_digest'].market_scope)
+    governance = _market_governance_profile(market_scope)
+    latest_decision = _latest_proposal_decision(active)
+    _initialize_paper_snapshot_for_proposal(
+        db,
+        proposal=active,
+        current_time=current_time,
+        decision_id=latest_decision.decision_id if latest_decision else None,
+        reason='active_backfill',
+    )
+    _bootstrap_paper_trade_for_proposal(
+        db,
+        proposal=active,
+        current_time=current_time,
+        decision_id=latest_decision.decision_id if latest_decision else None,
+        reason='active_backfill',
+    )
+    execute_active_paper_cycle(
+        db,
+        proposal=active,
+        current_time=current_time,
+        reason='active_health_check',
+    )
     nav_rows = fetch_paper_data(limit=120)['nav']
     paper = fetch_paper_data(limit=120)
     nav_rows = paper['nav']
     orders = paper['orders']
     live_drawdown = _paper_nav_drawdown(nav_rows)
     macro_status = dict(snapshot.get('macro_status', {}))
-    latest_decision = _latest_proposal_decision(active)
     operational_acceptance = build_operational_acceptance(
         proposal=active,
         latest_decision=latest_decision,
         nav_rows=nav_rows,
         orders=orders,
         macro_status=macro_status,
+        market_scope=str(snapshot['event_digest'].market_scope),
         current_time=current_time,
     )
     if latest_decision and latest_decision.action in {RiskDecisionAction.PAUSE_ACTIVE, RiskDecisionAction.ROLLBACK_TO_PREVIOUS_STABLE}:
         return latest_decision
 
-    if live_drawdown < governance.live_drawdown_pause:
+    if live_drawdown < float(governance['live_drawdown_pause']):
         return None
 
     previous_stable = _get_previous_stable_strategy(db, exclude_proposal_id=active.id)
@@ -2001,11 +3067,12 @@ def evaluate_active_strategy_health(db: Session, snapshot: dict[str, object], cu
         'version': 'v1.5',
         'active_health': {
             'live_drawdown': live_drawdown,
-            'pause_threshold': governance.live_drawdown_pause,
-            'rollback_threshold': governance.live_drawdown_rollback,
+            'pause_threshold': governance['live_drawdown_pause'],
+            'rollback_threshold': governance['live_drawdown_rollback'],
             'macro_status': macro_status,
             'previous_stable_title': previous_stable.title if previous_stable else None,
             'operational_acceptance': operational_acceptance,
+            'market_scope': market_scope,
         },
         'lifecycle': {
             'phase': 'paused_pending_review',
@@ -2024,9 +3091,9 @@ def evaluate_active_strategy_health(db: Session, snapshot: dict[str, object], cu
     action = RiskDecisionAction.PAUSE_ACTIVE
     explanation = (
         f"Live paper drawdown reached {live_drawdown:.2%}, above the pause threshold "
-        f"{governance.live_drawdown_pause:.2%}. The active strategy is paused pending review."
+        f"{float(governance['live_drawdown_pause']):.2%}. The active strategy is paused pending review."
     )
-    if live_drawdown >= governance.live_drawdown_rollback and previous_stable is not None:
+    if live_drawdown >= float(governance['live_drawdown_rollback']) and previous_stable is not None:
         active.status = ProposalStatus.CANDIDATE
         active.updated_at = current_time
         previous_stable.status = ProposalStatus.ACTIVE
@@ -2048,9 +3115,9 @@ def evaluate_active_strategy_health(db: Session, snapshot: dict[str, object], cu
         }
         explanation = (
             f"Live paper drawdown reached {live_drawdown:.2%}, above the rollback threshold "
-            f"{governance.live_drawdown_rollback:.2%}. Rolling back to {previous_stable.title}."
+            f"{float(governance['live_drawdown_rollback']):.2%}. Rolling back to {previous_stable.title}."
         )
-    elif live_drawdown >= governance.live_drawdown_pause:
+    elif live_drawdown >= float(governance['live_drawdown_pause']):
         active.status = ProposalStatus.CANDIDATE
         active.updated_at = current_time
 
@@ -2091,6 +3158,99 @@ def evaluate_active_strategy_health(db: Session, snapshot: dict[str, object], cu
     return decision
 
 
+def _promote_existing_real_candidate_over_mock_active(
+    db: Session,
+    *,
+    active: StrategyProposal,
+    current_time: datetime,
+) -> StrategyProposal | None:
+    if active.source_kind == 'minimax':
+        return None
+    market_scope = active.market_scope
+    governance = _market_governance_profile(market_scope)
+    challenger = db.execute(
+        select(StrategyProposal)
+        .options(selectinload(StrategyProposal.decisions))
+        .where(
+            StrategyProposal.status == ProposalStatus.CANDIDATE,
+            StrategyProposal.symbol == active.symbol,
+            StrategyProposal.market_scope == active.market_scope,
+            StrategyProposal.source_kind != 'mock',
+            StrategyProposal.provider_status == 'ready',
+            StrategyProposal.final_score >= float(governance['promote_threshold']),
+            StrategyProposal.final_score >= active.final_score,
+        )
+        .order_by(StrategyProposal.final_score.desc(), StrategyProposal.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if challenger is None:
+        return None
+
+    active.status = ProposalStatus.ARCHIVED
+    active.archived_at = current_time
+    active.updated_at = current_time
+    challenger.status = ProposalStatus.ACTIVE
+    challenger.promoted_at = current_time
+    challenger.updated_at = current_time
+    evidence_pack = dict(challenger.evidence_pack or {})
+    governance_report = dict(evidence_pack.get('governance_report', {}))
+    governance_report['selected_action'] = RiskDecisionAction.PROMOTE_TO_PAPER.value
+    active_comparison = dict(governance_report.get('active_comparison', {}))
+    active_comparison['active_title'] = active.title
+    active_comparison['active_score'] = active.final_score
+    active_comparison['score_delta'] = round(challenger.final_score - active.final_score, 1)
+    active_comparison['replacing_mock_active'] = True
+    governance_report['active_comparison'] = active_comparison
+    lifecycle = dict(governance_report.get('lifecycle', {}))
+    lifecycle['phase'] = 'promotion_ready'
+    lifecycle['next_step'] = 'promote_now'
+    governance_report['lifecycle'] = lifecycle
+    evidence_pack['governance_report'] = governance_report
+    decision = RiskDecision(
+        decision_id=f"decision-{stable_hash([challenger.run_id, 'replace_mock_active', current_time.isoformat()])}",
+        run_id=challenger.run_id,
+        proposal_id=challenger.id,
+        action=RiskDecisionAction.PROMOTE_TO_PAPER,
+        deterministic_score=challenger.deterministic_score,
+        llm_score=challenger.llm_score,
+        final_score=challenger.final_score,
+        bottom_line_passed=True,
+        bottom_line_report=dict(evidence_pack.get('bottom_line_report', {})),
+        llm_explanation='Promoted a ready MiniMax HK candidate over legacy mock active strategy.',
+        evidence_pack=evidence_pack,
+        created_at=current_time,
+    )
+    db.add(decision)
+    db.flush()
+    _record_system_audit(
+        db,
+        event_type='risk_decision_recorded',
+        entity_type='risk_decision',
+        entity_id=decision.id,
+        payload=_audit_payload(challenger, decision),
+        created_at=current_time,
+        run_id=challenger.run_id,
+        decision_id=decision.decision_id,
+        market_snapshot_hash=challenger.market_snapshot_hash,
+        event_digest_hash=challenger.event_digest_hash,
+    )
+    _initialize_paper_snapshot_for_proposal(
+        db,
+        proposal=challenger,
+        current_time=current_time,
+        decision_id=decision.decision_id,
+        reason='replace_mock_active',
+    )
+    _bootstrap_paper_trade_for_proposal(
+        db,
+        proposal=challenger,
+        current_time=current_time,
+        decision_id=decision.decision_id,
+        reason='replace_mock_active',
+    )
+    return challenger
+
+
 def materialize_proposals_and_decisions(
     db: Session,
     *,
@@ -2102,6 +3262,7 @@ def materialize_proposals_and_decisions(
 ) -> None:
     active_context = _proposal_context(previous_active)
     macro_status = dict(snapshot.get('macro_status', {}))
+    replacement_promoted = False
     for index, blueprint in enumerate(blueprints):
         deterministic_score = _deterministic_score(index, snapshot, digest, list(blueprint['features_used']))
         provisional_bottom_line = deterministic_score <= 100.0
@@ -2110,7 +3271,9 @@ def materialize_proposals_and_decisions(
             bottom_line_passed=provisional_bottom_line,
             active_context=active_context,
             macro_status=macro_status,
+            market_scope=str(digest.market_scope),
             current_time=current_time,
+            proposal_source_kind=str(blueprint.get('source_kind', 'mock')),
         )
         debate_report = run_research_debate(db, blueprint, snapshot, current_time)
         risk_judgment, evidence_pack = run_risk_judgment(
@@ -2130,7 +3293,9 @@ def materialize_proposals_and_decisions(
             bottom_line_passed=bottom_line_passed,
             active_context=active_context,
             macro_status=macro_status,
+            market_scope=str(digest.market_scope),
             current_time=current_time,
+            proposal_source_kind=str(blueprint.get('source_kind', 'mock')),
         )
         evidence_pack['governance_report'] = governance_report
         evidence_pack['quality_report'] = _build_quality_report(
@@ -2143,7 +3308,7 @@ def materialize_proposals_and_decisions(
             run_id=f"run-{stable_hash([blueprint['title'], digest.digest_hash, current_time.isoformat(), blueprint.get('source_kind', 'mock')])}",
             title=str(blueprint['title']),
             symbol=str(snapshot['symbol']),
-            market_scope='CN',
+            market_scope=str(digest.market_scope),
             thesis=str(blueprint['thesis']),
             source_kind=str(blueprint.get('source_kind', 'mock')),
             provider_status=str(blueprint.get('provider_status', 'mock')),
@@ -2218,7 +3383,26 @@ def materialize_proposals_and_decisions(
             )
         )
         if proposal.status == ProposalStatus.ACTIVE:
+            _initialize_paper_snapshot_for_proposal(
+                db,
+                proposal=proposal,
+                current_time=current_time,
+                decision_id=decision.decision_id,
+                reason='promoted_to_paper',
+            )
+            _bootstrap_paper_trade_for_proposal(
+                db,
+                proposal=proposal,
+                current_time=current_time,
+                decision_id=decision.decision_id,
+                reason='promoted_to_paper',
+            )
+            replacement_promoted = True
             active_context = _proposal_context(proposal)
+    if replacement_promoted and previous_active is not None:
+        previous_active.status = ProposalStatus.ARCHIVED
+        previous_active.archived_at = current_time
+        previous_active.updated_at = current_time
     db.flush()
 
 def _audit_payload(proposal: StrategyProposal, decision: RiskDecision) -> dict[str, object]:
@@ -2245,6 +3429,43 @@ def archive_strategy_proposals(db: Session, archived_at: datetime) -> None:
     db.flush()
 
 
+def archive_non_active_strategy_proposals(db: Session, archived_at: datetime) -> None:
+    records = list(
+        db.execute(
+            select(StrategyProposal).where(
+                StrategyProposal.status.not_in([ProposalStatus.ARCHIVED, ProposalStatus.ACTIVE])
+            )
+        ).scalars()
+    )
+    for record in records:
+        record.status = ProposalStatus.ARCHIVED
+        record.archived_at = archived_at
+        record.updated_at = archived_at
+    db.flush()
+
+
+def archive_out_of_scope_strategy_proposals(
+    db: Session,
+    *,
+    active_symbol: str,
+    active_market_scope: str,
+    archived_at: datetime,
+) -> None:
+    records = list(
+        db.execute(
+            select(StrategyProposal).where(
+                StrategyProposal.status != ProposalStatus.ARCHIVED,
+                (StrategyProposal.symbol != active_symbol) | (StrategyProposal.market_scope != active_market_scope),
+            )
+        ).scalars()
+    )
+    for record in records:
+        record.status = ProposalStatus.ARCHIVED
+        record.archived_at = archived_at
+        record.updated_at = archived_at
+    db.flush()
+
+
 def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str = 'manual') -> None:
     with _PIPELINE_SYNC_LOCK:
         started_at = now_tz()
@@ -2255,17 +3476,62 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
             current_time=started_at,
             last_trigger=trigger,
             degraded=False,
+            current_stage='sync_event_stream',
         )
         db.commit()
         try:
+            _set_pipeline_runtime_stage(
+                db,
+                stage='select_universe',
+                current_time=now_tz(),
+                status_message='Selecting HK research universe.',
+                trigger=trigger,
+            )
+            universe_selection = get_universe_selection(db, refresh=True, current_time=now_tz())
+            purge_out_of_scope_event_history(db, market_scope=str(universe_selection.get("market_scope", "HK")))
+            _set_pipeline_runtime_stage(
+                db,
+                stage='sync_event_stream',
+                current_time=now_tz(),
+                status_message='Syncing macro event stream.',
+                trigger=trigger,
+            )
             sync_event_stream(db)
+            _set_pipeline_runtime_stage(
+                db,
+                stage='sync_daily_event_digests',
+                current_time=now_tz(),
+                status_message='Building macro event digests.',
+                trigger=trigger,
+            )
             sync_daily_event_digests(db)
             current_time = now_tz()
+            _set_pipeline_runtime_stage(
+                db,
+                stage='build_market_snapshot',
+                current_time=current_time,
+                status_message='Building market snapshot.',
+                trigger=trigger,
+            )
             base_snapshot = build_market_snapshot(db)
+            _set_pipeline_runtime_stage(
+                db,
+                stage='market_analyst',
+                current_time=now_tz(),
+                status_message='Running market analyst.',
+                trigger=trigger,
+            )
             analyst_state = run_market_analyst(db, base_snapshot, current_time)
             snapshot = _merge_market_snapshot(base_snapshot, analyst_state)
             digest: DailyEventDigest = snapshot["event_digest"]  # type: ignore[assignment]
             symbol = str(snapshot["symbol"])
+            market_scope = str(digest.market_scope)
+            archive_out_of_scope_strategy_proposals(
+                db,
+                active_symbol=symbol,
+                active_market_scope=market_scope,
+                archived_at=current_time,
+            )
             previous_active = get_active_strategy(db)
             existing_open_count = db.execute(
                 select(func.count())
@@ -2274,27 +3540,38 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
             ).scalar_one()
 
             if force_refresh:
-                archive_strategy_proposals(db, archived_at=current_time)
+                if previous_active is not None:
+                    archive_non_active_strategy_proposals(db, archived_at=current_time)
+                else:
+                    archive_strategy_proposals(db, archived_at=current_time)
             elif existing_open_count > 0 and previous_active is None:
                 archive_strategy_proposals(db, archived_at=current_time)
             elif existing_open_count > 0 and previous_active is not None:
-                evaluate_active_strategy_health(db, snapshot, current_time)
-                macro_status = dict(snapshot.get('macro_status', {}))
-                _set_pipeline_runtime_status(
+                _set_pipeline_runtime_stage(
                     db,
-                    current_state='degraded' if bool(macro_status.get('degraded')) else 'idle',
-                    status_message='Pipeline health review completed.' if not bool(macro_status.get('degraded')) else 'Pipeline completed with macro degradation.',
-                    current_time=current_time,
-                    last_success_at=current_time.isoformat(),
-                    consecutive_failures=0,
-                    last_duration_ms=max(0, int((current_time - started_at).total_seconds() * 1000)),
-                    last_trigger=trigger,
-                    degraded=bool(macro_status.get('degraded')),
+                    stage='active_health_check',
+                    current_time=now_tz(),
+                    status_message='Checking active strategy health.',
+                    trigger=trigger,
                 )
-                db.commit()
-                return
+                evaluate_active_strategy_health(db, snapshot, current_time)
+                previous_active = get_active_strategy(db)
 
+            _set_pipeline_runtime_stage(
+                db,
+                stage='strategy_agent',
+                current_time=now_tz(),
+                status_message='Generating strategy candidates.',
+                trigger=trigger,
+            )
             blueprints, _ = run_strategy_agent(db=db, symbol=symbol, snapshot=snapshot, current_time=current_time)
+            _set_pipeline_runtime_stage(
+                db,
+                stage='materialize_decisions',
+                current_time=now_tz(),
+                status_message='Scoring candidates and materializing decisions.',
+                trigger=trigger,
+            )
             materialize_proposals_and_decisions(
                 db,
                 snapshot=snapshot,
@@ -2302,6 +3579,36 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 blueprints=blueprints,
                 previous_active=previous_active,
                 current_time=current_time,
+            )
+            if previous_active is not None:
+                promoted_existing = _promote_existing_real_candidate_over_mock_active(
+                    db,
+                    active=previous_active,
+                    current_time=current_time,
+                )
+                if promoted_existing is not None:
+                    previous_active = promoted_existing
+            _set_pipeline_runtime_stage(
+                db,
+                stage='paper_execution',
+                current_time=now_tz(),
+                status_message='Executing active paper strategy.',
+                trigger=trigger,
+            )
+            current_active = get_active_strategy(db)
+            if current_active is not None:
+                execute_active_paper_cycle(
+                    db,
+                    proposal=current_active,
+                    current_time=now_tz(),
+                    reason='scheduled_execution',
+                )
+            _set_pipeline_runtime_stage(
+                db,
+                stage='active_health_check',
+                current_time=now_tz(),
+                status_message='Finalizing active strategy health.',
+                trigger=trigger,
             )
             evaluate_active_strategy_health(db, snapshot, current_time)
             macro_status = dict(snapshot.get('macro_status', {}))
@@ -2668,9 +3975,20 @@ def list_event_stream(db: Session, limit: int = 50) -> list[EventRecord]:
     )
 
 
-def list_event_digests(db: Session, limit: int = 30) -> list[DailyEventDigest]:
+def list_event_digests(
+    db: Session,
+    limit: int = 30,
+    *,
+    market_scope: str | None = None,
+    symbol_scope: str | None = None,
+) -> list[DailyEventDigest]:
+    query = select(DailyEventDigest)
+    if market_scope is not None:
+        query = query.where(DailyEventDigest.market_scope == market_scope)
+    if symbol_scope is not None:
+        query = query.where(DailyEventDigest.symbol_scope == symbol_scope)
     return list(
         db.execute(
-            select(DailyEventDigest).order_by(DailyEventDigest.trade_date.desc(), DailyEventDigest.id.desc()).limit(limit)
+            query.order_by(DailyEventDigest.trade_date.desc(), DailyEventDigest.id.desc()).limit(limit)
         ).scalars()
     )

@@ -38,21 +38,22 @@ class StrategySettings(BaseModel):
 
 
 class UniverseSettings(BaseModel):
-    mode: str = "dynamic_cn"
+    mode: str = "dynamic_hk"
     top_n: int = 20
     min_list_days: int = 120
     exclude_st: bool = True
     include_gem: bool = True
+    min_turnover_millions: float = 200.0
 
 
 class ExecutionRulesSettings(BaseModel):
     allow_short: bool = False
     cn_lot_size: int = 100
-    cn_t_plus_one: bool = True
+    cn_t_plus_one: bool = False
 
 
 class PortfolioSettings(BaseModel):
-    symbols: list[str] = Field(default_factory=lambda: ["000300.SH", "510300.SH", "159915.SZ"])
+    symbols: list[str] = Field(default_factory=lambda: ["2800.HK"])
     default_capital: int = 1_000_000
 
 
@@ -116,6 +117,7 @@ class StorageSettings(BaseModel):
     database_url: str = "sqlite:///var/db/goby_shrimp.db"
     runtime_db_path: str = "var/db/trading.db"
     paper_db_path: str = "var/db/paper_trading.db"
+    runtime_state_db_path: str = "var/db/runtime_state.db"
     market_cache_path: str = "var/cache/market_data_cache.db"
     log_path: str = "var/logs/goby_shrimp.log"
 
@@ -148,6 +150,7 @@ ENV_MAPPING: dict[str, str] = {
     "DATABASE_URL": "storage.database_url",
     "RUNTIME_DB_PATH": "storage.runtime_db_path",
     "PAPER_DB_PATH": "storage.paper_db_path",
+    "RUNTIME_STATE_DB_PATH": "storage.runtime_state_db_path",
     "MARKET_CACHE_PATH": "storage.market_cache_path",
     "APP_LOG_PATH": "storage.log_path",
     "LLM_PROVIDER": "llm.provider",
