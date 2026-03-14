@@ -1,76 +1,55 @@
 # GobyShrimp
 
-GobyShrimp is an auditable strategy factory for HK market research and paper trading.
-It combines market-aware LLM research, deterministic governance, a paper ledger, and an operator dashboard into one reviewable workflow.
+[中文说明](README.zh-CN.md)
 
-The current delivery is focused on one narrow, defensible path:
+> An auditable HK strategy factory for market-aware LLM research, deterministic governance, and local paper trading.
+
+## Overview
+
+GobyShrimp is not a generic trading bot. It is a controlled research-and-paper-trading system designed to answer operational questions before any real-capital path exists.
+
+Current scope:
 - HK-only market scope
 - dynamic HK universe selection
 - MiniMax as the default live LLM provider
 - macro-only context pipeline
-- local paper trading ledger with audit trail
+- local paper ledger with audit trail
 
 ## Why GobyShrimp
 
-Most agent trading demos optimize for novelty.
-GobyShrimp optimizes for control.
+Most agent trading demos optimize for novelty. GobyShrimp optimizes for control.
 
-The system is built to answer questions that matter before any real capital path exists:
-- What symbol is the system researching right now, and why?
+It is built to answer:
+- What symbol is being researched right now, and why?
 - What strategy was proposed, by which provider, under which prompt contract?
 - Why was a proposal rejected, kept as candidate, or promoted to paper?
-- If paper NAV is flat, was that because price did not move, because no rebalance was needed, or because execution stalled?
+- If paper NAV is flat, was that because price did not move, no rebalance was needed, or execution stalled?
 - Is the macro pipeline healthy, degraded, or running on last known context?
-
-## Current Product Shape
-
-### Backend
-- FastAPI API under `src/goby_shrimp/api`
-- SQLAlchemy + Alembic for business data
-- dedicated runtime state store for high-frequency status
-- runtime scheduler under `src/goby_shrimp/runtime`
-
-### Frontend
-- Vue 3 dashboard under `apps/web`
-- operator views:
-  - `/command`
-  - `/candidates`
-  - `/research`
-  - `/paper`
-  - `/audit`
-
-### Runtime Artifacts
-- `var/db` for SQLite stores
-- `var/cache` for data cache
-- `var/logs` for local runtime logs
 
 ## What It Does Today
 
-### 1. Selects an HK symbol from the market
-GobyShrimp no longer runs on a single hardcoded instrument.
-The current universe mode is `dynamic_hk`.
+### 1. HK universe selection
 
-Selection flow:
+The system no longer runs on one hardcoded instrument. It uses `dynamic_hk` universe selection:
 1. load HK spot candidates
 2. filter for valid symbols and minimum turnover
-3. rank by liquidity, momentum, stability, price quality
+3. rank by liquidity, momentum, stability, and price quality
 4. enrich top candidates with multi-day factors
 5. penalize missing history windows
-6. select the top-ranked symbol as the current research target
+6. select the top-ranked symbol as the research target
 
-The selected symbol, top factors, and ranking rationale are exposed in the dashboard and audit trail.
+### 2. Market-aware snapshot
 
-### 2. Builds a market-aware research context
-The system constructs a `market_snapshot` with:
+GobyShrimp builds a `market_snapshot` with:
 - HK market profile
 - selected symbol and universe rationale
 - macro digest
 - regime and volatility context
-- preferred and discouraged strategy tags for the current market
+- preferred and discouraged strategy tags
 
-### 3. Generates structured strategy proposals with MiniMax
-The LLM path is routed through a single `LLM Gateway`.
+### 3. MiniMax live strategy generation
 
+All LLM calls go through a single `LLM Gateway`.
 Current runtime providers:
 - `minimax`
 - `mock`
@@ -81,10 +60,10 @@ Prompt contracts live under `src/goby_shrimp/prompts`:
 - `research_debate`
 - `risk_manager_llm`
 
-The system does not let the model emit arbitrary executable code.
-It produces structured strategy proposals and governance artifacts instead.
+The model produces structured strategy proposals, not arbitrary executable code.
 
-### 4. Applies deterministic governance
+### 4. Deterministic governance
+
 A proposal must clear:
 - hard risk gates
 - score thresholds
@@ -100,16 +79,17 @@ Governance outputs include:
 - promotion ETA
 - blocked reasons
 
-### 5. Runs a local paper ledger
+### 5. Local paper ledger
+
 When a proposal is promoted to paper, GobyShrimp:
 - initializes NAV
-- boots a first paper trade using live market price
-- records orders, positions, and NAV updates locally
+- boots the first paper trade with live market price
+- records orders, positions, and NAV locally
 - keeps evaluating the active strategy on each runtime cycle
 
 Important boundary:
 - prices come from live market data providers
-- orders, positions, and NAV are simulated in a local paper ledger
+- orders, positions, and NAV are simulated locally
 - this is not broker execution
 
 ## Architecture
@@ -134,7 +114,6 @@ flowchart TD
 ## Dashboard Views
 
 ### `/command`
-Operator command center for:
 - runtime heartbeat and pipeline stage
 - active strategy and latest execution result
 - current HK universe selection and factor breakdown
@@ -143,45 +122,41 @@ Operator command center for:
 - baseline strategy catalog
 
 ### `/candidates`
-Candidate ladder for:
-- ranking
+- candidate ranking
 - governance phase
 - cooldown state
 - promotion eligibility
 - pool comparison
 
 ### `/research`
-Proposal review view for:
 - market understanding
-- universe selection rationale
+- universe rationale
 - baseline fit
 - strategy DSL
-- debate report
+- debate
 - evidence pack
 - quality report
-- promotion blockers
+- blockers
 
 ### `/paper`
-Paper trading view for:
 - NAV curve
 - positions
 - orders
 - active strategy
 - operational acceptance
-- latest execution explanation
-- price freshness and rebalance reason
+- price freshness
+- rebalance explanation
 
 ### `/audit`
-Audit ledger for:
 - decision timeline
-- universe selection events
+- universe selection history
 - macro degradation / recovery
 - provider fallback events
 - governance cause chain
 
 ## Runtime Status
 
-The command center exposes runtime heartbeat fields so operators can see whether the system is actively progressing:
+The command center exposes:
 - `current_state`
 - `current_stage`
 - `stage_started_at`
@@ -193,7 +168,7 @@ The command center exposes runtime heartbeat fields so operators can see whether
 - `expected_next_run_at`
 - `last_trigger`
 
-The pipeline currently reports stage-level progress across:
+Current stage coverage:
 - event sync
 - digest sync
 - market snapshot build
@@ -204,27 +179,25 @@ The pipeline currently reports stage-level progress across:
 
 ## Market and Data Scope
 
-### Current market scope
+### Current scope
 - HK-only
-- default benchmark context anchored to HK market profile
-- dynamic universe selection instead of a fixed symbol list
+- market-aware
+- dynamic universe selection
 
 ### Price data routing
-HK price data currently routes through:
 - `tencent`
 - `akshare`
 - `yfinance`
 - `stooq`
 
-### Macro data routing
-Macro context currently routes through:
+### Macro routing
 - `FRED`
 - `World Bank`
-- last known context fallback
+- `last known context`
 
-### What is intentionally excluded
+### Intentionally excluded
 - news and announcement pipelines
-- real broker execution
+- broker execution
 - multi-market live trading
 - automatic production trading
 
@@ -255,11 +228,11 @@ Configuration precedence:
 defaults < config/base.yaml < config/local.yaml < .env < .env.local < environment variables
 ```
 
-Recommended local secrets in `.env.local`:
+Recommended secrets in `.env.local`:
 - `MINIMAX_API_KEY`
 - `FRED_API_KEY`
 
-Useful runtime-related environment overrides:
+Useful runtime overrides:
 - `LLM_PROVIDER=minimax`
 - `LLM_MODEL=MiniMax-M2.5`
 - `LLM_TEMPERATURE=0.3`
@@ -288,7 +261,6 @@ Reference files:
 
 ## Validation Baseline
 
-Current local baseline:
 - `pytest tests -q` -> `122 passed, 8 skipped`
 - `npm run build --prefix apps/web` -> passed
 
@@ -299,14 +271,14 @@ Current implementation status:
 - product readiness: `98%`
 - auditable strategy factory target: `94%`
 
-What is already true:
+Already true:
 - HK-only market-aware research path is active
 - MiniMax live path is integrated
-- runtime scheduler is real, not fake status only
+- runtime scheduler is real
 - paper ledger records orders, positions, and NAV
-- governance, ETA, and audit trail are visible in the dashboard
+- governance, ETA, and audit trail are visible
 
-What still needs time, not a redesign:
+Still needs time:
 - longer live operating history
 - thicker long-horizon quality statistics
 - more mature provider health history
@@ -333,12 +305,14 @@ var/db/                   local business DB + runtime state DB
 - `docs/DECISIONS.md`
 - `docs/configuration.md`
 - `docs/RUNBOOK.md`
+- `docs/RELEASE_CHECKLIST.md`
+- `docs/releases/v0.1.0.md`
 
 ## Known Limits
 - SQLite is still the delivery default, not the final operating database
-- paper execution is simulated, not routed to a broker
-- macro context is intentionally narrow and excludes news and announcements
-- long-horizon validation still depends on accumulating more live runtime history
+- paper execution is simulated, not broker-connected
+- macro context intentionally excludes news and announcements
+- long-horizon validation still depends on accumulating more live history
 
 ## Roadmap
 
@@ -346,7 +320,7 @@ var/db/                   local business DB + runtime state DB
 - accumulate longer operating history
 - improve long-horizon quality statistics
 - harden provider health history and recovery semantics
-- continue tightening paper execution explanations and audit drill-down
+- tighten paper execution explanations and audit drill-down
 
 ### Later
 - PostgreSQL migration when operating load justifies it
