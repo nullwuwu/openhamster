@@ -350,6 +350,11 @@ function poolSelectionLabel(value?: string): string {
   return displayLabel(t, 'poolSelection', value)
 }
 
+function backtestAdmissionLabel(eligible?: boolean): string {
+  if (eligible === undefined || eligible === null) return '--'
+  return eligible ? t('audit.backtestPassed') : t('audit.backtestBlocked')
+}
+
 function liveReadinessStatusLabel(value?: string): string {
   return displayLabel(t, 'liveReadinessStatus', value)
 }
@@ -522,6 +527,28 @@ function chainSummary(chain: (typeof timelineChains.value)[number]): string {
                   {{ poolSelectionLabel(chain.decision.evidence_pack?.quality_report?.pool_ranking?.selection_state) }}
                 </p>
               </div>
+            </div>
+
+            <div
+              v-if="chain.decision?.evidence_pack?.quality_report?.backtest_gate"
+              class="mt-3 rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-3 text-sm"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p class="text-slate-500">{{ t('audit.backtestAdmission') }}</p>
+                  <p class="mt-1 font-semibold text-slate-900">
+                    {{ backtestAdmissionLabel(chain.decision.evidence_pack?.quality_report?.backtest_gate?.eligible_for_paper) }}
+                  </p>
+                </div>
+                <Badge
+                  :variant="chain.decision.evidence_pack?.quality_report?.backtest_gate?.eligible_for_paper ? 'success' : 'warning'"
+                >
+                  {{ chain.decision.evidence_pack?.quality_report?.backtest_gate?.review?.verdict ?? '--' }}
+                </Badge>
+              </div>
+              <p class="mt-2 text-slate-600">
+                {{ chain.decision.evidence_pack?.quality_report?.backtest_gate?.summary ?? t('common.noData') }}
+              </p>
             </div>
 
             <div

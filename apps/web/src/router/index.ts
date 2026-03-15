@@ -11,6 +11,7 @@ export const router = createRouter({
     { path: '/research', component: () => import('@/pages/ResearchPage.vue') },
     { path: '/research/:proposalId', component: () => import('@/pages/ResearchDetailPage.vue') },
     { path: '/paper', component: () => import('@/pages/PaperPage.vue') },
+    { path: '/paper/detail', component: () => import('@/pages/PaperDetailPage.vue') },
     { path: '/audit', component: () => import('@/pages/AuditPage.vue') },
     { path: '/audit/:decisionId', component: () => import('@/pages/AuditDecisionDetailPage.vue') },
   ],

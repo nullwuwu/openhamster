@@ -2,8 +2,9 @@
 import { useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import { use } from 'echarts/core'
-import { BarChart, LineChart } from 'echarts/charts'
+import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
@@ -13,7 +14,7 @@ import Card from '@/components/ui/Card.vue'
 import { api } from '@/lib/api'
 import { displayLabel } from '@/lib/display'
 
-use([CanvasRenderer, GridComponent, TooltipComponent, LineChart, BarChart])
+use([CanvasRenderer, GridComponent, TooltipComponent, LineChart])
 
 const { t, locale } = useI18n()
 
@@ -62,9 +63,7 @@ const operationalAcceptance = computed(
 const sortedNavRows = computed(() =>
   [...navRows.value].sort((left, right) => left.trade_date.localeCompare(right.trade_date)),
 )
-const sortedPositions = computed(() =>
-  [...positions.value].sort((left, right) => right.market_value - left.market_value),
-)
+const sortedPositions = computed(() => [...positions.value].sort((left, right) => right.market_value - left.market_value))
 const sortedOrders = computed(() =>
   [...orders.value].sort((left, right) => right.created_at.localeCompare(left.created_at)),
 )
@@ -193,20 +192,6 @@ const navOption = computed(() => ({
       lineStyle: { color: '#ea580c', width: 2.5 },
       itemStyle: { color: '#ea580c' },
       areaStyle: { color: 'rgba(234, 88, 12, 0.12)' },
-    },
-  ],
-}))
-
-const positionOption = computed(() => ({
-  tooltip: { trigger: 'axis' },
-  grid: { left: 48, right: 18, top: 24, bottom: 36 },
-  xAxis: { type: 'category', data: sortedPositions.value.map((item) => item.symbol) },
-  yAxis: { type: 'value' },
-  series: [
-    {
-      type: 'bar',
-      data: sortedPositions.value.map((item) => item.market_value),
-      itemStyle: { color: '#0f766e' },
     },
   ],
 }))
@@ -448,13 +433,6 @@ function actionVariant(action?: string): 'neutral' | 'success' | 'warning' | 'da
         <VChart class="h-[280px] w-full" :option="navOption" autoresize />
       </Card>
       <Card>
-        <h3 class="mb-3 text-sm font-semibold">{{ t('paper.positions') }}</h3>
-        <VChart class="h-[280px] w-full" :option="positionOption" autoresize />
-      </Card>
-    </div>
-
-    <div class="grid gap-4 xl:grid-cols-2">
-      <Card>
         <h3 class="text-sm font-semibold">{{ t('paper.latestExecution') }}</h3>
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
           <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -526,229 +504,38 @@ function actionVariant(action?: string): 'neutral' | 'success' | 'warning' | 'da
       </Card>
 
       <Card>
-        <h3 class="text-sm font-semibold">{{ t('paper.governance') }}</h3>
-        <div class="mt-3 space-y-4 text-sm">
-          <div>
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.latestDecision') }}</p>
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <Badge :variant="actionVariant(latestDecision?.action)">{{ riskActionLabel(latestDecision?.action) }}</Badge>
-              <span class="text-slate-600">{{ latestDecision?.created_at ? formatDateTime(latestDecision.created_at) : t('common.noData') }}</span>
-            </div>
+        <h3 class="text-sm font-semibold">{{ t('paper.summaryDecision') }}</h3>
+        <div class="mt-3 space-y-3 text-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <Badge :variant="actionVariant(latestDecision?.action)">{{ riskActionLabel(latestDecision?.action) }}</Badge>
+            <span class="text-slate-600">{{ latestDecision?.created_at ? formatDateTime(latestDecision.created_at) : t('common.noData') }}</span>
           </div>
-
-          <div v-if="activeComparison">
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.activeComparison') }}</p>
-            <div class="mt-2 space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p class="font-medium text-slate-900">{{ activeComparison.active_title ?? t('common.noData') }}</p>
-              <p class="text-slate-600">{{ t('paper.scoreDelta') }}: {{ activeComparison.score_delta ?? '--' }}</p>
-              <p class="text-slate-600">
-                {{ t('paper.cooldownRemaining') }}: {{ activeComparison.cooldown_remaining_days ?? '--' }}
-              </p>
-            </div>
+          <p class="text-slate-600">
+            {{ t('paper.phase') }}:
+            <span class="font-semibold text-slate-900">{{ governancePhaseLabel(String(governanceReport?.lifecycle?.phase ?? 'candidate_watch')) }}</span>
+          </p>
+          <p class="text-slate-600">
+            {{ t('paper.nextStep') }}:
+            <span class="font-semibold text-slate-900">{{ governanceNextStepLabel(String(governanceReport?.lifecycle?.next_step ?? 'monitor_candidate')) }}</span>
+          </p>
+          <p class="text-slate-600">
+            {{ t('paper.openPositions') }}:
+            <span class="font-semibold text-slate-900">{{ sortedPositions.length }}</span>
+            ·
+            {{ t('paper.latestOrders') }}:
+            <span class="font-semibold text-slate-900">{{ sortedOrders.length }}</span>
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <Badge v-for="reason in blockedReasons.slice(0, 3)" :key="reason" variant="warning">
+              {{ governanceReasonLabel(reason) }}
+            </Badge>
+            <span v-if="!blockedReasons.length" class="text-slate-600">{{ t('paper.summaryNoBlockers') }}</span>
           </div>
-
-          <div>
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.blockedReasons') }}</p>
-            <div class="mt-2 flex flex-wrap gap-2">
-              <Badge
-                v-for="reason in blockedReasons"
-                :key="reason"
-                variant="warning"
-              >
-                {{ governanceReasonLabel(reason) }}
-              </Badge>
-              <span v-if="!blockedReasons.length" class="text-slate-600">{{ t('common.noData') }}</span>
-            </div>
-          </div>
-
-          <div v-if="governanceReport?.lifecycle">
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.strategyFlow') }}</p>
-            <div class="mt-2 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p class="text-slate-600">
-                {{ t('paper.phase') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ governancePhaseLabel(String(governanceReport?.lifecycle?.phase ?? 'candidate_watch')) }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('paper.nextStep') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ governanceNextStepLabel(String(governanceReport?.lifecycle?.next_step ?? 'monitor_candidate')) }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('paper.reviewTrigger') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ String(governanceReport?.lifecycle?.review_trigger ?? t('common.noData')) }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('paper.rechallengeAllowed') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ governanceReport?.lifecycle?.rechallenge_allowed ? t('common.yes') : t('common.no') }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('paper.estimatedEligibility') }}:
-                <span class="font-semibold text-slate-900">
-                  {{
-                    governanceReport?.lifecycle?.estimated_next_eligible_at
-                      ? formatDateTime(String(governanceReport?.lifecycle?.estimated_next_eligible_at))
-                      : lifecycleEtaKindLabel(String(governanceReport?.lifecycle?.eta_kind ?? 'unknown'))
-                  }}
-                </span>
-              </p>
-              <div v-if="Array.isArray(governanceReport?.lifecycle?.resume_conditions)">
-                <p class="text-slate-600">{{ t('paper.resumeConditions') }}:</p>
-                <div class="mt-2 flex flex-wrap gap-2">
-                  <Badge
-                    v-for="condition in governanceReport?.lifecycle?.resume_conditions ?? []"
-                    :key="String(condition)"
-                    variant="warning"
-                  >
-                    {{ resumeConditionLabel(String(condition)) }}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="Object.keys(activeHealth).length || Object.keys(macroDependency).length">
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('paper.recoveryContext') }}</p>
-            <div class="mt-2 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
-              <p class="text-slate-600">
-                {{ t('paper.previousStable') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ String(activeHealth.previous_stable_title ?? t('common.noData')) }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('paper.macroDependency') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ macroDependencyStatus ?? t('common.noData') }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('paper.macroProvider') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ macroDependencyProvider ?? t('common.noData') }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('command.macroFreshness') }}:
-                <span class="font-semibold text-slate-900">
-                  {{
-                    activeMacroStatus?.freshness_hours !== undefined && activeMacroStatus?.freshness_hours !== null
-                      ? `${activeMacroStatus.freshness_hours}h · ${String(activeMacroStatus?.freshness_tier ?? '--')}`
-                      : t('common.noData')
-                  }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('command.macroHealth30d') }}:
-                <span class="font-semibold text-slate-900">
-                  {{
-                    activeMacroStatus?.health_score_30d !== undefined && activeMacroStatus?.health_score_30d !== null
-                      ? formatPercent(Number(activeMacroStatus.health_score_30d))
-                      : t('common.noData')
-                  }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('paper.macroMessage') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ macroDependencyMessage ?? t('common.noData') }}
-                </span>
-              </p>
-            </div>
-          </div>
-
-          <div v-if="Object.keys(operationalAcceptance).length">
-            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('command.operationalAcceptance') }}</p>
-            <div class="mt-2 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
-              <p class="text-slate-600">
-                {{ t('command.acceptanceStatus') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ acceptanceStatusLabel(String(operationalAcceptance.status ?? 'review_required')) }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('command.liveDays') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ operationalAcceptance.live_days ?? t('common.noData') }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('paper.fillRate') }}:
-                <span class="font-semibold text-slate-900">
-                  {{
-                    operationalAcceptance.fill_rate !== undefined && operationalAcceptance.fill_rate !== null
-                      ? formatPercent(Number(operationalAcceptance.fill_rate))
-                      : t('common.noData')
-                  }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('command.operationalScore') }}:
-                <span class="font-semibold text-slate-900">
-                  {{
-                    operationalAcceptance.operational_score !== undefined && operationalAcceptance.operational_score !== null
-                      ? formatPercent(Number(operationalAcceptance.operational_score))
-                      : t('common.noData')
-                  }}
-                </span>
-              </p>
-              <p class="text-slate-600">
-                {{ t('paper.incidentFreeDays') }}:
-                <span class="font-semibold text-slate-900">
-                  {{ operationalAcceptance.incident_free_days ?? t('common.noData') }}
-                </span>
-              </p>
-              <div v-if="Array.isArray(operationalAcceptance.failed_checks) && operationalAcceptance.failed_checks.length">
-                <p class="text-slate-600">{{ t('paper.blockedReasons') }}:</p>
-                <div class="mt-2 flex flex-wrap gap-2">
-                  <Badge
-                    v-for="reason in operationalAcceptance.failed_checks"
-                    :key="String(reason)"
-                    variant="warning"
-                  >
-                    {{ governanceReasonLabel(String(reason)) }}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-          </div>
+          <RouterLink to="/paper/detail" class="inline-block text-sm font-medium text-teal-700 underline-offset-2 hover:underline">
+            {{ t('paper.openDetail') }}
+          </RouterLink>
         </div>
       </Card>
     </div>
-
-    <Card>
-      <h3 class="text-sm font-semibold">{{ t('paper.latestOrders') }}</h3>
-      <div v-if="sortedOrders.length" class="mt-3 overflow-x-auto">
-        <table class="w-full text-left text-sm">
-          <thead>
-            <tr class="text-slate-500">
-              <th class="pb-2">{{ t('common.time') }}</th>
-              <th class="pb-2">{{ t('common.symbol') }}</th>
-              <th class="pb-2">{{ t('common.side') }}</th>
-              <th class="pb-2">{{ t('common.qty') }}</th>
-              <th class="pb-2">{{ t('common.price') }}</th>
-              <th class="pb-2">{{ t('paper.orderStatus') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="order in sortedOrders" :key="order.id" class="border-t border-slate-200">
-              <td class="py-2">{{ formatDateTime(order.created_at) }}</td>
-              <td class="py-2">{{ order.symbol }}</td>
-              <td class="py-2">{{ orderSideLabel(order.side) }}</td>
-              <td class="py-2">{{ order.quantity }}</td>
-              <td class="py-2">{{ order.price.toFixed(2) }}</td>
-              <td class="py-2">{{ orderStatusLabel(order.status) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p v-else class="mt-3 text-sm text-slate-600">{{ t('paper.noOrders') }}</p>
-    </Card>
   </div>
 </template>
