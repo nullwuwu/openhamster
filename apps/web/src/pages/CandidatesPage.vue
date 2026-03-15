@@ -7,7 +7,7 @@ import { RouterLink } from 'vue-router'
 import Badge from '@/components/ui/Badge.vue'
 import Card from '@/components/ui/Card.vue'
 import { api } from '@/lib/api'
-import { displayLabel } from '@/lib/display'
+import { displayLabel, localizeStrategyTitle } from '@/lib/display'
 
 const { t, locale } = useI18n()
 
@@ -102,6 +102,9 @@ function formatDateTime(value?: string | null): string {
     minute: '2-digit',
   }).format(parsed)
 }
+function strategyTitle(value?: string | null): string {
+  return localizeStrategyTitle(value, locale.value)
+}
 </script>
 
 <template>
@@ -178,7 +181,13 @@ function formatDateTime(value?: string | null): string {
       <Card v-for="item in visibleCandidates" :key="item.proposal.id" class="space-y-4">
         <div class="flex items-start justify-between gap-3">
           <div>
-            <h3 class="text-base font-semibold text-slate-900">{{ item.proposal.title }}</h3>
+            <h3 class="text-base font-semibold text-slate-900">{{ strategyTitle(item.proposal.title) }}</h3>
+            <p
+              v-if="strategyTitle(item.proposal.title) !== item.proposal.title"
+              class="mt-1 text-xs text-slate-500"
+            >
+              {{ item.proposal.title }}
+            </p>
             <p class="mt-1 text-sm text-slate-600">{{ item.proposal.thesis }}</p>
             <RouterLink :to="`/candidates/${item.proposal.id}`" class="mt-2 inline-flex text-sm text-teal-700 underline-offset-2 hover:underline">
               {{ t('candidateDetail.openDetail') }}

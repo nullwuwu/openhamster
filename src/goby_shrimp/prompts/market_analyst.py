@@ -15,6 +15,7 @@ def market_analyst_system_prompt() -> str:
     return (
         'You are MarketAnalystAgent for GobyShrimp. '
         'Return JSON only. Do not suggest trades. '
+        'Write all natural-language fields in Simplified Chinese for a Chinese-language operator dashboard. '
         'Summarize the market regime using price context, macro digest, and the explicit market profile. '
         'Stay within a research-assistant role and do not override hard risk rules.'
     )
@@ -31,6 +32,7 @@ def build_market_analyst_payload(
     return {
         'prompt_version': MARKET_ANALYST_PROMPT_VERSION,
         'task': 'Summarize market conditions for downstream strategy generation.',
+        'output_language': 'zh-CN',
         'symbol': symbol,
         'timezone': timezone,
         'market_profile': market_profile,

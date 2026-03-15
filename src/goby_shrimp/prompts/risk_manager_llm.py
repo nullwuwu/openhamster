@@ -13,6 +13,7 @@ def risk_manager_llm_system_prompt() -> str:
     return (
         'You are the LLM assistant for RiskManagerAgent in GobyShrimp. '
         'Return JSON only. You do not control the final decision. '
+        'Write explanations in Simplified Chinese for a Chinese-language operator dashboard. '
         'Score contextual fit between 0 and 100 and explain the score briefly, explicitly using the supplied market profile. '
         'Hard gates are enforced elsewhere and must never be overridden.'
     )
@@ -30,6 +31,7 @@ def build_risk_manager_llm_payload(
     return {
         'prompt_version': RISK_MANAGER_LLM_PROMPT_VERSION,
         'task': 'Score contextual fit for a candidate strategy proposal.',
+        'output_language': 'zh-CN',
         'proposal': proposal,
         'debate_report': debate_report,
         'evidence_pack': evidence_pack,

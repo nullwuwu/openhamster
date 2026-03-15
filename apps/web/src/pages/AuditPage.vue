@@ -12,7 +12,11 @@ import { RouterLink } from "vue-router";
 import Badge from "@/components/ui/Badge.vue";
 import Card from "@/components/ui/Card.vue";
 import { api } from "@/lib/api";
-import { displayLabel, humanizeLabel } from "@/lib/display";
+import {
+  displayLabel,
+  humanizeLabel,
+  localizeStrategyTitle,
+} from "@/lib/display";
 
 use([CanvasRenderer, GridComponent, TooltipComponent, LineChart]);
 
@@ -487,7 +491,8 @@ function chainCauseLabel(chain: (typeof timelineChains.value)[number]): string {
 }
 
 function chainTitle(chain: (typeof timelineChains.value)[number]): string {
-  if (chain.proposal?.title) return chain.proposal.title;
+  if (chain.proposal?.title)
+    return localizeStrategyTitle(chain.proposal.title, locale.value);
   if (chain.decision?.action) return riskActionLabel(chain.decision.action);
   if (chain.eventTypes.length > 0) return auditEventLabel(chain.eventTypes[0]);
   return t("common.noData");

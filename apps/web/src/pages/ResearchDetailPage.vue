@@ -7,7 +7,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import Badge from '@/components/ui/Badge.vue'
 import Card from '@/components/ui/Card.vue'
 import { api } from '@/lib/api'
-import { displayLabel, humanizeLabel } from '@/lib/display'
+import { displayLabel, humanizeLabel, localizeStrategyTitle } from '@/lib/display'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -94,6 +94,9 @@ function formatSignedMetric(value?: number | null, suffix = ''): string {
   if (value === null || value === undefined) return '--'
   return `${value > 0 ? '+' : ''}${value}${suffix}`
 }
+function strategyTitle(value?: string | null): string {
+  return localizeStrategyTitle(value, locale.value)
+}
 </script>
 
 <template>
@@ -104,7 +107,14 @@ function formatSignedMetric(value?: number | null, suffix = ''): string {
           <RouterLink to="/research" class="text-sm text-slate-500 underline-offset-2 hover:underline">
             {{ t('researchDetail.backToResearch') }}
           </RouterLink>
-          <h2 class="mt-2 text-xl font-semibold text-slate-900">{{ proposal?.title ?? t('researchDetail.title') }}</h2>
+          <h1 class="mt-2 text-sm font-semibold uppercase tracking-widest text-slate-500">{{ t('researchDetail.title') }}</h1>
+          <h2 class="mt-1 text-xl font-semibold text-slate-900">{{ strategyTitle(proposal?.title) }}</h2>
+          <p
+            v-if="proposal?.title && strategyTitle(proposal.title) !== proposal.title"
+            class="mt-1 text-xs text-slate-500"
+          >
+            {{ proposal.title }}
+          </p>
           <p class="mt-2 text-sm text-slate-600">{{ proposal?.thesis ?? t('common.noData') }}</p>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -193,9 +203,9 @@ function formatSignedMetric(value?: number | null, suffix = ''): string {
             </div>
             <p class="mt-2 text-sm text-slate-700">{{ selectedUniverseCandidate.selection_reason ?? t('common.noData') }}</p>
             <p class="mt-2 text-xs text-slate-500">
-              20D: {{ formatSignedMetric(selectedUniverseCandidate.return_20d_pct, '%') }}
-              · 60D: {{ formatSignedMetric(selectedUniverseCandidate.return_60d_pct, '%') }}
-              · 20D Vol: {{ formatSignedMetric(selectedUniverseCandidate.volatility_20d_pct, '%') }}
+              {{ t('research.metric20d') }}: {{ formatSignedMetric(selectedUniverseCandidate.return_20d_pct, '%') }}
+              · {{ t('research.metric60d') }}: {{ formatSignedMetric(selectedUniverseCandidate.return_60d_pct, '%') }}
+              · {{ t('research.metric20dVol') }}: {{ formatSignedMetric(selectedUniverseCandidate.volatility_20d_pct, '%') }}
             </p>
           </div>
           <div class="rounded-lg border border-amber-200 bg-amber-50/70 p-4">
@@ -253,9 +263,9 @@ function formatSignedMetric(value?: number | null, suffix = ''): string {
               {{ proposal.evidence_pack?.quality_report?.backtest_gate?.summary ?? t('common.noData') }}
             </p>
             <p class="mt-2 text-xs text-slate-500">
-              CAGR: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.cagr ?? '--' }}
-              · Sharpe: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.sharpe ?? '--' }}
-              · MaxDD: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.max_drawdown ?? '--' }}
+              {{ t('research.metricCagr') }}: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.cagr ?? '--' }}
+              · {{ t('research.metricSharpe') }}: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.sharpe ?? '--' }}
+              · {{ t('research.metricMaxDrawdownShort') }}: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.max_drawdown ?? '--' }}
             </p>
           </div>
         </Card>

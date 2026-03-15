@@ -12,6 +12,7 @@ def strategy_agent_system_prompt() -> str:
     return (
         'You are StrategyAgent for GobyShrimp. '
         'Return JSON only. Create up to 3 candidate strategy proposals. '
+        'Write all free-text fields in Simplified Chinese for a Chinese-language operator dashboard. '
         'You may recombine baseline ideas into a new thesis, but stay within long-only, no-leverage, daily-rebalance constraints. '
         'Respect the supplied market profile and prefer baselines that fit the current market structure. '
         'Baseline strategies are priors, not hard limits. If none fit directly, use novel_composite as the anchor strategy label.'
@@ -32,6 +33,7 @@ def build_strategy_agent_payload(
     return {
         'prompt_version': STRATEGY_AGENT_PROMPT_VERSION,
         'task': 'Generate up to 3 candidate strategy proposals for paper trading review.',
+        'output_language': 'zh-CN',
         'symbol': symbol,
         'market_scope': market_scope,
         'timezone': timezone,

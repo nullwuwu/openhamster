@@ -14,6 +14,7 @@ def research_debate_system_prompt() -> str:
     return (
         'You are ResearchDebateAgent for GobyShrimp. '
         'Return JSON only. Produce a concise case-for and case-against for one strategy proposal. '
+        'Write all natural-language fields in Simplified Chinese for a Chinese-language operator dashboard. '
         'Assess whether the proposal fits the supplied market profile rather than a generic equity market. '
         'Do not decide promotion. Do not mention execution outside paper trading constraints.'
     )
@@ -29,6 +30,7 @@ def build_research_debate_payload(
     return {
         'prompt_version': RESEARCH_DEBATE_PROMPT_VERSION,
         'task': 'Stress test a single strategy proposal and produce debate output.',
+        'output_language': 'zh-CN',
         'proposal': proposal,
         'market_snapshot': market_snapshot,
         'market_profile': market_profile,

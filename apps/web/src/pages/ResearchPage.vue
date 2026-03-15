@@ -7,7 +7,7 @@ import { RouterLink } from "vue-router";
 import Badge from "@/components/ui/Badge.vue";
 import Card from "@/components/ui/Card.vue";
 import { api } from "@/lib/api";
-import { displayLabel } from "@/lib/display";
+import { displayLabel, localizeStrategyTitle } from "@/lib/display";
 
 const { t, locale } = useI18n();
 
@@ -53,6 +53,13 @@ const orderedProposals = computed(() => {
     return right.final_score - left.final_score;
   });
 });
+const initialVisibleCount = 12;
+const showAllProposals = ref(false);
+const visibleProposals = computed(() =>
+  showAllProposals.value
+    ? orderedProposals.value
+    : orderedProposals.value.slice(0, initialVisibleCount),
+);
 const current = computed(
   () =>
     orderedProposals.value.find((item) => item.id === selectedId.value) ??
@@ -210,6 +217,9 @@ function formatDateTime(value?: string | null): string {
     minute: "2-digit",
   }).format(parsed);
 }
+function strategyTitle(value?: string | null): string {
+  return localizeStrategyTitle(value, locale.value);
+}
 </script>
 
 <template>
@@ -219,8 +229,23 @@ function formatDateTime(value?: string | null): string {
         <h3 class="text-sm font-semibold">{{ t("research.title") }}</h3>
         <p class="mt-1 text-sm text-slate-600">{{ t("research.subtitle") }}</p>
       </div>
+      <div
+        class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-xs text-slate-600"
+      >
+        <span>
+          {{ t("research.showingCount", { shown: visibleProposals.length, total: orderedProposals.length }) }}
+        </span>
+        <button
+          v-if="orderedProposals.length > initialVisibleCount"
+          type="button"
+          class="font-medium text-teal-700 underline-offset-2 hover:underline"
+          @click="showAllProposals = !showAllProposals"
+        >
+          {{ showAllProposals ? t("research.showLess") : t("research.showAll") }}
+        </button>
+      </div>
       <button
-        v-for="proposal in proposals"
+        v-for="proposal in visibleProposals"
         :key="proposal.id"
         type="button"
         class="w-full rounded-lg border px-3 py-3 text-left transition-colors"
@@ -232,7 +257,15 @@ function formatDateTime(value?: string | null): string {
         @click="selectedId = proposal.id"
       >
         <div class="flex items-center justify-between gap-2">
-          <p class="font-semibold">{{ proposal.title }}</p>
+          <div class="min-w-0">
+            <p class="font-semibold">{{ strategyTitle(proposal.title) }}</p>
+            <p
+              v-if="strategyTitle(proposal.title) !== proposal.title"
+              class="mt-1 truncate text-xs opacity-70"
+            >
+              {{ proposal.title }}
+            </p>
+          </div>
           <Badge
             :variant="
               proposal.status === 'active'
@@ -262,7 +295,13 @@ function formatDateTime(value?: string | null): string {
       <Card v-if="current" class="space-y-4">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <h3 class="text-base font-semibold">{{ current.title }}</h3>
+            <h3 class="text-base font-semibold">{{ strategyTitle(current.title) }}</h3>
+            <p
+              v-if="strategyTitle(current.title) !== current.title"
+              class="mt-1 text-xs text-slate-500"
+            >
+              {{ current.title }}
+            </p>
             <p class="mt-1 text-sm text-slate-600">{{ current.thesis }}</p>
             <p class="mt-3 text-xs uppercase tracking-widest text-slate-500">
               {{ t("research.providerStatus") }}
@@ -476,6 +515,12 @@ function formatDateTime(value?: string | null): string {
                 <div class="flex items-start justify-between gap-3">
                   <div>
                     <p class="font-medium text-slate-900">
+                      {{ strategyTitle(proposal.title) }}
+                    </p>
+                    <p
+                      v-if="strategyTitle(proposal.title) !== proposal.title"
+                      class="mt-1 text-xs text-slate-500"
+                    >
                       {{ proposal.title }}
                     </p>
                     <p class="mt-1 text-sm text-slate-600">
@@ -598,6 +643,12 @@ function formatDateTime(value?: string | null): string {
                 <div class="flex items-start justify-between gap-3">
                   <div>
                     <p class="font-medium text-slate-900">
+                      {{ strategyTitle(proposal.title) }}
+                    </p>
+                    <p
+                      v-if="strategyTitle(proposal.title) !== proposal.title"
+                      class="mt-1 text-xs text-slate-500"
+                    >
                       {{ proposal.title }}
                     </p>
                     <p class="mt-1 text-sm text-slate-600">
@@ -734,14 +785,14 @@ function formatDateTime(value?: string | null): string {
                 }}
               </p>
               <p class="text-xs text-slate-500">
-                20D:
+                {{ t("research.metric20d") }}:
                 {{
                   formatSignedMetric(
                     selectedUniverseCandidate.return_20d_pct,
                     "%",
                   )
                 }}
-                · 60D:
+                · {{ t("research.metric60d") }}:
                 {{
                   formatSignedMetric(
                     selectedUniverseCandidate.return_60d_pct,

@@ -7,7 +7,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import Badge from '@/components/ui/Badge.vue'
 import Card from '@/components/ui/Card.vue'
 import { api } from '@/lib/api'
-import { displayLabel, humanizeLabel } from '@/lib/display'
+import { displayLabel, humanizeLabel, localizeStrategyTitle } from '@/lib/display'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -81,6 +81,9 @@ function formatDateTime(value?: string | null): string {
     minute: '2-digit',
   }).format(parsed)
 }
+function strategyTitle(value?: string | null): string {
+  return localizeStrategyTitle(value, locale.value)
+}
 </script>
 
 <template>
@@ -91,7 +94,13 @@ function formatDateTime(value?: string | null): string {
           <RouterLink to="/candidates" class="text-sm text-slate-500 underline-offset-2 hover:underline">
             {{ t('candidateDetail.backToCandidates') }}
           </RouterLink>
-          <h2 class="mt-2 text-xl font-semibold text-slate-900">{{ proposal?.title ?? t('candidateDetail.title') }}</h2>
+          <h2 class="mt-2 text-xl font-semibold text-slate-900">{{ strategyTitle(proposal?.title) }}</h2>
+          <p
+            v-if="proposal?.title && strategyTitle(proposal.title) !== proposal.title"
+            class="mt-1 text-xs text-slate-500"
+          >
+            {{ proposal.title }}
+          </p>
           <p class="mt-2 text-sm text-slate-600">{{ proposal?.thesis ?? t('common.noData') }}</p>
         </div>
         <div class="flex flex-wrap gap-2">
