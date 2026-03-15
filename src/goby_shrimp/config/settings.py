@@ -86,6 +86,10 @@ class GovernanceSettings(BaseModel):
     keep_threshold: float = 68.0
     challenger_min_delta: float = 3.0
     cooldown_days: int = 5
+    require_backtest_before_paper: bool = True
+    candidate_retention_limit: int = 24
+    candidate_max_age_days: int = 14
+    rejected_retention_days: int = 3
     live_drawdown_pause: float = 0.12
     live_drawdown_rollback: float = 0.15
     acceptance_min_days: int = 7

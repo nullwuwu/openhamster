@@ -341,6 +341,11 @@ function actionVariant(action?: string): 'neutral' | 'success' | 'warning' | 'da
       <p class="mt-1 text-sm text-slate-600">{{ t('paper.subtitle') }}</p>
     </Card>
 
+    <Card class="border border-slate-200/80 bg-slate-50/70">
+      <p class="text-sm font-semibold text-slate-900">{{ t('paper.tradingCalendarTitle') }}</p>
+      <p class="mt-1 text-sm text-slate-600">{{ t('paper.tradingCalendarBody') }}</p>
+    </Card>
+
     <div class="grid gap-4 xl:grid-cols-[1.5fr,1fr]">
       <Card>
         <div class="flex items-start justify-between gap-4">

@@ -240,6 +240,15 @@ export interface QualityReport {
     sharpe?: number
     max_drawdown?: number
   }
+  backtest_gate?: {
+    available?: boolean
+    eligible_for_paper?: boolean
+    blocked_reasons?: string[]
+    summary?: string
+    review?: Record<string, unknown>
+    metrics?: Record<string, unknown>
+    window?: Record<string, unknown>
+  }
   verdict?: {
     quality_band?: string
     comparable?: boolean

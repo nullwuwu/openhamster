@@ -130,6 +130,10 @@ function formatDateTime(value?: string | null): string {
             <p class="mt-1 text-sm text-slate-600">{{ t('candidates.guideDecisionBody') }}</p>
           </div>
         </div>
+        <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-3">
+          <p class="text-sm font-semibold text-amber-900">{{ t('candidates.backtestGuideTitle') }}</p>
+          <p class="mt-1 text-sm text-amber-800">{{ t('candidates.backtestGuideBody') }}</p>
+        </div>
       </details>
     </Card>
 
@@ -253,6 +257,16 @@ function formatDateTime(value?: string | null): string {
               {{ governanceNextStepLabel(String(item.latest_decision?.evidence_pack?.governance_report?.lifecycle?.next_step ?? 'monitor_candidate')) }}
             </p>
           </div>
+        </div>
+
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50 p-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidates.backtestAdmission') }}</p>
+          <p class="mt-2 text-sm font-semibold text-slate-900">
+            {{ item.proposal.evidence_pack?.quality_report?.backtest_gate?.eligible_for_paper ? t('common.yes') : t('common.no') }}
+          </p>
+          <p class="mt-1 text-sm text-slate-600">
+            {{ item.proposal.evidence_pack?.quality_report?.backtest_gate?.summary ?? t('common.noData') }}
+          </p>
         </div>
 
         <div class="grid gap-3 sm:grid-cols-3 text-sm">

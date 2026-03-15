@@ -198,6 +198,10 @@ function formatSignedMetric(value?: number | null, suffix = ''): string {
               · 20D Vol: {{ formatSignedMetric(selectedUniverseCandidate.volatility_20d_pct, '%') }}
             </p>
           </div>
+          <div class="rounded-lg border border-amber-200 bg-amber-50/70 p-4">
+            <p class="text-sm font-semibold text-amber-900">{{ t('researchDetail.backtestTermsTitle') }}</p>
+            <p class="mt-1 text-sm text-amber-800">{{ t('researchDetail.backtestTermsBody') }}</p>
+          </div>
         </Card>
 
         <Card class="space-y-4">
@@ -239,6 +243,20 @@ function formatSignedMetric(value?: number | null, suffix = ''): string {
               <span class="text-slate-500">{{ t('research.replaceable') }}</span>
               <span class="font-semibold text-slate-900">{{ boolLabel(Boolean(proposal.evidence_pack?.quality_report?.verdict?.replaceable)) }}</span>
             </div>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 p-4">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('researchDetail.backtestAdmission') }}</p>
+            <p class="mt-2 text-sm font-semibold text-slate-900">
+              {{ boolLabel(Boolean(proposal.evidence_pack?.quality_report?.backtest_gate?.eligible_for_paper)) }}
+            </p>
+            <p class="mt-2 text-sm text-slate-700">
+              {{ proposal.evidence_pack?.quality_report?.backtest_gate?.summary ?? t('common.noData') }}
+            </p>
+            <p class="mt-2 text-xs text-slate-500">
+              CAGR: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.cagr ?? '--' }}
+              · Sharpe: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.sharpe ?? '--' }}
+              · MaxDD: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.max_drawdown ?? '--' }}
+            </p>
           </div>
         </Card>
       </div>

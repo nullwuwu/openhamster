@@ -143,10 +143,14 @@ def test_research_proposals_include_pool_ranking() -> None:
         data = response.json()
         assert data
         assert any('pool_ranking' in item['evidence_pack'].get('quality_report', {}) for item in data)
+        assert any('backtest_gate' in item['evidence_pack'].get('quality_report', {}) for item in data)
         ranked = next(item for item in data if 'pool_ranking' in item['evidence_pack'].get('quality_report', {}))
         ranking = ranked['evidence_pack']['quality_report']['pool_ranking']
         assert 'percentile' in ranking
         assert 'median_gap' in ranking
+        backtest_gate = ranked['evidence_pack']['quality_report']['backtest_gate']
+        assert 'eligible_for_paper' in backtest_gate
+        assert 'summary' in backtest_gate
         track_record = ranked['evidence_pack']['quality_report']['track_record']
         assert 'trend' in track_record
         assert 'stable_streak' in track_record

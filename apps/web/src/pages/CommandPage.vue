@@ -568,6 +568,19 @@ function formatMetricLabel(key: string): string {
       </details>
     </Card>
 
+    <Card class="border border-slate-200/80 bg-slate-50/70">
+      <p class="text-sm font-semibold text-slate-900">{{ t('command.flowTitle') }}</p>
+      <p class="mt-1 text-sm text-slate-600">{{ t('command.flowBody') }}</p>
+      <div class="mt-4 grid gap-2 md:grid-cols-6">
+        <div class="rounded-lg border border-slate-200/80 bg-white/80 px-3 py-3 text-center text-sm font-medium text-slate-800">{{ t('command.flowUniverse') }}</div>
+        <div class="rounded-lg border border-slate-200/80 bg-white/80 px-3 py-3 text-center text-sm font-medium text-slate-800">{{ t('command.flowProposal') }}</div>
+        <div class="rounded-lg border border-slate-200/80 bg-white/80 px-3 py-3 text-center text-sm font-medium text-slate-800">{{ t('command.flowDebate') }}</div>
+        <div class="rounded-lg border border-slate-200/80 bg-white/80 px-3 py-3 text-center text-sm font-medium text-slate-800">{{ t('command.flowRisk') }}</div>
+        <div class="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-3 text-center text-sm font-semibold text-amber-900">{{ t('command.flowBacktest') }}</div>
+        <div class="rounded-lg border border-teal-200 bg-teal-50/70 px-3 py-3 text-center text-sm font-semibold text-teal-900">{{ t('command.flowPaper') }}</div>
+      </div>
+    </Card>
+
     <Card v-if="isSampleMode" class="border border-amber-200 bg-amber-50/80">
       <h3 class="text-sm font-semibold text-amber-900">{{ t('command.sampleModeTitle') }}</h3>
       <p class="mt-1 text-sm text-amber-800">{{ t('command.sampleModeBody') }}</p>

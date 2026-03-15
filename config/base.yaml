@@ -130,6 +130,10 @@ governance:
   keep_threshold: 68.0
   challenger_min_delta: 3.0
   cooldown_days: 5
+  require_backtest_before_paper: true
+  candidate_retention_limit: 24
+  candidate_max_age_days: 14
+  rejected_retention_days: 3
   live_drawdown_pause: 0.12
   live_drawdown_rollback: 0.15
   acceptance_min_days: 7

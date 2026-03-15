@@ -226,6 +226,26 @@ function formatDateTime(value?: string | null): string {
               </div>
             </div>
           </div>
+          <div>
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('candidateDetail.backtestGate') }}</p>
+            <p class="mt-2 text-sm font-semibold text-slate-900">
+              {{
+                boolLabel(Boolean(decision.evidence_pack?.quality_report?.backtest_gate?.eligible_for_paper))
+              }}
+            </p>
+            <p class="mt-2 text-sm text-slate-600">
+              {{ decision.evidence_pack?.quality_report?.backtest_gate?.summary ?? t('common.noData') }}
+            </p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <Badge
+                v-for="reason in decision.evidence_pack?.quality_report?.backtest_gate?.blocked_reasons ?? []"
+                :key="String(reason)"
+                variant="warning"
+              >
+                {{ governanceReasonLabel(String(reason)) }}
+              </Badge>
+            </div>
+          </div>
         </Card>
       </div>
     </template>

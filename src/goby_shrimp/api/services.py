@@ -41,6 +41,8 @@ from ..prompts import (
     strategy_agent_system_prompt,
 )
 from ..market_regime import Regime, get_market_regime
+from ..models import Verdict
+from ..risk import risk_gate_review
 from ..runtime_state import get_runtime_state_json, set_runtime_state_json
 from ..strategy import get_strategy_factory, get_strategy_registry
 from ..strategy.signals import Signal
@@ -1128,14 +1130,109 @@ def _sanitize_strategy_params(base_strategy: str, params: dict[str, object]) -> 
     return {key: value for key, value in params.items() if key in allowed}
 
 
-def _proposal_strategy_adapter(proposal: StrategyProposal):
-    params = proposal.strategy_dsl.get('params', {}) if isinstance(proposal.strategy_dsl, dict) else {}
-    base_strategy = _proposal_base_strategy(proposal)
+def _proposal_base_strategy_from_spec(title: str, strategy_dsl: dict[str, object] | None) -> str:
+    params = strategy_dsl.get('params', {}) if isinstance(strategy_dsl, dict) else {}
+    if isinstance(params, dict) and isinstance(params.get('base_strategy'), str) and params.get('base_strategy'):
+        return str(params['base_strategy'])
+    return title
+
+
+def _strategy_adapter_from_spec(title: str, strategy_dsl: dict[str, object] | None):
+    params = strategy_dsl.get('params', {}) if isinstance(strategy_dsl, dict) else {}
+    base_strategy = _proposal_base_strategy_from_spec(title, strategy_dsl)
     strategy_params = dict(params) if isinstance(params, dict) else {}
     strategy_params.pop('base_strategy', None)
     strategy_params.pop('symbol', None)
     sanitized = _sanitize_strategy_params(base_strategy, strategy_params)
     return get_strategy_factory().create(name=base_strategy, mode="auto", params=sanitized)
+
+
+def _proposal_strategy_adapter(proposal: StrategyProposal):
+    return _strategy_adapter_from_spec(proposal.title, proposal.strategy_dsl)
+
+
+def _proposal_backtest_gate(
+    *,
+    title: str,
+    symbol: str,
+    strategy_dsl: dict[str, object],
+    current_time: datetime,
+) -> dict[str, object]:
+    settings = get_settings()
+    lookback_years = max(int(settings.hard_gates.min_data_years), 3) + 1
+    start_date = (current_time - timedelta(days=365 * lookback_years)).date().isoformat()
+    end_date = current_time.date().isoformat()
+    try:
+        strategy = _strategy_adapter_from_spec(title, strategy_dsl)
+        result = BacktestEngine().run(
+            ticker=symbol,
+            strategy=strategy,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=float(settings.portfolio.default_capital),
+            is_first_live=bool(settings.yellow_flags.first_live_deployment),
+        )
+        review = risk_gate_review(result)
+        blocked_reasons: list[str] = []
+        if review.verdict == Verdict.NO_GO:
+            blocked_reasons.append('backtest_no_go')
+        elif review.requires_human_approve:
+            blocked_reasons.append('backtest_review_required')
+        elif review.verdict == Verdict.REVISE:
+            blocked_reasons.append('backtest_requires_revision')
+        eligible_for_paper = review.verdict == Verdict.GO and not review.requires_human_approve
+        return {
+            'available': True,
+            'eligible_for_paper': eligible_for_paper,
+            'blocked_reasons': blocked_reasons,
+            'summary': (
+                'Backtest admission passed for paper promotion.'
+                if eligible_for_paper
+                else review.reasoning or 'Backtest admission blocked this proposal from paper promotion.'
+            ),
+            'metrics': result.model_dump(),
+            'review': review.model_dump(),
+            'window': {
+                'start_date': start_date,
+                'end_date': end_date,
+                'lookback_years': lookback_years,
+            },
+        }
+    except Exception as exc:
+        return {
+            'available': False,
+            'eligible_for_paper': False,
+            'blocked_reasons': ['backtest_unavailable'],
+            'summary': f'Backtest admission was unavailable: {exc}',
+            'metrics': {},
+            'review': {
+                'verdict': Verdict.REVISE.value,
+                'requires_human_approve': False,
+                'hard_gates_failed': [],
+                'yellow_flags_triggered': [],
+                'utility_score': None,
+                'reasoning': str(exc),
+            },
+            'window': {
+                'start_date': start_date,
+                'end_date': end_date,
+                'lookback_years': lookback_years,
+            },
+        }
+
+
+def _backtest_gate_bottom_line(gate: dict[str, object]) -> bool:
+    return bool(gate.get('available')) and bool(gate.get('eligible_for_paper'))
+
+
+def _backtest_metrics_for_evidence(gate: dict[str, object]) -> dict[str, float]:
+    metrics = dict(gate.get('metrics', {}) or {})
+    out: dict[str, float] = {}
+    for key in ('cagr', 'sharpe', 'max_drawdown', 'annual_turnover', 'data_years', 'param_sensitivity'):
+        value = metrics.get(key)
+        if isinstance(value, (int, float)):
+            out[key] = float(value)
+    return out
 
 
 def _load_execution_history(symbol: str, current_time: datetime):
@@ -2622,6 +2719,7 @@ def _governance_action(
     market_scope: str,
     current_time: datetime,
     proposal_source_kind: str = 'mock',
+    backtest_gate: dict[str, object] | None = None,
 ) -> tuple[ProposalStatus, RiskDecisionAction, dict[str, object]]:
     settings_governance = get_settings().governance
     market_governance = _market_governance_profile(market_scope)
@@ -2661,11 +2759,22 @@ def _governance_action(
         blocked_reasons.append('cooldown_active')
     if settings_governance.block_promotion_on_macro_degrade and bool(macro_status.get('degraded')):
         blocked_reasons.append('macro_provider_degraded')
+    if settings_governance.require_backtest_before_paper:
+        if not isinstance(backtest_gate, dict):
+            blocked_reasons.append('backtest_missing')
+        elif not bool(backtest_gate.get('eligible_for_paper', False)):
+            blocked_reasons.extend(
+                [str(item) for item in list(backtest_gate.get('blocked_reasons', []) or [])] or ['backtest_not_passed']
+            )
 
     promote_allowed = (
         bottom_line_passed
         and final_score >= float(market_governance['promote_threshold'])
         and can_challenge_active
+        and (
+            not settings_governance.require_backtest_before_paper
+            or (isinstance(backtest_gate, dict) and bool(backtest_gate.get('eligible_for_paper', False)))
+        )
         and not (
             settings_governance.block_promotion_on_macro_degrade and bool(macro_status.get('degraded'))
         )
@@ -2707,6 +2816,8 @@ def _governance_action(
         'promotion_gate': {
             'eligible': action == RiskDecisionAction.PROMOTE_TO_PAPER,
             'blocked_reasons': blocked_reasons,
+            'backtest_required': bool(settings_governance.require_backtest_before_paper),
+            'backtest_summary': str(backtest_gate.get('summary', '')) if isinstance(backtest_gate, dict) else '',
         },
         'active_comparison': {
             'active_title': active_context.get('title') if active_context else None,
@@ -2867,6 +2978,7 @@ def _base_evidence_pack(
         'data_integrity': True,
         'max_drawdown_limit': deterministic_evidence['max_drawdown'] <= 0.15,
         'execution_safety': True,
+        'backtest_admission': True,
     }
     return {
         'bottom_line_report': bottom_line_report,
@@ -2894,6 +3006,7 @@ def _build_quality_report(
     final_score: float,
 ) -> dict[str, object]:
     deterministic = dict(evidence_pack.get('deterministic_evidence', {}))
+    backtest_gate = dict(evidence_pack.get('backtest_gate', {}))
     active_comparison = dict(governance_report.get('active_comparison', {}))
     thresholds = dict(governance_report.get('thresholds', {}))
     promotion_gate = dict(governance_report.get('promotion_gate', {}))
@@ -2951,6 +3064,15 @@ def _build_quality_report(
             'sharpe': float(deterministic.get('sharpe', 0.0)),
             'max_drawdown': float(deterministic.get('max_drawdown', 0.0)),
         },
+        'backtest_gate': {
+            'available': bool(backtest_gate.get('available', False)),
+            'eligible_for_paper': bool(backtest_gate.get('eligible_for_paper', False)),
+            'blocked_reasons': [str(item) for item in list(backtest_gate.get('blocked_reasons', []) or [])],
+            'summary': str(backtest_gate.get('summary', '')),
+            'review': dict(backtest_gate.get('review', {}) or {}),
+            'metrics': dict(backtest_gate.get('metrics', {}) or {}),
+            'window': dict(backtest_gate.get('window', {}) or {}),
+        },
         'verdict': {
             'quality_band': quality_band,
             'comparable': comparable,
@@ -2961,10 +3083,7 @@ def _build_quality_report(
 
 
 def _proposal_base_strategy(proposal: StrategyProposal) -> str:
-    params = proposal.strategy_dsl.get('params', {}) if isinstance(proposal.strategy_dsl, dict) else {}
-    if isinstance(params, dict) and isinstance(params.get('base_strategy'), str) and params.get('base_strategy'):
-        return str(params['base_strategy'])
-    return proposal.title
+    return _proposal_base_strategy_from_spec(proposal.title, proposal.strategy_dsl)
 
 
 def _attach_quality_track_record(db: Session, proposals: list[StrategyProposal]) -> list[StrategyProposal]:
@@ -3074,6 +3193,18 @@ def _ensure_quality_report_payload(evidence_pack: dict[str, object], final_score
             }
             evidence_pack['governance_report'] = governance_report
     if isinstance(evidence_pack.get('quality_report'), dict):
+        quality_report = dict(evidence_pack.get('quality_report', {}) or {})
+        if 'backtest_gate' not in quality_report:
+            quality_report['backtest_gate'] = {
+                'available': False,
+                'eligible_for_paper': False,
+                'blocked_reasons': ['backtest_not_recorded'],
+                'summary': 'Backtest admission was not recorded for this historical proposal.',
+                'review': {},
+                'metrics': {},
+                'window': {},
+            }
+            evidence_pack['quality_report'] = quality_report
         return evidence_pack
     if not isinstance(governance_report, dict):
         return evidence_pack
@@ -3928,6 +4059,7 @@ def materialize_proposals_and_decisions(
 ) -> None:
     active_context = _proposal_context(previous_active)
     macro_status = dict(snapshot.get('macro_status', {}))
+    settings_governance = get_settings().governance
     replacement_promoted = False
     for index, blueprint in enumerate(blueprints):
         deterministic_score = _deterministic_score(index, snapshot, digest, list(blueprint['features_used']))
@@ -3940,6 +4072,7 @@ def materialize_proposals_and_decisions(
             market_scope=str(digest.market_scope),
             current_time=current_time,
             proposal_source_kind=str(blueprint.get('source_kind', 'mock')),
+            backtest_gate=None,
         )
         debate_report = run_research_debate(db, blueprint, snapshot, current_time)
         risk_judgment, evidence_pack = run_risk_judgment(
@@ -3953,7 +4086,24 @@ def materialize_proposals_and_decisions(
         )
         llm_score = float(risk_judgment['llm_score'])
         final_score = round(deterministic_score * 0.7 + llm_score * 0.3, 1)
-        bottom_line_passed = all(evidence_pack['bottom_line_report'].values())
+        dsl = _strategy_dsl(blueprint, snapshot, digest)
+        backtest_gate = _proposal_backtest_gate(
+            title=str(blueprint['title']),
+            symbol=str(snapshot['symbol']),
+            strategy_dsl=dsl,
+            current_time=current_time,
+        )
+        evidence_pack['backtest_gate'] = backtest_gate
+        evidence_pack['deterministic_evidence'] = {
+            **dict(evidence_pack.get('deterministic_evidence', {}) or {}),
+            **_backtest_metrics_for_evidence(backtest_gate),
+        }
+        if settings_governance.require_backtest_before_paper:
+            evidence_pack['bottom_line_report'] = {
+                **dict(evidence_pack.get('bottom_line_report', {}) or {}),
+                'backtest_admission': _backtest_gate_bottom_line(backtest_gate),
+            }
+        bottom_line_passed = all(bool(value) for value in evidence_pack['bottom_line_report'].values())
         status, action, governance_report = _governance_action(
             final_score=final_score,
             bottom_line_passed=bottom_line_passed,
@@ -3962,6 +4112,7 @@ def materialize_proposals_and_decisions(
             market_scope=str(digest.market_scope),
             current_time=current_time,
             proposal_source_kind=str(blueprint.get('source_kind', 'mock')),
+            backtest_gate=backtest_gate,
         )
         evidence_pack['governance_report'] = governance_report
         evidence_pack['quality_report'] = _build_quality_report(
@@ -3969,7 +4120,6 @@ def materialize_proposals_and_decisions(
             governance_report=governance_report,
             final_score=final_score,
         )
-        dsl = _strategy_dsl(blueprint, snapshot, digest)
         proposal = StrategyProposal(
             run_id=f"run-{stable_hash([blueprint['title'], digest.digest_hash, current_time.isoformat(), blueprint.get('source_kind', 'mock')])}",
             title=str(blueprint['title']),
@@ -4132,6 +4282,104 @@ def archive_out_of_scope_strategy_proposals(
     db.flush()
 
 
+def _proposal_lifecycle_phase(proposal: StrategyProposal) -> str | None:
+    latest_decision = _latest_proposal_decision(proposal)
+    if latest_decision is None or not isinstance(latest_decision.evidence_pack, dict):
+        return None
+    return str(
+        dict(dict(latest_decision.evidence_pack).get('governance_report', {}))
+        .get('lifecycle', {})
+        .get('phase')
+        or ''
+    ) or None
+
+
+def prune_strategy_proposals(
+    db: Session,
+    *,
+    active_symbol: str,
+    active_market_scope: str,
+    current_time: datetime,
+) -> dict[str, int]:
+    settings = get_settings().governance
+    archived = {
+        'rejected_retention': 0,
+        'aged_candidates': 0,
+        'overflow_candidates': 0,
+    }
+    rejected_cutoff = current_time - timedelta(days=max(0, int(settings.rejected_retention_days)))
+    rejected_records = list(
+        db.execute(
+            select(StrategyProposal).where(
+                StrategyProposal.status == ProposalStatus.REJECTED,
+                StrategyProposal.created_at < rejected_cutoff,
+                StrategyProposal.status != ProposalStatus.ARCHIVED,
+            )
+        ).scalars()
+    )
+    for record in rejected_records:
+        record.status = ProposalStatus.ARCHIVED
+        record.archived_at = current_time
+        record.updated_at = current_time
+        archived['rejected_retention'] += 1
+
+    candidate_records = list(
+        db.execute(
+            select(StrategyProposal)
+            .options(selectinload(StrategyProposal.decisions))
+            .where(
+                StrategyProposal.status == ProposalStatus.CANDIDATE,
+                StrategyProposal.symbol == active_symbol,
+                StrategyProposal.market_scope == active_market_scope,
+            )
+        ).scalars()
+    )
+    protected_phases = {'candidate_cooldown', 'paused_pending_review'}
+    max_age_days = max(1, int(settings.candidate_max_age_days))
+    retention_limit = max(1, int(settings.candidate_retention_limit))
+    survivors: list[StrategyProposal] = []
+    for record in candidate_records:
+        phase = _proposal_lifecycle_phase(record)
+        age_days = max(0, (current_time.date() - record.created_at.date()).days)
+        if age_days > max_age_days and phase not in protected_phases:
+            record.status = ProposalStatus.ARCHIVED
+            record.archived_at = current_time
+            record.updated_at = current_time
+            archived['aged_candidates'] += 1
+            continue
+        survivors.append(record)
+
+    ranked = sorted(survivors, key=lambda item: (item.final_score, item.created_at), reverse=True)
+    kept_ids = {record.id for record in ranked[:retention_limit]}
+    for record in ranked[retention_limit:]:
+        phase = _proposal_lifecycle_phase(record)
+        if phase in protected_phases:
+            kept_ids.add(record.id)
+            continue
+        record.status = ProposalStatus.ARCHIVED
+        record.archived_at = current_time
+        record.updated_at = current_time
+        archived['overflow_candidates'] += 1
+
+    if any(archived.values()):
+        _record_system_audit(
+            db,
+            event_type='candidate_pool_pruned',
+            entity_type='strategy_pool',
+            entity_id=f'{active_market_scope}:{active_symbol}',
+            payload={
+                'market_scope': active_market_scope,
+                'symbol': active_symbol,
+                'retention_limit': retention_limit,
+                'candidate_max_age_days': max_age_days,
+                **archived,
+            },
+            created_at=current_time,
+        )
+    db.flush()
+    return archived
+
+
 def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str = 'manual') -> None:
     with _PIPELINE_SYNC_LOCK:
         started_at = now_tz()
@@ -4244,6 +4492,12 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 digest=digest,
                 blueprints=blueprints,
                 previous_active=previous_active,
+                current_time=current_time,
+            )
+            prune_strategy_proposals(
+                db,
+                active_symbol=symbol,
+                active_market_scope=market_scope,
                 current_time=current_time,
             )
             if previous_active is not None:
