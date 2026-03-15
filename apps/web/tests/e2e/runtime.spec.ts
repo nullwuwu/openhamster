@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test('runtime page shows pipeline detail and logs', async ({ page }) => {
-  const responsePromise = page.waitForResponse((response) => response.url().includes('/api/v1/command') && response.status() === 200)
+  const responsePromise = page.waitForResponse((response) => response.url().includes('/api/v1/runtime/logs') && response.status() === 200)
   await page.goto('/runtime')
   await responsePromise
 

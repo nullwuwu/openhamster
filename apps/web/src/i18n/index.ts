@@ -456,6 +456,8 @@ const messages = {
     research: {
       title: '研究与辩论',
       subtitle: 'StrategyAgent 产出提案，ResearchDebateAgent 形成支持与反对证据。',
+      summaryTitle: '研究摘要',
+      summaryBody: '主页面只保留当前结论、回测准入、质量结论和下一步。完整辩论、DSL 与参数细节进入详情页。',
       leaderboard: '策略池排行榜',
       eliminationView: '淘汰视图',
       rejectedCount: '已拒绝数量',
@@ -1130,6 +1132,8 @@ const messages = {
     research: {
       title: 'Research and Debate',
       subtitle: 'StrategyAgent creates proposals and ResearchDebateAgent stresses the thesis before promotion.',
+      summaryTitle: 'Research Summary',
+      summaryBody: 'The main page now keeps only the current conclusion, backtest admission, quality verdict, and next step. Full debate, DSL, and parameter detail live on the detail page.',
       leaderboard: 'Pool Leaderboard',
       eliminationView: 'Elimination View',
       rejectedCount: 'Rejected Count',
