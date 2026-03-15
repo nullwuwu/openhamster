@@ -14,8 +14,14 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return
-          if (id.includes('echarts') || id.includes('zrender') || id.includes('vue-echarts')) {
-            return 'vendor-echarts'
+          if (id.includes('vue-echarts')) {
+            return 'vendor-vue-echarts'
+          }
+          if (id.includes('echarts')) {
+            return 'vendor-echarts-core'
+          }
+          if (id.includes('zrender')) {
+            return 'vendor-zrender'
           }
           if (id.includes('@tanstack/vue-query')) {
             return 'vendor-query'

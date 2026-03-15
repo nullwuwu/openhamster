@@ -1,10 +1,10 @@
 # 实施状态
 
 ## 当前完成度
-- 工程重构：约 `92%`
+- 工程底座：约 `93%`
 - 产品可用度：约 `98%`
-- 可审计策略工厂目标达成度：约 `94%`
-- `v2` 推进度：约 `30%`
+- `v1` 完成度：约 `95%`
+- `v2` 推进度：约 `35%-40%`
 
 ## 已完成
 - 仓库已收敛到单一主线：`API + Dashboard + MiniMax LLM Gateway + Macro pipeline + Backtest/Experiment + Audit`
@@ -20,6 +20,11 @@
   - `/research`
   - `/paper`
   - `/audit`
+  - `/runtime`
+- Dashboard 已完成一轮“摘要页 + 详情页”分层：
+  - `/research` 主页面已收成摘要，深证据进入 proposal detail
+  - `/paper` 主页面已收成摘要，订单/持仓/恢复上下文进入 paper detail
+  - `/audit` 高级区已按 readiness / universe / risk / digest / raw events 分组折叠
 - Dashboard 关键页面已进入“决策台”形态：
   - `/command` 已补评分拆解、治理原因、宏观通道状态、策略状态流、候选池分布概览
   - `/candidates` 已补活跃策略对比、冷却期、阻断原因、候选状态流
@@ -126,11 +131,18 @@
   - dashboard: `Run Now`
 - 前端性能已完成首轮收口：
   - Vite manual chunks
-  - `vendor-vue / vendor-query / vendor-echarts / vendor`
+  - `vendor-vue / vendor-query / vendor-vue-echarts / vendor-echarts-core / vendor-zrender / vendor`
   - 主入口 bundle 已显著缩小
-- 前端已完成手工拆包，主入口 bundle 已显著收敛
+- 前端已补 Playwright 核心场景回归：
+  - `/command`
+  - `/runtime`
+  - `/paper`
+  - `/paper/detail`
+  - `/audit`
+  - `/research/:proposalId`
 - 当前测试与前端构建通过：
-  - `pytest tests -q -> 122 passed, 8 skipped`
+  - `pytest tests/integration/test_api_routes.py -q -> 14 passed`
+  - `cd apps/web && npm run test:e2e -- --reporter=line -> 6 passed`
   - `npm run build --prefix apps/web -> passed`
 
 ## 已明确不做
@@ -151,7 +163,7 @@
   - 当前已有 provider chain、reliability、freshness
   - 后续仍建议补更成熟的源健康评分历史与优先级策略
 - Dashboard 仍有最后一轮产品化空间：
-  - `/paper` 与 `/audit` 还可以继续做深层 drill-down
+  - `/paper` 与 `/audit` 仍可继续做更深层 drill-down
   - 多语言仍需随新增展示项持续补齐
 
 ## 下一步优先级
