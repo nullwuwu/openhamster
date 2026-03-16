@@ -68,6 +68,12 @@ function poolSelectionLabel(value?: string): string {
 function marketBiasLabel(value?: string): string {
   return displayLabel(t, 'marketBias', value)
 }
+function knowledgeFamilyLabel(value?: string): string {
+  return displayLabel(t, 'knowledgeFamily', value)
+}
+function knowledgeFitLabel(value?: string): string {
+  return displayLabel(t, 'knowledgeFit', value)
+}
 function boolLabel(value?: boolean): string {
   if (value === undefined || value === null) return '--'
   return value ? t('common.yes') : t('common.no')
@@ -266,6 +272,25 @@ function strategyTitle(value?: string | null): string {
               {{ t('research.metricCagr') }}: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.cagr ?? '--' }}
               · {{ t('research.metricSharpe') }}: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.sharpe ?? '--' }}
               · {{ t('research.metricMaxDrawdownShort') }}: {{ proposal.evidence_pack?.quality_report?.backtest_gate?.metrics?.max_drawdown ?? '--' }}
+            </p>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 p-4">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('researchDetail.knowledgeTitle') }}</p>
+            <p class="mt-2 text-sm font-semibold text-slate-900">
+              {{
+                (proposal.evidence_pack?.quality_report?.knowledge_families_used ?? [])
+                  .map((item) => knowledgeFamilyLabel(String(item)))
+                  .join(' / ') || t('common.noData')
+              }}
+            </p>
+            <p class="mt-2 text-sm text-slate-700">
+              {{ proposal.evidence_pack?.quality_report?.baseline_delta_summary ?? t('common.noData') }}
+            </p>
+            <p class="mt-2 text-xs text-slate-500">
+              {{ t('researchDetail.knowledgeFit') }}:
+              {{ knowledgeFitLabel(String(proposal.evidence_pack?.quality_report?.knowledge_fit_assessment ?? 'unknown')) }}
+              · {{ t('researchDetail.noveltyAssessment') }}:
+              {{ displayLabel(t, 'noveltyAssessment', String(proposal.evidence_pack?.quality_report?.verdict?.novelty_assessment ?? 'unknown')) }}
             </p>
           </div>
         </Card>

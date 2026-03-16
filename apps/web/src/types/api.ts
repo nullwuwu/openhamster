@@ -60,6 +60,9 @@ export interface StrategySnapshot {
   tags: string[]
   supported_markets: string[]
   market_bias: string
+  knowledge_families?: string[]
+  strategy_family_label_zh?: string | null
+  knowledge_notes_zh?: string | null
   updated_at: string
 }
 
@@ -249,11 +252,17 @@ export interface QualityReport {
     metrics?: Record<string, unknown>
     window?: Record<string, unknown>
   }
+  knowledge_fit_assessment?: string
+  knowledge_risk_flags?: string[]
+  knowledge_failure_mode_hits?: string[]
+  knowledge_families_used?: string[]
+  baseline_delta_summary?: string
   verdict?: {
     quality_band?: string
     comparable?: boolean
     replaceable?: boolean
     accumulable?: boolean
+    novelty_assessment?: string
   }
   pool_ranking?: {
     rank?: number

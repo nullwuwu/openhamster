@@ -20,6 +20,9 @@ class StrategyPlugin:
     tags: tuple[str, ...] = ()
     supported_markets: tuple[str, ...] = ("HK", "CN")
     market_bias: str = "balanced"
+    knowledge_families: tuple[str, ...] = ()
+    strategy_family_label_zh: str = ""
+    knowledge_notes_zh: str = ""
 
 
 def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
@@ -32,6 +35,9 @@ def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
             tags=("trend", "moving-average"),
             supported_markets=("HK", "CN"),
             market_bias="hk_preferred",
+            knowledge_families=("trend_following",),
+            strategy_family_label_zh="趋势跟随",
+            knowledge_notes_zh="通过中短期均线关系确认趋势延续，适合作为港股主线趋势基线。",
         ),
         StrategyPlugin(
             name="rsi",
@@ -41,6 +47,9 @@ def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
             tags=("momentum", "oscillator"),
             supported_markets=("CN", "HK"),
             market_bias="cn_preferred",
+            knowledge_families=("mean_reversion", "momentum_filter"),
+            strategy_family_label_zh="均值回归 / 动量过滤",
+            knowledge_notes_zh="利用超买超卖做反转判断，但必须警惕强趋势环境中的持续钝化。",
         ),
         StrategyPlugin(
             name="macd",
@@ -50,6 +59,9 @@ def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
             tags=("momentum", "trend"),
             supported_markets=("HK", "CN"),
             market_bias="balanced",
+            knowledge_families=("trend_following", "momentum_filter"),
+            strategy_family_label_zh="趋势跟随 / 动量过滤",
+            knowledge_notes_zh="用动量和趋势共振过滤弱信号，避免在无方向区间里高频切换。",
         ),
         StrategyPlugin(
             name="mean_reversion",
@@ -59,6 +71,9 @@ def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
             tags=("reversion", "vectorized"),
             supported_markets=("CN", "HK"),
             market_bias="cn_preferred",
+            knowledge_families=("mean_reversion",),
+            strategy_family_label_zh="均值回归",
+            knowledge_notes_zh="依赖偏离回归和波动收敛，不适合趋势快速扩张时直接逆势参与。",
         ),
         StrategyPlugin(
             name="channel_breakout",
@@ -68,6 +83,9 @@ def iter_builtin_strategy_plugins() -> list[StrategyPlugin]:
             tags=("breakout", "vectorized"),
             supported_markets=("HK", "CN"),
             market_bias="hk_preferred",
+            knowledge_families=("breakout", "volatility_filter"),
+            strategy_family_label_zh="突破 / 波动率过滤",
+            knowledge_notes_zh="在波动扩张与区间突破配合时更有效，适合港股指数主导型市场。",
         ),
     ]
 

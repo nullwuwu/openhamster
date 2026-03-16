@@ -1,5 +1,10 @@
 import pandas as pd
-from goby_shrimp.strategy import get_strategy_factory, get_strategy_registry, strategy_plugin_names
+from goby_shrimp.strategy import (
+    get_strategy_factory,
+    get_strategy_knowledge_catalog,
+    get_strategy_registry,
+    strategy_plugin_names,
+)
 from goby_shrimp.strategy.signals import Signal
 
 
@@ -41,3 +46,14 @@ def test_registry_exposes_plugin_metadata():
     assert definitions
     assert any(item.description for item in definitions)
     assert "ma_cross" in strategy_plugin_names()
+    assert all(item.knowledge_families for item in definitions)
+
+
+def test_strategy_knowledge_catalog_matches_baselines():
+    catalog = get_strategy_knowledge_catalog()
+    assert len(catalog) == 5
+    families = {item.family_key for item in catalog}
+    assert {"trend_following", "mean_reversion", "breakout", "momentum_filter", "volatility_filter"} == families
+    registry = get_strategy_registry()
+    assert set(registry.get("ma_cross").knowledge_families) == {"trend_following"}
+    assert set(registry.get("channel_breakout").knowledge_families) == {"breakout", "volatility_filter"}

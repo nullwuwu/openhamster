@@ -82,6 +82,9 @@ class StrategySnapshotDTO(BaseModel):
     tags: list[str] = Field(default_factory=list)
     supported_markets: list[str] = Field(default_factory=list)
     market_bias: str = 'balanced'
+    knowledge_families: list[str] = Field(default_factory=list)
+    strategy_family_label_zh: str | None = None
+    knowledge_notes_zh: str | None = None
     updated_at: datetime
 
 

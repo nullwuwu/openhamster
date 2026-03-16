@@ -106,6 +106,9 @@ class StrategyDefinition:
     tags: tuple[str, ...] = ()
     supported_markets: tuple[str, ...] = ("HK", "CN")
     market_bias: str = "balanced"
+    knowledge_families: tuple[str, ...] = ()
+    strategy_family_label_zh: str = ""
+    knowledge_notes_zh: str = ""
 
 
 class StrategyRegistry:
@@ -124,6 +127,9 @@ class StrategyRegistry:
         tags: tuple[str, ...] | None = None,
         supported_markets: tuple[str, ...] | None = None,
         market_bias: str = "balanced",
+        knowledge_families: tuple[str, ...] | None = None,
+        strategy_family_label_zh: str = "",
+        knowledge_notes_zh: str = "",
     ) -> None:
         key = name.strip().lower()
         self._defs[key] = StrategyDefinition(
@@ -135,6 +141,9 @@ class StrategyRegistry:
             tags=tags or (),
             supported_markets=supported_markets or ("HK", "CN"),
             market_bias=market_bias,
+            knowledge_families=knowledge_families or (),
+            strategy_family_label_zh=strategy_family_label_zh,
+            knowledge_notes_zh=knowledge_notes_zh,
         )
 
     def register_plugin(self, plugin: StrategyPlugin) -> None:
@@ -147,6 +156,9 @@ class StrategyRegistry:
             tags=plugin.tags,
             supported_markets=plugin.supported_markets,
             market_bias=plugin.market_bias,
+            knowledge_families=plugin.knowledge_families,
+            strategy_family_label_zh=plugin.strategy_family_label_zh,
+            knowledge_notes_zh=plugin.knowledge_notes_zh,
         )
 
     def get(self, name: str) -> StrategyDefinition:

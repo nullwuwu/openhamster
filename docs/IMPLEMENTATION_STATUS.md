@@ -107,6 +107,27 @@
   - `/command` 与 `/audit` 已展示 provider cohort 摘要
   - `/audit` 已展示 provider cohort 趋势图
   - readiness 证据层已纳入 provider comparison
+- 第一版 `strategy knowledge layer（策略知识层）` 已落地：
+  - 已新增 5 个内置知识家族：
+    - `trend_following（趋势跟随）`
+    - `mean_reversion（均值回归）`
+    - `breakout（突破）`
+    - `momentum_filter（动量过滤）`
+    - `volatility_filter（波动率过滤）`
+  - baseline 已显式映射到知识家族，不再只是“策略类 + 描述”
+  - `strategy_agent（策略生成）` 已显式消费知识条目、市场偏好与 baseline 家族映射
+  - proposal / evidence / quality_report 已带：
+    - `knowledge_families_used`
+    - `baseline_delta_summary`
+    - `novelty_claim`
+    - `knowledge_fit_assessment`
+    - `knowledge_risk_flags`
+    - `novelty_assessment`
+  - `research debate（研究辩论）` 与 `risk gate（风险门禁）` 已可因知识层原因阻断 proposal
+  - 已形成知识层审计语义：
+    - `strategy_knowledge_applied`
+    - `strategy_novelty_reviewed`
+  - `/command`、`/research`、`/research/:proposalId`、`/audit` 已显示知识层摘要或证据
 - `v2` 的桌面应用方向已形成正式方案，但尚未进入壳层实现：
   - `Desktop Packaging Proposal`
   - 当前仍以 `launchd + 本地服务 + dashboard` 为长期运行基线
@@ -141,7 +162,7 @@
   - `/audit`
   - `/research/:proposalId`
 - 当前测试与前端构建通过：
-  - `pytest tests/integration/test_api_routes.py -q -> 14 passed`
+  - `pytest tests/test_strategy_factory.py tests/integration/test_api_routes.py -q -> 20 passed`
   - `cd apps/web && npm run test:e2e -- --reporter=line -> 6 passed`
   - `npm run build --prefix apps/web -> passed`
 
@@ -165,6 +186,10 @@
 - Dashboard 仍有最后一轮产品化空间：
   - `/paper` 与 `/audit` 仍可继续做更深层 drill-down
   - 多语言仍需随新增展示项持续补齐
+- 策略知识层仍是第一版：
+  - 当前只使用内置知识目录
+  - 还没有进入第二阶段的外部资料提炼与审核流程
+  - 知识层目前主要服务解释力、治理和审计，还未形成独立的长期统计面板
 
 ## 下一步优先级
 1. 用连续运行样本验证验收报告的长期稳定性

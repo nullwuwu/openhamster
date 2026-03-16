@@ -15,6 +15,7 @@ def risk_manager_llm_system_prompt() -> str:
         'Return JSON only. You do not control the final decision. '
         'Write explanations in Simplified Chinese for a Chinese-language operator dashboard. '
         'Score contextual fit between 0 and 100 and explain the score briefly, explicitly using the supplied market profile. '
+        'Use the supplied strategy knowledge as an evaluation prior for family fit, failure modes, and novelty, but do not override hard gates. '
         'Hard gates are enforced elsewhere and must never be overridden.'
     )
 
@@ -27,6 +28,7 @@ def build_risk_manager_llm_payload(
     market_snapshot: dict[str, Any],
     event_digest: dict[str, Any],
     market_profile: dict[str, Any],
+    knowledge_context: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         'prompt_version': RISK_MANAGER_LLM_PROMPT_VERSION,
@@ -38,6 +40,7 @@ def build_risk_manager_llm_payload(
         'market_snapshot': market_snapshot,
         'market_profile': market_profile,
         'event_digest': event_digest,
+        'knowledge_context': knowledge_context,
         'output_schema': {
             'llm_score': 'number between 0 and 100',
             'llm_explanation': 'string',

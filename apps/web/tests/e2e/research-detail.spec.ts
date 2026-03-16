@@ -18,4 +18,5 @@ test("research detail page shows backtest admission and causal chain", async ({
   ).toBeVisible();
   await expect(page.getByText(/Research Causal View|研究因果链/)).toBeVisible();
   await expect(page.getByText(/Backtest Terms|回测术语说明/)).toBeVisible();
+  await expect(page.getByText(/Strategy Knowledge|策略知识层/)).toBeVisible();
 });

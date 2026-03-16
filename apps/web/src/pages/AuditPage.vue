@@ -16,6 +16,7 @@ import {
   displayLabel,
   humanizeLabel,
   localizeStrategyTitle,
+  term,
 } from "@/lib/display";
 
 use([CanvasRenderer, GridComponent, TooltipComponent, LineChart]);
@@ -441,6 +442,12 @@ function liveReadinessStatusLabel(value?: string): string {
 function universeReasonTagLabel(value?: string): string {
   return displayLabel(t, "universeReasonTag", value);
 }
+function knowledgeFamilyLabel(value?: string): string {
+  return displayLabel(t, "knowledgeFamily", value);
+}
+function knowledgeFitLabel(value?: string): string {
+  return displayLabel(t, "knowledgeFit", value);
+}
 
 function actionVariant(
   action?: string,
@@ -512,7 +519,7 @@ function chainSummary(chain: (typeof timelineChains.value)[number]): string {
 <template>
   <div class="space-y-4">
     <Card>
-      <h3 class="text-sm font-semibold">{{ t("audit.title") }}</h3>
+      <h3 class="text-sm font-semibold">{{ term(t("audit.title")) }}</h3>
       <p class="mt-1 text-sm text-slate-600">{{ t("audit.subtitle") }}</p>
     </Card>
 
@@ -531,7 +538,7 @@ function chainSummary(chain: (typeof timelineChains.value)[number]): string {
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 class="text-sm font-semibold">
-            {{ t("audit.providerMigration") }}
+            {{ term(t("audit.providerMigration")) }}
           </h3>
           <p class="mt-1 text-sm text-slate-600">
             {{ providerMigration.summary }}
@@ -749,6 +756,29 @@ function chainSummary(chain: (typeof timelineChains.value)[number]): string {
                   chain.decision.evidence_pack?.quality_report?.backtest_gate
                     ?.summary ?? t("common.noData")
                 }}
+              </p>
+            </div>
+
+            <div
+              v-if="chain.decision?.evidence_pack?.quality_report?.knowledge_families_used?.length"
+              class="mt-3 rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-3 text-sm"
+            >
+              <p class="text-slate-500">{{ t("audit.knowledgeReview") }}</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{
+                  (chain.decision.evidence_pack?.quality_report?.knowledge_families_used ?? [])
+                    .map((item) => knowledgeFamilyLabel(String(item)))
+                    .join(" / ")
+                }}
+              </p>
+              <p class="mt-2 text-slate-600">
+                {{ chain.decision.evidence_pack?.quality_report?.baseline_delta_summary ?? t("common.noData") }}
+              </p>
+              <p class="mt-2 text-xs text-slate-500">
+                {{ t("audit.knowledgeFit") }}:
+                {{ knowledgeFitLabel(String(chain.decision.evidence_pack?.quality_report?.knowledge_fit_assessment ?? "unknown")) }}
+                · {{ t("audit.noveltyAssessment") }}:
+                {{ displayLabel(t, "noveltyAssessment", String(chain.decision.evidence_pack?.quality_report?.verdict?.novelty_assessment ?? "unknown")) }}
               </p>
             </div>
 

@@ -44,7 +44,13 @@ from ..market_regime import Regime, get_market_regime
 from ..models import Verdict
 from ..risk import risk_gate_review
 from ..runtime_state import get_runtime_state_json, set_runtime_state_json
-from ..strategy import get_strategy_factory, get_strategy_registry
+from ..strategy import (
+    get_strategy_factory,
+    get_strategy_registry,
+    get_strategy_knowledge,
+    knowledge_payload_for_market,
+    knowledge_preferences_from_market_profile,
+)
 from ..strategy.signals import Signal
 from .db import SessionLocal
 from .models import (
@@ -1917,6 +1923,42 @@ def _current_market_profile(market_scope: str) -> dict[str, object]:
     return get_market_profile(market_scope).to_dict()
 
 
+def _current_strategy_knowledge(market_scope: str) -> list[dict[str, object]]:
+    return knowledge_payload_for_market(market_scope)
+
+
+def _knowledge_preferences_for_market_profile(market_profile: dict[str, object]) -> tuple[list[str], list[str]]:
+    return knowledge_preferences_from_market_profile(
+        preferred_baseline_tags=list(market_profile.get("preferred_baseline_tags", []) or []),
+        discouraged_baseline_tags=list(market_profile.get("discouraged_baseline_tags", []) or []),
+    )
+
+
+def _baseline_family_map_for_market(market_scope: str) -> dict[str, list[str]]:
+    market = market_scope.upper()
+    mapping: dict[str, list[str]] = {}
+    for definition in get_strategy_registry().definitions():
+        if market not in definition.supported_markets:
+            continue
+        mapping[definition.name] = list(definition.knowledge_families)
+    mapping["novel_composite"] = []
+    return mapping
+
+
+def _knowledge_entries(family_keys: list[str]) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for family_key in family_keys:
+        if family_key in seen:
+            continue
+        seen.add(family_key)
+        try:
+            entries.append(get_strategy_knowledge(family_key).to_dict())
+        except KeyError:
+            continue
+    return entries
+
+
 def _market_governance_profile(market_scope: str) -> dict[str, float | int]:
     profile = get_market_profile(market_scope)
     governance = profile.governance
@@ -2418,11 +2460,14 @@ def _fallback_proposal_blueprints(symbol: str, provider_status) -> list[dict[str
         {
             'title': 'Signal Reef',
             'base_strategy': 'ma_cross',
+            'knowledge_families_used': ['trend_following'],
             'source_kind': 'mock',
             'provider_status': provider_status.status,
             'provider_model': provider_status.model,
             'provider_message': provider_status.message,
             'thesis': 'Use trend persistence plus macro stability to keep a single active exposure with low turnover.',
+            'baseline_delta_summary': '在均线趋势基线上强化宏观稳定性过滤，属于温和的趋势变体。',
+            'novelty_claim': '轻度创新：趋势基线 + 宏观稳定性过滤。',
             'features_used': ['SMA', 'EMA', 'volatility', 'macro_summary'],
             'params': {'short_window': 12, 'long_window': 34},
             'debate_report': {
@@ -2441,11 +2486,14 @@ def _fallback_proposal_blueprints(symbol: str, provider_status) -> list[dict[str
         {
             'title': 'Harbor Drift',
             'base_strategy': 'channel_breakout',
+            'knowledge_families_used': ['breakout', 'volatility_filter'],
             'source_kind': 'mock',
             'provider_status': provider_status.status,
             'provider_model': provider_status.model,
             'provider_message': provider_status.message,
             'thesis': 'Watch for volatility compression and breakout only when macro drift stays contained.',
+            'baseline_delta_summary': '在通道突破上强调波动压缩和宏观平稳约束，属于突破过滤变体。',
+            'novelty_claim': '中等创新：突破基线 + 波动率过滤。',
             'features_used': ['Donchian', 'ATR', 'volatility', 'macro_summary'],
             'params': {'lookback': 20},
             'debate_report': {
@@ -2464,11 +2512,14 @@ def _fallback_proposal_blueprints(symbol: str, provider_status) -> list[dict[str
         {
             'title': 'Tide Counter',
             'base_strategy': 'mean_reversion',
+            'knowledge_families_used': ['mean_reversion', 'momentum_filter'],
             'source_kind': 'mock',
             'provider_status': provider_status.status,
             'provider_model': provider_status.model,
             'provider_message': provider_status.message,
             'thesis': 'Fade short over-extension if macro pressure eases and realized volatility compresses.',
+            'baseline_delta_summary': '在均值回归上加入宏观缓和和波动收缩前提，属于反转过滤变体。',
+            'novelty_claim': '轻度创新：均值回归基线 + 环境过滤。',
             'features_used': ['Bollinger', 'RSI', 'volatility', 'macro_summary'],
             'params': {'window': 20, 'rsi_threshold': 30},
             'debate_report': {
@@ -2517,11 +2568,23 @@ def _normalize_strategy_agent_blueprints(
         if not features_used:
             features_used = ['volatility', 'macro_summary']
         raw_params = proposal.get('params', {})
+        knowledge_families_used = [
+            str(item)
+            for item in list(proposal.get('knowledge_families_used', []) or [])
+            if str(item).strip()
+        ]
+        if not knowledge_families_used and base_strategy != 'novel_composite':
+            knowledge_families_used = list(get_strategy_registry().get(base_strategy).knowledge_families)
+        if base_strategy == 'novel_composite' and not knowledge_families_used:
+            continue
         normalized.append(
             {
                 'title': title,
                 'base_strategy': base_strategy,
                 'thesis': thesis,
+                'knowledge_families_used': knowledge_families_used,
+                'baseline_delta_summary': str(proposal.get('baseline_delta_summary', '')).strip()[:240],
+                'novelty_claim': str(proposal.get('novelty_claim', '')).strip()[:240],
                 'features_used': features_used,
                 'params': raw_params if isinstance(raw_params, dict) else {},
                 'source_kind': source_kind,
@@ -2590,6 +2653,9 @@ def run_market_analyst(db: Session, snapshot: dict[str, object], current_time: d
 def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], current_time: datetime):
     digest: DailyEventDigest = snapshot['event_digest']
     market_profile = dict(snapshot['market_profile'])
+    strategy_knowledge = _current_strategy_knowledge(str(digest.market_scope))
+    knowledge_preferences, knowledge_discouraged = _knowledge_preferences_for_market_profile(market_profile)
+    baseline_family_map = _baseline_family_map_for_market(str(digest.market_scope))
     baseline_strategies = [
         {
             'strategy_name': item.strategy_name,
@@ -2598,6 +2664,9 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
             'tags': list(definition.tags),
             'supported_markets': list(definition.supported_markets),
             'market_bias': definition.market_bias,
+            'knowledge_families': list(definition.knowledge_families),
+            'strategy_family_label_zh': definition.strategy_family_label_zh,
+            'knowledge_notes_zh': definition.knowledge_notes_zh,
         }
         for item in db.execute(select(StrategySnapshot).order_by(StrategySnapshot.strategy_name.asc())).scalars()
         if (definition := get_strategy_registry().get(item.strategy_name)).supported_markets and str(digest.market_scope) in definition.supported_markets
@@ -2615,6 +2684,10 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
         },
         market_profile=market_profile,
         baseline_strategies=baseline_strategies,
+        strategy_knowledge=strategy_knowledge,
+        knowledge_preferences=knowledge_preferences,
+        knowledge_discouraged=knowledge_discouraged,
+        baseline_family_map=baseline_family_map,
         hard_limits=['long_only', 'no_leverage', *list(market_profile.get('execution_constraints', []))],
     )
     result = get_llm_gateway().invoke_json(
@@ -2720,6 +2793,7 @@ def _governance_action(
     current_time: datetime,
     proposal_source_kind: str = 'mock',
     backtest_gate: dict[str, object] | None = None,
+    knowledge_assessment: dict[str, object] | None = None,
 ) -> tuple[ProposalStatus, RiskDecisionAction, dict[str, object]]:
     settings_governance = get_settings().governance
     market_governance = _market_governance_profile(market_scope)
@@ -2766,6 +2840,12 @@ def _governance_action(
             blocked_reasons.extend(
                 [str(item) for item in list(backtest_gate.get('blocked_reasons', []) or [])] or ['backtest_not_passed']
             )
+    knowledge_blocked_reasons = []
+    if isinstance(knowledge_assessment, dict):
+        knowledge_blocked_reasons = [str(item) for item in list(knowledge_assessment.get('blocked_reasons', []) or [])]
+        for reason in knowledge_blocked_reasons:
+            if reason not in blocked_reasons:
+                blocked_reasons.append(reason)
 
     promote_allowed = (
         bottom_line_passed
@@ -2778,6 +2858,7 @@ def _governance_action(
         and not (
             settings_governance.block_promotion_on_macro_degrade and bool(macro_status.get('degraded'))
         )
+        and not any(reason in {'knowledge_family_mismatch', 'knowledge_failure_mode_risk', 'knowledge_param_outlier', 'knowledge_low_novelty'} for reason in blocked_reasons)
     )
 
     if promote_allowed:
@@ -2832,6 +2913,14 @@ def _governance_action(
             'status': macro_status.get('status'),
             'degraded': bool(macro_status.get('degraded')),
         },
+        'knowledge_gate': {
+            'families_used': list(knowledge_assessment.get('knowledge_families_used', [])) if isinstance(knowledge_assessment, dict) else [],
+            'fit_assessment': str(knowledge_assessment.get('knowledge_fit_assessment', 'unknown')) if isinstance(knowledge_assessment, dict) else 'unknown',
+            'risk_flags': list(knowledge_assessment.get('knowledge_risk_flags', [])) if isinstance(knowledge_assessment, dict) else [],
+            'failure_mode_hits': list(knowledge_assessment.get('knowledge_failure_mode_hits', [])) if isinstance(knowledge_assessment, dict) else [],
+            'novelty_assessment': str(knowledge_assessment.get('novelty_assessment', 'unknown')) if isinstance(knowledge_assessment, dict) else 'unknown',
+            'blocked_reasons': knowledge_blocked_reasons,
+        },
         'market_profile': _current_market_profile(market_scope),
         'lifecycle': {
             'phase': lifecycle_phase,
@@ -2884,6 +2973,122 @@ def _strategy_dsl(blueprint: dict[str, object], snapshot: dict[str, object], dig
     }
 
 
+def _numeric_param_outlier(param_priors: dict[str, dict[str, object]], params: dict[str, object]) -> list[str]:
+    hits: list[str] = []
+    for key, bounds in param_priors.items():
+        value = params.get(key)
+        if not isinstance(value, (int, float)):
+            continue
+        minimum = bounds.get("min")
+        maximum = bounds.get("max")
+        if isinstance(minimum, (int, float)) and value < minimum:
+            hits.append(key)
+        elif isinstance(maximum, (int, float)) and value > maximum:
+            hits.append(key)
+    return hits
+
+
+def _knowledge_assessment(blueprint: dict[str, object], snapshot: dict[str, object]) -> dict[str, object]:
+    market_profile = dict(snapshot.get("market_profile", {}))
+    regime = str(snapshot.get("regime", "")).lower()
+    base_strategy = str(blueprint.get("base_strategy", ""))
+    params = blueprint.get("params", {})
+    params = params if isinstance(params, dict) else {}
+    families = [str(item) for item in list(blueprint.get("knowledge_families_used", []) or []) if str(item).strip()]
+    if not families and base_strategy and base_strategy != "novel_composite":
+        try:
+            families = list(get_strategy_registry().get(base_strategy).knowledge_families)
+        except ValueError:
+            families = []
+
+    preferred, discouraged = _knowledge_preferences_for_market_profile(market_profile)
+    family_entries = _knowledge_entries(families)
+    failure_hits: list[str] = []
+    risk_flags: list[str] = []
+    param_outliers: list[str] = []
+    fit_notes: list[str] = []
+    for entry in family_entries:
+        risk_flags.extend([str(item) for item in list(entry.get("risk_flags", []) or [])])
+        param_outliers.extend(_numeric_param_outlier(dict(entry.get("parameter_priors", {}) or {}), params))
+        discouraged_conditions = [str(item).lower() for item in list(entry.get("discouraged_market_conditions", []) or [])]
+        preferred_conditions = [str(item).lower() for item in list(entry.get("preferred_market_conditions", []) or [])]
+        if regime in discouraged_conditions:
+            failure_hits.extend([f"{entry['family_key']}:{regime}"])
+        if regime in preferred_conditions:
+            fit_notes.append(f"{entry['label_zh']}适配当前 {regime} 环境")
+
+    novelty_assessment = "distinct"
+    baseline_delta_summary = str(blueprint.get("baseline_delta_summary", "")).strip()
+    novelty_claim = str(blueprint.get("novelty_claim", "")).strip()
+    defaults: dict[str, object] = {}
+    if base_strategy and base_strategy != "novel_composite":
+        try:
+            defaults = dict(get_strategy_registry().get(base_strategy).default_params)
+        except ValueError:
+            defaults = {}
+    changed_keys = [key for key, value in params.items() if defaults.get(key) != value]
+    if base_strategy != "novel_composite":
+        if len(changed_keys) <= 1 and len(families) <= 1:
+            novelty_assessment = "low"
+        elif len(changed_keys) <= 2:
+            novelty_assessment = "moderate"
+    elif not families:
+        novelty_assessment = "low"
+
+    family_mismatch = bool(families) and all(family in discouraged for family in families) and not any(family in preferred for family in families)
+    fit_assessment = "aligned"
+    if family_mismatch:
+        fit_assessment = "mismatch"
+    elif failure_hits or param_outliers:
+        fit_assessment = "fragile"
+    elif any(family in preferred for family in families):
+        fit_assessment = "aligned"
+    elif families:
+        fit_assessment = "neutral"
+
+    blocked_reasons: list[str] = []
+    if family_mismatch:
+        blocked_reasons.append("knowledge_family_mismatch")
+    if failure_hits:
+        blocked_reasons.append("knowledge_failure_mode_risk")
+    if param_outliers:
+        blocked_reasons.append("knowledge_param_outlier")
+    if novelty_assessment == "low":
+        blocked_reasons.append("knowledge_low_novelty")
+
+    return {
+        "knowledge_families_used": families,
+        "knowledge_entries": family_entries,
+        "knowledge_fit_assessment": fit_assessment,
+        "knowledge_risk_flags": sorted(set(risk_flags)),
+        "knowledge_failure_mode_hits": failure_hits,
+        "novelty_assessment": novelty_assessment,
+        "baseline_delta_summary": baseline_delta_summary
+        or ("轻微变体，主要沿用既有基线逻辑。" if novelty_assessment == "low" else "在现有基线之上做了市场适配变形。"),
+        "novelty_claim": novelty_claim
+        or ("轻微变体" if novelty_assessment == "low" else "市场适配型变体"),
+        "blocked_reasons": blocked_reasons,
+        "fit_notes": fit_notes,
+        "param_outliers": sorted(set(param_outliers)),
+        "preferred_families": preferred,
+        "discouraged_families": discouraged,
+    }
+
+
+def _knowledge_penalty_score(assessment: dict[str, object]) -> float:
+    penalty = 0.0
+    blocked = set(str(item) for item in list(assessment.get("blocked_reasons", []) or []))
+    if "knowledge_family_mismatch" in blocked:
+        penalty += 8.0
+    if "knowledge_failure_mode_risk" in blocked:
+        penalty += 5.0
+    if "knowledge_param_outlier" in blocked:
+        penalty += 4.0
+    if "knowledge_low_novelty" in blocked:
+        penalty += 2.0
+    return penalty
+
+
 def _fallback_debate_report(blueprint: dict[str, object], digest: DailyEventDigest) -> dict[str, object]:
     if isinstance(blueprint.get('debate_report'), dict):
         return dict(blueprint['debate_report'])
@@ -2902,6 +3107,7 @@ def _fallback_debate_report(blueprint: dict[str, object], digest: DailyEventDige
 
 def run_research_debate(db: Session, blueprint: dict[str, object], snapshot: dict[str, object], current_time: datetime) -> dict[str, object]:
     digest: DailyEventDigest = snapshot['event_digest']
+    knowledge_assessment = _knowledge_assessment(blueprint, snapshot)
     if blueprint.get('source_kind') == 'mock':
         report = _fallback_debate_report(blueprint, digest)
         report['prompt_version'] = blueprint.get('prompt_versions', {}).get('research_debate', RESEARCH_DEBATE_PROMPT_VERSION)
@@ -2925,6 +3131,13 @@ def run_research_debate(db: Session, blueprint: dict[str, object], snapshot: dic
         event_digest={
             'macro_summary': digest.macro_summary,
             'event_scores': digest.event_scores,
+        },
+        knowledge_context={
+            'families_used': knowledge_assessment['knowledge_families_used'],
+            'fit_assessment': knowledge_assessment['knowledge_fit_assessment'],
+            'failure_mode_hits': knowledge_assessment['knowledge_failure_mode_hits'],
+            'baseline_delta_summary': knowledge_assessment['baseline_delta_summary'],
+            'novelty_claim': knowledge_assessment['novelty_claim'],
         },
     )
     result = get_llm_gateway().invoke_json(
@@ -2984,6 +3197,9 @@ def _base_evidence_pack(
         'bottom_line_report': bottom_line_report,
         'deterministic_evidence': deterministic_evidence,
         'governance_report': governance_report,
+        'knowledge_families_used': list(blueprint.get('knowledge_families_used', []) or []),
+        'baseline_delta_summary': str(blueprint.get('baseline_delta_summary', '')),
+        'novelty_claim': str(blueprint.get('novelty_claim', '')),
         'llm_judgment_inputs': {
             'macro_summary': digest.macro_summary,
             'event_scores': digest.event_scores,
@@ -3007,6 +3223,7 @@ def _build_quality_report(
 ) -> dict[str, object]:
     deterministic = dict(evidence_pack.get('deterministic_evidence', {}))
     backtest_gate = dict(evidence_pack.get('backtest_gate', {}))
+    knowledge_context = dict(evidence_pack.get('knowledge_context', {}))
     active_comparison = dict(governance_report.get('active_comparison', {}))
     thresholds = dict(governance_report.get('thresholds', {}))
     promotion_gate = dict(governance_report.get('promotion_gate', {}))
@@ -3073,11 +3290,17 @@ def _build_quality_report(
             'metrics': dict(backtest_gate.get('metrics', {}) or {}),
             'window': dict(backtest_gate.get('window', {}) or {}),
         },
+        'knowledge_fit_assessment': str(knowledge_context.get('knowledge_fit_assessment', 'unknown')),
+        'knowledge_risk_flags': [str(item) for item in list(knowledge_context.get('knowledge_risk_flags', []) or [])],
+        'knowledge_failure_mode_hits': [str(item) for item in list(knowledge_context.get('knowledge_failure_mode_hits', []) or [])],
+        'knowledge_families_used': [str(item) for item in list(knowledge_context.get('knowledge_families_used', []) or [])],
+        'baseline_delta_summary': str(knowledge_context.get('baseline_delta_summary', evidence_pack.get('baseline_delta_summary', ''))),
         'verdict': {
             'quality_band': quality_band,
             'comparable': comparable,
             'replaceable': replaceable,
             'accumulable': comparable and oos_passed and robustness_passed,
+            'novelty_assessment': str(knowledge_context.get('novelty_assessment', 'unknown')),
         },
     }
 
@@ -3170,6 +3393,41 @@ def _attach_quality_track_record(db: Session, proposals: list[StrategyProposal])
     return proposals
 
 
+def _backfill_knowledge_payload(
+    evidence_pack: dict[str, object],
+    *,
+    strategy_dsl: dict[str, object] | None = None,
+) -> dict[str, object]:
+    if evidence_pack.get('knowledge_context') and evidence_pack.get('knowledge_families_used'):
+        return evidence_pack
+    dsl = strategy_dsl if isinstance(strategy_dsl, dict) else {}
+    params = dict(dsl.get('params', {}) or {}) if isinstance(dsl.get('params', {}), dict) else {}
+    base_strategy = str(params.get('base_strategy', '') or '')
+    if not base_strategy or base_strategy == 'novel_composite':
+        return evidence_pack
+    try:
+        definition = get_strategy_registry().get(base_strategy)
+    except ValueError:
+        return evidence_pack
+    knowledge_assessment = _knowledge_assessment(
+        {
+            'base_strategy': base_strategy,
+            'params': {key: value for key, value in params.items() if key != 'base_strategy'},
+            'knowledge_families_used': list(definition.knowledge_families),
+            'baseline_delta_summary': definition.knowledge_notes_zh,
+            'novelty_claim': '基线策略',
+        },
+        {'market_profile': _current_market_profile('HK'), 'regime': ''},
+    )
+    return {
+        **evidence_pack,
+        'knowledge_families_used': list(definition.knowledge_families),
+        'baseline_delta_summary': definition.knowledge_notes_zh,
+        'novelty_claim': str(evidence_pack.get('novelty_claim', '基线策略')),
+        'knowledge_context': knowledge_assessment,
+    }
+
+
 def _ensure_quality_report_payload(evidence_pack: dict[str, object], final_score: float) -> dict[str, object]:
     governance_report = evidence_pack.get('governance_report')
     if isinstance(governance_report, dict):
@@ -3204,7 +3462,15 @@ def _ensure_quality_report_payload(evidence_pack: dict[str, object], final_score
                 'metrics': {},
                 'window': {},
             }
-            evidence_pack['quality_report'] = quality_report
+        quality_report.setdefault('knowledge_fit_assessment', 'unknown')
+        quality_report.setdefault('knowledge_risk_flags', [])
+        quality_report.setdefault('knowledge_failure_mode_hits', [])
+        quality_report.setdefault('knowledge_families_used', list(evidence_pack.get('knowledge_families_used', []) or []))
+        quality_report.setdefault('baseline_delta_summary', str(evidence_pack.get('baseline_delta_summary', '')))
+        verdict = dict(quality_report.get('verdict', {}) or {})
+        verdict.setdefault('novelty_assessment', 'unknown')
+        quality_report['verdict'] = verdict
+        evidence_pack['quality_report'] = quality_report
         return evidence_pack
     if not isinstance(governance_report, dict):
         return evidence_pack
@@ -3220,7 +3486,10 @@ def _hydrate_proposal_quality_report(proposal: StrategyProposal | None) -> Strat
     if proposal is None:
         return None
     if isinstance(proposal.evidence_pack, dict):
-        proposal.evidence_pack = _ensure_quality_report_payload(dict(proposal.evidence_pack), proposal.final_score)
+        proposal.evidence_pack = _ensure_quality_report_payload(
+            _backfill_knowledge_payload(dict(proposal.evidence_pack), strategy_dsl=proposal.strategy_dsl),
+            proposal.final_score,
+        )
     return proposal
 
 
@@ -3721,9 +3990,12 @@ def run_risk_judgment(
 ) -> tuple[dict[str, object], dict[str, object]]:
     digest: DailyEventDigest = snapshot['event_digest']
     evidence_pack = _base_evidence_pack(blueprint, digest, deterministic_score, governance_report)
+    knowledge_assessment = _knowledge_assessment(blueprint, snapshot)
+    evidence_pack['knowledge_context'] = knowledge_assessment
     if blueprint.get('source_kind') == 'mock':
         judgment = _fallback_risk_judgment(blueprint)
         evidence_pack['llm_judgment_inputs']['prompt_versions'] = blueprint.get('prompt_versions', {})
+        judgment['llm_score'] = max(50.0, judgment['llm_score'] - _knowledge_penalty_score(knowledge_assessment))
         return judgment, evidence_pack
 
     payload = build_risk_manager_llm_payload(
@@ -3746,6 +4018,14 @@ def run_risk_judgment(
         event_digest={
             'macro_summary': digest.macro_summary,
             'event_scores': digest.event_scores,
+        },
+        knowledge_context={
+            'families_used': knowledge_assessment['knowledge_families_used'],
+            'fit_assessment': knowledge_assessment['knowledge_fit_assessment'],
+            'failure_mode_hits': knowledge_assessment['knowledge_failure_mode_hits'],
+            'baseline_delta_summary': knowledge_assessment['baseline_delta_summary'],
+            'novelty_claim': knowledge_assessment['novelty_claim'],
+            'risk_flags': knowledge_assessment['knowledge_risk_flags'],
         },
     )
     result = get_llm_gateway().invoke_json(
@@ -3770,8 +4050,9 @@ def run_risk_judgment(
         llm_score = float(raw.get('llm_score', 72.0))
     except (TypeError, ValueError):
         llm_score = 72.0
+    adjusted_score = max(50.0, min(95.0, llm_score - _knowledge_penalty_score(knowledge_assessment)))
     judgment = {
-        'llm_score': max(50.0, min(95.0, llm_score)),
+        'llm_score': adjusted_score,
         'llm_explanation': str(raw.get('llm_explanation') or '').strip(),
         'prompt_version': RISK_MANAGER_LLM_PROMPT_VERSION,
     }
@@ -4064,6 +4345,7 @@ def materialize_proposals_and_decisions(
     for index, blueprint in enumerate(blueprints):
         deterministic_score = _deterministic_score(index, snapshot, digest, list(blueprint['features_used']))
         provisional_bottom_line = deterministic_score <= 100.0
+        knowledge_assessment = _knowledge_assessment(blueprint, snapshot)
         status, action, governance_report = _governance_action(
             final_score=deterministic_score,
             bottom_line_passed=provisional_bottom_line,
@@ -4073,6 +4355,7 @@ def materialize_proposals_and_decisions(
             current_time=current_time,
             proposal_source_kind=str(blueprint.get('source_kind', 'mock')),
             backtest_gate=None,
+            knowledge_assessment=knowledge_assessment,
         )
         debate_report = run_research_debate(db, blueprint, snapshot, current_time)
         risk_judgment, evidence_pack = run_risk_judgment(
@@ -4113,6 +4396,7 @@ def materialize_proposals_and_decisions(
             current_time=current_time,
             proposal_source_kind=str(blueprint.get('source_kind', 'mock')),
             backtest_gate=backtest_gate,
+            knowledge_assessment=knowledge_assessment,
         )
         evidence_pack['governance_report'] = governance_report
         evidence_pack['quality_report'] = _build_quality_report(
@@ -4195,6 +4479,43 @@ def materialize_proposals_and_decisions(
                 market_snapshot_hash=proposal.market_snapshot_hash,
                 event_digest_hash=proposal.event_digest_hash,
                 payload=_audit_payload(proposal, decision),
+                created_at=current_time,
+            )
+        )
+        db.add(
+            AuditRecord(
+                run_id=proposal.run_id,
+                decision_id=decision.decision_id,
+                event_type='strategy_knowledge_applied',
+                entity_type='strategy_proposal',
+                entity_id=proposal.id,
+                strategy_dsl_hash=stable_hash(dsl),
+                market_snapshot_hash=proposal.market_snapshot_hash,
+                event_digest_hash=proposal.event_digest_hash,
+                payload={
+                    'knowledge_families_used': list(evidence_pack.get('knowledge_families_used', []) or []),
+                    'baseline_delta_summary': str(evidence_pack.get('baseline_delta_summary', '')),
+                    'knowledge_fit_assessment': str(dict(evidence_pack.get('knowledge_context', {}) or {}).get('knowledge_fit_assessment', 'unknown')),
+                    'knowledge_risk_flags': list(dict(evidence_pack.get('knowledge_context', {}) or {}).get('knowledge_risk_flags', []) or []),
+                },
+                created_at=current_time,
+            )
+        )
+        db.add(
+            AuditRecord(
+                run_id=proposal.run_id,
+                decision_id=decision.decision_id,
+                event_type='strategy_novelty_reviewed',
+                entity_type='risk_decision',
+                entity_id=decision.id,
+                strategy_dsl_hash=stable_hash(dsl),
+                market_snapshot_hash=proposal.market_snapshot_hash,
+                event_digest_hash=proposal.event_digest_hash,
+                payload={
+                    'novelty_assessment': str(dict(evidence_pack.get('knowledge_context', {}) or {}).get('novelty_assessment', 'unknown')),
+                    'blocked_reasons': list(dict(evidence_pack.get('knowledge_context', {}) or {}).get('blocked_reasons', []) or []),
+                    'novelty_claim': str(evidence_pack.get('novelty_claim', '')),
+                },
                 created_at=current_time,
             )
         )

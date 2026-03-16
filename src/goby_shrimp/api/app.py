@@ -602,6 +602,9 @@ def list_strategies(db: Session = Depends(get_db)) -> list[StrategySnapshotDTO]:
             tags=list(get_strategy_registry().get(record.strategy_name).tags),
             supported_markets=list(get_strategy_registry().get(record.strategy_name).supported_markets),
             market_bias=get_strategy_registry().get(record.strategy_name).market_bias,
+            knowledge_families=list(get_strategy_registry().get(record.strategy_name).knowledge_families),
+            strategy_family_label_zh=get_strategy_registry().get(record.strategy_name).strategy_family_label_zh,
+            knowledge_notes_zh=get_strategy_registry().get(record.strategy_name).knowledge_notes_zh,
             updated_at=record.updated_at,
         )
         for record in records

@@ -55,6 +55,8 @@ def test_strategy_list() -> None:
         assert data
         assert 'supported_markets' in data[0]
         assert 'market_bias' in data[0]
+        assert 'knowledge_families' in data[0]
+        assert 'strategy_family_label_zh' in data[0]
 
 
 def test_command_center_includes_llm_status() -> None:
@@ -144,6 +146,7 @@ def test_research_proposals_include_pool_ranking() -> None:
         assert data
         assert any('pool_ranking' in item['evidence_pack'].get('quality_report', {}) for item in data)
         assert any('backtest_gate' in item['evidence_pack'].get('quality_report', {}) for item in data)
+        assert any('knowledge_families_used' in item['evidence_pack'].get('quality_report', {}) for item in data)
         ranked = next(item for item in data if 'pool_ranking' in item['evidence_pack'].get('quality_report', {}))
         ranking = ranked['evidence_pack']['quality_report']['pool_ranking']
         assert 'percentile' in ranking
@@ -154,6 +157,8 @@ def test_research_proposals_include_pool_ranking() -> None:
         track_record = ranked['evidence_pack']['quality_report']['track_record']
         assert 'trend' in track_record
         assert 'stable_streak' in track_record
+        assert 'baseline_delta_summary' in ranked['evidence_pack']['quality_report']
+        assert 'novelty_assessment' in ranked['evidence_pack']['quality_report']['verdict']
 
 
 def test_acceptance_report_endpoint() -> None:
@@ -190,6 +195,16 @@ def test_runtime_llm_switch_records_provider_migration_events() -> None:
         assert 'llm_provider_switched' in event_types
         assert 'provider_cohort_started' in event_types
         assert 'provider_comparison_window_closed' in event_types
+
+
+def test_strategy_payloads_include_knowledge_fields() -> None:
+    with TestClient(app) as client:
+        proposals = client.get('/api/v1/research/proposals').json()
+        assert proposals
+        quality_report = proposals[0]['evidence_pack']['quality_report']
+        assert 'knowledge_families_used' in quality_report
+        assert 'baseline_delta_summary' in quality_report
+        assert 'novelty_assessment' in quality_report['verdict']
 
 
 def test_runtime_llm_switch_queues_background_sync(monkeypatch) -> None:

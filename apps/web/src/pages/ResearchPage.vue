@@ -201,6 +201,9 @@ function marketBiasLabel(value?: string): string {
 function universeReasonTagLabel(value?: string): string {
   return displayLabel(t, "universeReasonTag", value);
 }
+function knowledgeFamilyLabel(value?: string): string {
+  return displayLabel(t, "knowledgeFamily", value);
+}
 function formatSignedMetric(value?: number | null, suffix = ""): string {
   if (value === null || value === undefined) return "--";
   return `${value > 0 ? "+" : ""}${value}${suffix}`;
@@ -420,6 +423,26 @@ function strategyTitle(value?: string | null): string {
             class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3"
           >
             <p class="text-sm text-slate-500">
+              {{ t("research.knowledgeMethod") }}
+            </p>
+            <p class="mt-1 text-lg font-semibold text-slate-900">
+              {{
+                (current.evidence_pack?.quality_report?.knowledge_families_used ?? [])
+                  .map((item) => knowledgeFamilyLabel(String(item)))
+                  .join(" / ") || t("common.noData")
+              }}
+            </p>
+            <p class="mt-1 text-sm text-slate-600">
+              {{
+                current.evidence_pack?.quality_report?.baseline_delta_summary ??
+                t("common.noData")
+              }}
+            </p>
+          </div>
+          <div
+            class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3"
+          >
+            <p class="text-sm text-slate-500">
               {{ t("research.activeComparison") }}
             </p>
             <p class="mt-1 text-lg font-semibold text-slate-900">
@@ -435,9 +458,7 @@ function strategyTitle(value?: string | null): string {
               }}
             </p>
           </div>
-          <div
-            class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3"
-          >
+          <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3">
             <p class="text-sm text-slate-500">{{ t("candidates.nextStep") }}</p>
             <p class="mt-1 text-lg font-semibold text-slate-900">
               {{

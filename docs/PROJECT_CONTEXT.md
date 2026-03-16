@@ -52,6 +52,7 @@
 - `HK-only（仅港股）` 市场主线
 - `dynamic_hk（港股动态选股）`
 - `MiniMax` 真链路
+- `strategy knowledge layer（策略知识层）` 第一版
 - `backtest admission（回测准入）`
 - `paper trading（模拟盘）`
 - `live readiness（实盘就绪度）`
@@ -79,17 +80,51 @@
 当前主流程是：
 1. `Universe Selection（选股）`
 2. `Market Analysis（市场分析）`
-3. `Strategy Generation（策略生成）`
-4. `Research Debate（研究辩论）`
-5. `Backtest Admission（回测准入）`
-6. `Governance Decision（治理决策）`
-7. `Paper Trading（模拟盘）`
-8. `Live Readiness（实盘就绪度）`
+3. `Strategy Knowledge（策略知识层）`
+4. `Strategy Generation（策略生成）`
+5. `Research Debate（研究辩论）`
+6. `Backtest Admission（回测准入）`
+7. `Governance Decision（治理决策）`
+8. `Paper Trading（模拟盘）`
+9. `Live Readiness（实盘就绪度）`
 
 关键原则：
+- 策略知识层先于策略生成
+- 系统先读取知识家族、市场适配和失效模式，再生成当前 proposal
 - 回测发生在模拟盘之前
 - 没过回测准入的策略，不允许直接进入模拟盘
 - 模拟盘不是初筛工具，而是更接近真实运行环境的第二层验证
+
+## 策略知识层的边界
+第一版 `strategy knowledge layer（策略知识层）` 的目标不是做策略百科，而是把仓库里已经在使用的策略常识显式化、可审计化。
+
+当前知识来源固定为：
+1. 现有 `baseline（基线策略）` 的反向抽象
+2. 现有 `market profile（市场画像）` 中已经隐含的市场适配知识
+3. 现有 `governance rules（治理规则）` 中已经隐含的失效条件与参数约束
+
+当前仅包含 5 个知识家族：
+- `trend_following（趋势跟随）`
+- `mean_reversion（均值回归）`
+- `breakout（突破）`
+- `momentum_filter（动量过滤）`
+- `volatility_filter（波动率过滤）`
+
+当前明确不做：
+- 不直接导入外部文章
+- 不让外部网页原文直接进入 prompt
+- 不让未审核知识直接参与门禁
+- 不把知识条目当成可执行策略
+
+策略知识层当前承担的职责：
+- 解释 baseline（基线策略）属于哪类方法
+- 判断 proposal（策略提案）是不是只是轻微换皮
+- 判断 proposal 是否踩中某类方法的常见失效模式
+- 为 `research debate（研究辩论）`、`risk gate（风险门禁）`、`audit（审计）` 提供共同语言
+
+对应的知识层审计事件：
+- `strategy_knowledge_applied（策略知识已应用）`
+- `strategy_novelty_reviewed（策略新颖性已评审）`
 
 ## 候选策略生命周期
 候选策略会落库保留历史证据，但不会无限堆积在主视图里。
