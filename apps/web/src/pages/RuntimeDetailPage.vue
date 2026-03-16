@@ -12,7 +12,7 @@ import VChart from 'vue-echarts'
 import Badge from '@/components/ui/Badge.vue'
 import Card from '@/components/ui/Card.vue'
 import { api } from '@/lib/api'
-import { displayLabel } from '@/lib/display'
+import { displayLabel, term } from '@/lib/display'
 
 use([CanvasRenderer, GridComponent, TooltipComponent, LegendComponent, LineChart])
 
@@ -149,9 +149,9 @@ function formatDurationMs(value?: number): string {
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <RouterLink to="/command" class="text-sm text-slate-500 underline-offset-2 hover:underline">
-            {{ t('runtimeDetail.backToCommand') }}
+            {{ term(t('runtimeDetail.backToCommand')) }}
           </RouterLink>
-          <h2 class="mt-2 text-xl font-semibold text-slate-900">{{ t('runtimeDetail.title') }}</h2>
+          <h2 class="mt-2 text-xl font-semibold text-slate-900">{{ term(t('runtimeDetail.title')) }}</h2>
           <p class="mt-2 text-sm text-slate-600">{{ t('runtimeDetail.subtitle') }}</p>
         </div>
         <Badge :variant="runtimeVariant(runtimeStatus?.current_state, runtimeStatus?.degraded, runtimeStatus?.stalled)">
@@ -197,7 +197,7 @@ function formatDurationMs(value?: number): string {
     <div class="grid gap-4 xl:grid-cols-[1fr,0.9fr]">
       <Card class="space-y-4">
         <div>
-          <h3 class="text-sm font-semibold">{{ t('runtimeDetail.pipelineDetail') }}</h3>
+          <h3 class="text-sm font-semibold">{{ term(t('runtimeDetail.pipelineDetail')) }}</h3>
           <p class="mt-1 text-sm text-slate-600">{{ runtimeStatus?.status_message ?? t('common.noData') }}</p>
         </div>
         <div class="grid gap-2 text-sm sm:grid-cols-2">
@@ -251,7 +251,7 @@ function formatDurationMs(value?: number): string {
 
       <Card class="space-y-4">
         <div>
-          <h3 class="text-sm font-semibold">{{ t('runtimeDetail.dependencies') }}</h3>
+          <h3 class="text-sm font-semibold">{{ term(t('runtimeDetail.dependencies')) }}</h3>
           <p class="mt-1 text-sm text-slate-600">{{ t('runtimeDetail.dependenciesBody') }}</p>
         </div>
         <div class="grid gap-2 text-sm">

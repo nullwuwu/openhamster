@@ -7,6 +7,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 
 import Button from '@/components/ui/Button.vue'
 import { getCurrentLocale, setAppLocale, type SupportedLocale } from '@/i18n'
+import { term } from '@/lib/display'
 import { useUiStore } from '@/stores/ui'
 
 type NavKey = 'command' | 'runtime' | 'candidates' | 'research' | 'paper' | 'audit'
@@ -28,13 +29,13 @@ const locale = ref<SupportedLocale>(getCurrentLocale())
 const navItems = computed(() =>
   navDefs.map((item) => ({
     ...item,
-    label: t(`shell.nav.${item.key}`),
+    label: term(t(`shell.nav.${item.key}`)),
   })),
 )
 
 const routeTitle = computed(() => {
   const matched = navDefs.find((item) => route.path.startsWith(item.path))
-  return matched ? t(`shell.nav.${matched.key}`) : t('shell.nav.command')
+  return term(matched ? t(`shell.nav.${matched.key}`) : t('shell.nav.command'))
 })
 
 function switchLocale(next: SupportedLocale): void {
@@ -80,7 +81,7 @@ function switchLocale(next: SupportedLocale): void {
       <main class="min-w-0 flex-1">
         <header class="panel-glass mb-4 flex items-center justify-between rounded-2xl px-4 py-3">
           <div>
-            <h2 class="text-sm uppercase tracking-[0.18em] text-slate-500">{{ t('shell.consoleTitle') }}</h2>
+            <h2 class="text-sm uppercase tracking-[0.18em] text-slate-500">{{ term(t('shell.consoleTitle')) }}</h2>
             <p class="text-base font-semibold text-slate-900">{{ routeTitle }}</p>
           </div>
           <div class="flex items-center gap-2">

@@ -11,13 +11,11 @@ test('command page renders executive summary with live runtime semantics', async
   expect(typeof payload.market_snapshot.macro_status.status).toBe('string')
   expect(payload.market_snapshot.macro_status.provider).toBeTruthy()
 
-  if (payload.llm_status.using_mock_fallback || payload.market_snapshot.macro_status.degraded) {
-    await expect(page.getByText(/当前仍是样例模式|Sample mode is still active/).first()).toBeVisible()
-  } else {
-    await expect(page.getByText('当前仍是样例模式')).toHaveCount(0)
-    await expect(page.getByText('Sample mode is still active')).toHaveCount(0)
-  }
-  await expect(page.getByRole('heading', { name: /The system is not yet ready for live trading|系统当前还不具备实盘条件/ })).toBeVisible()
-  await expect(page.getByText(/Three Key Reasons|三个最关键原因/)).toBeVisible()
-  await expect(page.getByText(/Not Ready For Live|尚未具备实盘条件/).first()).toBeVisible()
+  await expect(page.getByText(/Executive Summary/)).toBeVisible()
+  await expect(page.getByText(/Pipeline Stages/)).toBeVisible()
+  await expect(page.getByText(/Stage Evidence/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /Run Now|立即研究一次/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'MiniMax' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Mock' })).toHaveCount(0)
+  await expect(page.getByText(/Open Runtime Detail（打开运行详情）|Open Runtime Detail/)).toBeVisible()
 })
