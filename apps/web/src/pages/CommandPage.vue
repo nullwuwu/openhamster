@@ -46,6 +46,24 @@ const activeKnowledgeFamilies = computed<string[]>(() => {
 const operationalAcceptance = computed(
   () => (command.value?.active_strategy.operational_acceptance as Record<string, unknown> | undefined) ?? {},
 )
+const paperTrading = computed(() => command.value?.active_strategy.paper_trading ?? null)
+const paperStatusSummary = computed(() => {
+  const trading = paperTrading.value
+  if (!trading) return null
+  const orders = Array.isArray(trading.orders) ? trading.orders.length : 0
+  const positions = Array.isArray(trading.positions) ? trading.positions.length : 0
+  const navPoints = Array.isArray(trading.nav) ? trading.nav.length : 0
+  const latestStatus = latestPaperExecution.value?.status
+  const isActive = Boolean(activeProposal.value && (orders > 0 || positions > 0 || navPoints > 0))
+  return {
+    isActive,
+    orders,
+    positions,
+    navPoints,
+    latestStatus: paperExecutionStatusLabel(latestStatus),
+    explanation: latestPaperExecution.value?.explanation ?? '--',
+  }
+})
 
 const isSampleMode = computed(() => {
   if (!command.value) return false
@@ -449,6 +467,35 @@ function statusLabel(value: BoardStatus): string {
           <div class="mt-2 rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-3 text-sm text-slate-700">
             {{ executiveSummary.nextStep }}
           </div>
+        </div>
+      </div>
+    </Card>
+
+    <Card v-if="paperStatusSummary" class="border border-emerald-200/80 bg-emerald-50/70">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-emerald-700">{{ t('command.paperStatusTitle') }}</p>
+          <h3 class="mt-1 text-base font-semibold text-emerald-950">
+            {{ paperStatusSummary.isActive ? t('command.paperStatusActive') : t('command.paperStatusInactive') }}
+          </h3>
+          <p class="mt-2 text-sm text-emerald-900">{{ paperStatusSummary.explanation }}</p>
+        </div>
+        <Badge :variant="paperStatusSummary.isActive ? 'success' : 'warning'">
+          {{ paperStatusSummary.latestStatus }}
+        </Badge>
+      </div>
+      <div class="mt-4 grid gap-2 text-sm sm:grid-cols-3">
+        <div class="rounded-lg border border-emerald-200/80 bg-white px-3 py-2">
+          <p class="text-emerald-700">{{ t('command.paperOrders') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ paperStatusSummary.orders }}</p>
+        </div>
+        <div class="rounded-lg border border-emerald-200/80 bg-white px-3 py-2">
+          <p class="text-emerald-700">{{ t('command.paperPositions') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ paperStatusSummary.positions }}</p>
+        </div>
+        <div class="rounded-lg border border-emerald-200/80 bg-white px-3 py-2">
+          <p class="text-emerald-700">{{ t('command.paperNavPoints') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ paperStatusSummary.navPoints }}</p>
         </div>
       </div>
     </Card>

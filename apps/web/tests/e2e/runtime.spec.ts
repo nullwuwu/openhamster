@@ -5,8 +5,8 @@ test('runtime page shows pipeline detail and logs', async ({ page }) => {
   await page.goto('/runtime')
   await responsePromise
 
-  await expect(page.getByRole('heading', { name: /Runtime Detail|运行详情/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /运行态 Detail|Runtime Detail/i })).toBeVisible()
   await expect(page.getByText(/Pipeline Detail|Pipeline 详情/)).toBeVisible()
-  await expect(page.getByText(/Runtime Logs|运行日志/)).toBeVisible()
+  await expect(page.getByText(/运行态 Logs|Runtime Logs|运行日志/)).toBeVisible()
   await expect(page.getByText(/Dependencies|运行依赖/)).toBeVisible()
 })

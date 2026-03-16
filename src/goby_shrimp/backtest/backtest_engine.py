@@ -409,20 +409,9 @@ class BacktestEngine:
         
         logger.info(f"📊 [BacktestEngine] Crossovers: {crossover_count}, Years: {data_years:.1f}, Turnover: {turnover:.2f}x")
         
-        # 假设清单
-        assumptions = []
-        if self.slippage_bps > 0:
-            assumptions.append("slippage")
-        if self.commission_rate > 0:
-            assumptions.append("commission")
-        if self.tax_rate > 0:
-            assumptions.append("tax")
-        if self.dividend_withholding > 0:
-            assumptions.append("dividend_withholding")
-        
-        # 如果没有设置假设，默认添加基础假设
-        if not assumptions:
-            assumptions = ["slippage", "commission", "tax", "dividend_withholding"]
+        # 假设清单表示“是否已建模”，而不是“数值是否大于 0”。
+        # 例如股息预扣税为 0 仍然代表该项已被显式建模。
+        assumptions = ["slippage", "commission", "tax", "dividend_withholding"]
         
         logger.info(
             f"✅ [BacktestEngine] Done: CAGR={cagr:.1%}, MaxDD={max_dd:.1%}, "
