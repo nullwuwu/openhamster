@@ -97,18 +97,30 @@ def parse_json_payload(text: str) -> dict[str, Any]:
     try:
         return json.loads(payload)
     except json.JSONDecodeError as first_error:
-        payload = re.sub(r",(\s*[}\]])", r"\1", payload)
-        try:
-            return json.loads(payload)
-        except json.JSONDecodeError:
-            extracted = _extract_balanced_json(payload)
-            if extracted is not None:
-                try:
-                    return json.loads(extracted)
-                except json.JSONDecodeError:
-                    pass
-            logger.warning("LLM JSON parse failed: %s | payload=%s", first_error, payload[:300])
-            raise
+        candidates: list[str] = []
+        candidates.append(payload)
+        candidates.append(re.sub(r",(\s*[}\]])", r"\1", payload))
+
+        extracted = _extract_balanced_json(payload)
+        if extracted is not None:
+            repaired = _repair_unescaped_inner_quotes(extracted)
+            candidates.extend(
+                [
+                    extracted,
+                    re.sub(r",(\s*[}\]])", r"\1", extracted),
+                    repaired,
+                    re.sub(r",(\s*[}\]])", r"\1", repaired),
+                ]
+            )
+
+        for candidate in candidates:
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+
+        logger.warning("LLM JSON parse failed: %s | payload=%s", first_error, payload[:300])
+        raise
 
 
 def _extract_balanced_json(text: str) -> str | None:
@@ -149,4 +161,59 @@ def _extract_balanced_json(text: str) -> str | None:
             depth -= 1
             if depth == 0:
                 return text[start:index + 1]
+    return None
+
+
+def _repair_unescaped_inner_quotes(text: str) -> str:
+    """
+    修复字符串内部未转义的双引号，例如：
+    "summary": "策略包含 "moving-average" 过滤"
+    """
+    chars: list[str] = []
+    in_string = False
+    escaped = False
+    index = 0
+
+    while index < len(text):
+        char = text[index]
+        if not in_string:
+            chars.append(char)
+            if char == '"':
+                in_string = True
+                escaped = False
+            index += 1
+            continue
+
+        if escaped:
+            chars.append(char)
+            escaped = False
+            index += 1
+            continue
+
+        if char == "\\":
+            chars.append(char)
+            escaped = True
+            index += 1
+            continue
+
+        if char == '"':
+            next_sig = _next_significant_char(text, index + 1)
+            if next_sig in {",", "}", "]", ":"} or next_sig is None:
+                chars.append(char)
+                in_string = False
+            else:
+                chars.append('\\"')
+            index += 1
+            continue
+
+        chars.append(char)
+        index += 1
+
+    return "".join(chars)
+
+
+def _next_significant_char(text: str, start: int) -> str | None:
+    for index in range(start, len(text)):
+        if not text[index].isspace():
+            return text[index]
     return None

@@ -19,6 +19,7 @@ import numpy as np
 from ..models import BacktestResult
 from ..config import get_settings
 from ..data import DataProvider, YFinanceProvider, TwelveDataProvider, get_provider
+from ..data.source_manager import get_source_manager
 from ..data.symbols import detect_market
 
 logger = logging.getLogger("goby_shrimp.backtest")
@@ -319,8 +320,17 @@ class BacktestEngine:
             
         except Exception as e:
             logger.error(f"❌ [BacktestEngine] Data fetch failed: {e}")
-            
-            # 如果当前不是 yfinance，尝试 fallback
+
+            # 历史回测优先走统一数据源路由，减少对单一免费源的重复压力。
+            try:
+                routed = get_source_manager().fetch_ohlcv(ticker, start_date, end_date)
+                if routed is not None and not routed.empty:
+                    logger.info("✅ [BacktestEngine] Loaded data from source_manager fallback chain")
+                    return self._normalize_columns(routed)
+            except Exception as routed_exc:
+                logger.error(f"❌ [BacktestEngine] source_manager fallback failed: {routed_exc}")
+
+            # 如果当前不是 yfinance，最后再尝试 yfinance。
             if detect_market(ticker) != "cn" and not isinstance(self.data_provider, YFinanceProvider):
                 logger.warning("⚠️ [BacktestEngine] Falling back to YFinanceProvider")
                 self.data_provider = YFinanceProvider()
@@ -330,7 +340,7 @@ class BacktestEngine:
                     return data
                 except Exception as e2:
                     logger.error(f"❌ [BacktestEngine] Fallback also failed: {e2}")
-            
+
             raise
     
     def _normalize_columns(self, data: pd.DataFrame) -> pd.DataFrame:

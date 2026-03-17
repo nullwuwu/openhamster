@@ -4,6 +4,7 @@
 - `PROJECT_OVERVIEW.md`：项目目标、阶段定义、B 级自治边界
 - `PROJECT_CONTEXT.md`：项目背景、运行假设、语言规范、Mac mini 长期运行基线与当前产品边界
 - `STRATEGY_KNOWLEDGE_LAYER.md`：第一版策略知识层的来源、边界、知识家族、治理接入点与第二阶段留口
+- `TUSHARE_PURCHASE_PLAN.md`：Tushare 港股权限购买顺序与分阶段建议
 - `NEW_THREAD_HANDOFF.md`：新线程接力说明，适合在新的 Codex 会话开头直接贴给模型
 - `IMPLEMENTATION_STATUS.md`：当前已交付能力与未完成项
 - `DECISIONS.md`：关键架构决策与取舍

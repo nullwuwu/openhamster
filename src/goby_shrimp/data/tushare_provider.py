@@ -1,6 +1,4 @@
-"""
-Tushare 数据源（A股）
-"""
+"""Tushare 数据源（A股 / 港股）"""
 from __future__ import annotations
 
 import logging
@@ -11,14 +9,14 @@ from typing import Optional
 import pandas as pd
 
 from .base import DataProvider
-from .symbols import normalize_cn_symbol
+from .symbols import detect_market, normalize_tushare_symbol
 from ..config import get_settings
 
 logger = logging.getLogger("goby_shrimp.data.tushare")
 
 
 class TushareProvider(DataProvider):
-    """Tushare A 股日线提供者"""
+    """Tushare 日线提供者，支持 A股 与 港股。"""
 
     name = "tushare"
 
@@ -41,19 +39,16 @@ class TushareProvider(DataProvider):
         start: str,
         end: Optional[str] = None,
     ) -> pd.DataFrame:
-        ts_code = normalize_cn_symbol(ticker)
+        market = detect_market(ticker)
+        ts_code = normalize_tushare_symbol(ticker)
         start_date = self._to_tushare_date(start)
         end_date = self._to_tushare_date(end) if end else datetime.now().strftime("%Y%m%d")
 
         last_error: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                logger.info(f"📥 [tushare] Fetching {ts_code} {start_date}~{end_date}")
-                data = self._pro.daily(
-                    ts_code=ts_code,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
+                logger.info(f"📥 [tushare] Fetching {ts_code} {start_date}~{end_date} market={market}")
+                data = self._fetch_daily(ts_code=ts_code, start_date=start_date, end_date=end_date, market=market)
                 if data is None or data.empty:
                     raise RuntimeError(f"No data for {ts_code}")
                 df = self._normalize(data)
@@ -65,6 +60,14 @@ class TushareProvider(DataProvider):
                 if attempt < self.max_retries:
                     time.sleep(float(attempt))
         raise RuntimeError(f"tushare failed after {self.max_retries} attempts: {last_error}")
+
+    def _fetch_daily(self, *, ts_code: str, start_date: str, end_date: str, market: str) -> pd.DataFrame:
+        if market == "hk":
+            endpoint = getattr(self._pro, "hk_daily", None)
+            if endpoint is None:
+                raise RuntimeError("tushare hk_daily endpoint is unavailable")
+            return endpoint(ts_code=ts_code, start_date=start_date, end_date=end_date)
+        return self._pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
 
     def fetch_stock_basic(self, list_status: str = "L") -> pd.DataFrame:
         """

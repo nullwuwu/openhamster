@@ -42,3 +42,7 @@ class DataProvider(ABC):
     def close(self):
         """关闭连接（可选实现）"""
         pass
+
+    def fetch_latest_quote(self, ticker: str) -> Optional[dict[str, object]]:
+        """获取最新报价（可选实现）。"""
+        return None

@@ -53,6 +53,28 @@ def normalize_hk_symbol(ticker: str) -> str:
     return f"{raw.zfill(4)}.HK"
 
 
+def normalize_tushare_symbol(ticker: str) -> str:
+    """
+    统一为 Tushare 可接受的 ts_code。
+
+    - A股: 600519.SH / 000001.SZ
+    - 港股: 02800.HK / 00700.HK
+    """
+    market = detect_market(ticker)
+    if market == "cn":
+        return normalize_cn_symbol(ticker)
+    if market == "hk":
+        symbol = (ticker or "").strip().upper()
+        if symbol.endswith(".HK"):
+            raw = symbol[:-3]
+        else:
+            raw = symbol
+        if not raw.isdigit():
+            raise ValueError(f"Invalid HK symbol for tushare/minshare: {ticker}")
+        return f"{raw.zfill(5)}.HK"
+    raise ValueError(f"Unsupported symbol for tushare: {ticker}")
+
+
 def normalize_symbol(ticker: str, market: str | None = None) -> str:
     """
     按市场标准化代码

@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import sys
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
@@ -98,3 +98,15 @@ class TestStooqMock:
 
         with pytest.raises(RuntimeError, match="failed after"):
             StooqProvider(max_retries=1).fetch_ohlcv("INVALID", "2024-01-01", "2024-01-10")
+
+    @patch("goby_shrimp.data.stooq_provider.requests.get")
+    def test_fetch_stooq_data_accepts_lowercase_date_column(self, mock_get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.text = "date,open,high,low,close,volume\n2024-01-02,1,2,0.5,1.5,100\n"
+        mock_get.return_value = response
+
+        data = StooqProvider(max_retries=1).fetch_ohlcv("AAPL", "2024-01-01", "2024-01-10")
+
+        assert len(data) == 1
+        assert list(data.columns) == ["open", "high", "low", "close", "volume"]

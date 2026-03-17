@@ -8,6 +8,7 @@ from .yfinance_provider import YFinanceProvider
 from .twelve_data_provider import TwelveDataProvider
 from .akshare_provider import AKShareProvider
 from .stooq_provider import StooqProvider
+from .minshare_provider import MinShareProvider
 from .tencent_provider import TencentProvider
 from .itick_provider import ITickProvider
 from .alphavantage_provider import AlphaVantageProvider
@@ -23,6 +24,7 @@ __all__ = [
     "TwelveDataProvider",
     "AKShareProvider",
     "StooqProvider",
+    "MinShareProvider",
     "TencentProvider",
     "ITickProvider",
     "AlphaVantageProvider",
@@ -43,6 +45,7 @@ _PROVIDERS = {
     "twelve_data": TwelveDataProvider,
     "akshare": AKShareProvider,
     "stooq": StooqProvider,
+    "minshare": MinShareProvider,
     "tencent": TencentProvider,
     "itick": ITickProvider,
     "alphavantage": AlphaVantageProvider,

@@ -66,6 +66,36 @@ def test_fallback_when_primary_fails():
     assert akshare.fetch_ohlcv.call_count == 1
 
 
+def test_hk_market_priority_prefers_minshare_before_tencent():
+    manager = DataSourceManager(enable_cache=False)
+    minshare = Mock()
+    minshare.fetch_ohlcv.return_value = _mock_df()
+    tencent = Mock()
+    tencent.fetch_ohlcv.return_value = _mock_df()
+    yfinance = Mock()
+    yfinance.fetch_ohlcv.return_value = _mock_df()
+
+    calls: list[str] = []
+
+    def _get_provider(name: str):
+        calls.append(name)
+        if name == "minshare":
+            return minshare
+        if name == "tencent":
+            return tencent
+        if name == "yfinance":
+            return yfinance
+        return None
+
+    manager._get_provider = _get_provider  # type: ignore[method-assign]
+    df = manager.fetch_ohlcv("2800.HK", "2026-01-01", "2026-01-10")
+    assert df is not None
+    assert not df.empty
+    assert calls[0] == "minshare"
+    assert tencent.fetch_ohlcv.call_count == 0
+    assert yfinance.fetch_ohlcv.call_count == 0
+
+
 def test_cache_hit_avoids_second_provider_call(tmp_path):
     manager = DataSourceManager(enable_cache=True, cache_path=str(tmp_path / "cache.db"))
     tushare = Mock()

@@ -18,6 +18,7 @@ from .alphavantage_provider import AlphaVantageProvider
 from .akshare_provider import AKShareProvider
 from .yfinance_provider import YFinanceProvider
 from .stooq_provider import StooqProvider
+from .minshare_provider import MinShareProvider
 from .tushare_provider import TushareProvider
 from ..config import get_settings
 
@@ -30,13 +31,13 @@ class DataSourceManager:
 
     默认优先级:
     - CN: tushare -> akshare -> stooq
-    - HK: tencent -> akshare -> yfinance -> stooq
+    - HK: minshare -> tencent -> akshare -> yfinance -> stooq
     - US: alphavantage -> yfinance -> stooq
     """
 
     PROVIDER_PRIORITY_BY_MARKET = {
         "cn": ["tushare", "akshare", "stooq"],
-        "hk": ["tencent", "akshare", "yfinance", "stooq"],
+        "hk": ["minshare", "tencent", "akshare", "yfinance", "stooq"],
         "us": ["alphavantage", "yfinance", "stooq"],
     }
 
@@ -64,6 +65,8 @@ class DataSourceManager:
             return YFinanceProvider()
         if name == "stooq":
             return StooqProvider()
+        if name == "minshare":
+            return MinShareProvider()
         if name == "tushare":
             return TushareProvider()
         raise ValueError(f"Unknown provider: {name}")
@@ -147,6 +150,17 @@ class DataSourceManager:
         return float(quote["price"])
 
     def fetch_latest_quote(self, ticker: str) -> Optional[dict[str, object]]:
+        market = detect_market(ticker)
+        if market == "hk":
+            minshare = self._get_provider("minshare")
+            if minshare is not None and hasattr(minshare, "fetch_latest_quote"):
+                try:
+                    quote = minshare.fetch_latest_quote(ticker)
+                    if quote is not None:
+                        return quote
+                except Exception as exc:
+                    logger.warning(f"⚠️ minshare latest quote failed for {ticker}: {exc}")
+
         now = datetime.now()
         start = (now - timedelta(days=10)).strftime("%Y-%m-%d")
         end = now.strftime("%Y-%m-%d")

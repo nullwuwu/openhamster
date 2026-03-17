@@ -6,6 +6,7 @@ Stooq 数据源
 """
 from __future__ import annotations
 import logging
+from io import StringIO
 from datetime import datetime
 from typing import Optional
 
@@ -18,20 +19,32 @@ logger = logging.getLogger("goby_shrimp.data.stooq")
 
 
 def _fetch_stooq_data(symbol: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
-    """直接获取 Stooq 数据"""
-    # Stooq 使用 CSV 格式下载
-    start_str = start_date.strftime("%Y-%m-%d")
-    end_str = end_date.strftime("%Y-%m-%d")
+    """直接获取 Stooq 数据，兼容大小写列名和异常 CSV。"""
+    start_str = start_date.strftime("%Y%m%d")
+    end_str = end_date.strftime("%Y%m%d")
+    url = f"https://stooq.com/q/d/l/?s={symbol}&d1={start_str}&d2={end_str}"
 
-    url = f"https://stooq.com/q/d/l/?s={symbol}&d1={start_str.replace('-', '')}&d2={end_str.replace('-', '')}"
-
-    try:
-        df = pd.read_csv(url, index_col="Date", parse_dates=True)
-        df = df.sort_index()
-        return df
-    except Exception as e:
-        logger.warning(f"Failed to fetch from Stooq: {e}")
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    payload = response.text.strip()
+    if not payload or payload.lower().startswith("no data"):
         return pd.DataFrame()
+
+    df = pd.read_csv(StringIO(payload))
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    normalized_columns = {str(column): str(column).strip().lower() for column in df.columns}
+    df = df.rename(columns=normalized_columns)
+    if "date" not in df.columns:
+        first_column = next(iter(df.columns), "")
+        if str(first_column).strip().lower() != "date":
+            raise ValueError(f"Unexpected Stooq columns: {list(df.columns)}")
+        df = df.rename(columns={first_column: "date"})
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"]).set_index("date").sort_index()
+    return df
 
 
 class StooqProvider(DataProvider):
@@ -109,7 +122,7 @@ class StooqProvider(DataProvider):
         
         df = data.copy()
         
-        # 确保列名大写
+        # 标准化列名
         df.columns = [c.lower() for c in df.columns]
         
         # 只保留需要的列
@@ -124,12 +137,10 @@ class StooqProvider(DataProvider):
         for col in required:
             df[col] = pd.to_numeric(df[col], errors="coerce")
         
-        # 重置索引，把日期变成列 (Stooq 索引名是 'Date')
+        # 重置索引，把日期变成列
         df = df.reset_index()
-        
-        # 处理可能的索引名
-        date_col = df.columns[0]  # 第一列是日期
-        if date_col.lower() == 'date':
+        date_col = df.columns[0]
+        if str(date_col) != "date":
             df = df.rename(columns={date_col: "date"})
         
         # 转换日期

@@ -13,7 +13,11 @@ RESEARCH_DEBATE_SCHEMA_HINT = {
 def research_debate_system_prompt() -> str:
     return (
         'You are ResearchDebateAgent for GobyShrimp. '
-        'Return JSON only. Produce a concise case-for and case-against for one strategy proposal. '
+        'Return exactly one JSON object and nothing else. '
+        'Do not wrap the JSON in markdown fences. '
+        'Do not prepend or append commentary. '
+        'When mentioning English terms inside Chinese text, never insert raw double quotes; use Chinese wording or brackets instead. '
+        'Produce a concise case-for and case-against for one strategy proposal. '
         'Write all natural-language fields in Simplified Chinese for a Chinese-language operator dashboard. '
         'Assess whether the proposal fits the supplied market profile rather than a generic equity market. '
         'Use the supplied strategy knowledge to judge fit, failure modes, and whether the idea is merely a thin baseline variation. '

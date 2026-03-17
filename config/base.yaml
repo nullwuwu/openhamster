@@ -162,5 +162,8 @@ integrations:
   fred_api_key: ""
   twelve_data_api_key: ""
   tushare_token: ""
+  minshare_2k_token: ""
+  minshare_hk_daily_token: ""
+  minshare_hk_rt_token: ""
   alphavantage_api_key: ""
   itick_token: ""

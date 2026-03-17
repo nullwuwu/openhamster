@@ -115,6 +115,9 @@ class IntegrationsSettings(BaseModel):
     fred_api_key: str = ""
     twelve_data_api_key: str = ""
     tushare_token: str = ""
+    minshare_2k_token: str = ""
+    minshare_hk_daily_token: str = ""
+    minshare_hk_rt_token: str = ""
     alphavantage_api_key: str = ""
     itick_token: str = ""
 
@@ -167,6 +170,9 @@ ENV_MAPPING: dict[str, str] = {
     "FRED_API_KEY": "integrations.fred_api_key",
     "TWELVE_DATA_API_KEY": "integrations.twelve_data_api_key",
     "TUSHARE_TOKEN": "integrations.tushare_token",
+    "MINISHARE_2K_TOKEN": "integrations.minshare_2k_token",
+    "MINISHARE_HK_DAILY_TOKEN": "integrations.minshare_hk_daily_token",
+    "MINISHARE_HK_RT_TOKEN": "integrations.minshare_hk_rt_token",
     "ALPHAVANTAGE_API_KEY": "integrations.alphavantage_api_key",
     "ITICK_TOKEN": "integrations.itick_token",
 }

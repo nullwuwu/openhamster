@@ -39,6 +39,10 @@ def test_strategy_agent_prompt_contract() -> None:
         market_snapshot={"regime": "defensive"},
         market_profile={"market_scope": "HK", "preferred_baseline_tags": ["trend"]},
         baseline_strategies=[{"strategy_name": "ma_cross"}],
+        strategy_knowledge=[{"family_key": "trend_following"}],
+        knowledge_preferences=["trend_following"],
+        knowledge_discouraged=["mean_reversion"],
+        baseline_family_map={"ma_cross": ["trend_following"]},
         hard_limits=["long-only", "no leverage"],
     )
 
@@ -55,11 +59,13 @@ def test_research_debate_prompt_contract() -> None:
         market_snapshot={"regime": "balanced"},
         market_profile={"market_scope": "HK"},
         event_digest={"macro_summary": "macro"},
+        knowledge_context={"families_used": ["trend_following"]},
     )
 
     assert payload["prompt_version"] == RESEARCH_DEBATE_PROMPT_VERSION
     assert payload["market_profile"]["market_scope"] == "HK"
     assert payload["output_schema"]["stance_for"] == ["string"]
+    assert payload["output_language"] == "zh-CN"
     assert RESEARCH_DEBATE_SCHEMA_HINT["synthesis"] == ""
 
 
@@ -71,6 +77,7 @@ def test_risk_manager_prompt_contract() -> None:
         market_snapshot={"regime": "balanced"},
         market_profile={"market_scope": "HK"},
         event_digest={"macro_summary": "macro"},
+        knowledge_context={"families_used": ["trend_following"]},
     )
 
     assert payload["prompt_version"] == RISK_MANAGER_LLM_PROMPT_VERSION
