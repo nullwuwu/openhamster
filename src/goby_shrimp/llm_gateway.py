@@ -71,7 +71,7 @@ class MiniMaxAdapter:
 
     def __init__(self) -> None:
         settings = get_settings()
-        self.model = settings.llm.model or "MiniMax-M2.5"
+        self.model = settings.llm.model or "MiniMax-M2.7"
         self.temperature = settings.llm.temperature
         self.client = MiniMaxClient()
 

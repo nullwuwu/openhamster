@@ -23,7 +23,7 @@ class EventsSettings(BaseModel):
 
 class LLMSettings(BaseModel):
     provider: str = "minimax"
-    model: str = "MiniMax-M2.5"
+    model: str = "MiniMax-M2.7"
     temperature: float = 0.3
     max_output_tokens: int = 4096
 

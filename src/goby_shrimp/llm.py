@@ -42,7 +42,7 @@ class MiniMaxClient:
             "anthropic-version": "2023-06-01",
         }
         body = {
-            "model": model or self.model or "MiniMax-M2.5",
+            "model": model or self.model or "MiniMax-M2.7",
             "system": system,
             "messages": [{"role": "user", "content": user}],
             "temperature": self.temperature if temperature is None else temperature,

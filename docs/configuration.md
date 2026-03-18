@@ -65,7 +65,7 @@
 - `events.macro_provider = fred`
 - `integrations.fred_api_key` 用于 `FRED` 宏观 provider
 - `llm.provider = minimax`
-- `llm.model = MiniMax-M2.5`
+- `llm.model = MiniMax-M2.7`
 - dashboard 可通过运行时配置在 `minimax / mock` 间切换 provider
 - 宏观通道当前 provider 链为 `FRED -> World Bank -> 最近可用上下文`
 - 宏观通道降级会阻断新的策略晋级，但不会让系统启动失败
