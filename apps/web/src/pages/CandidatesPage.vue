@@ -16,10 +16,20 @@ const candidatesQuery = useQuery({
   queryFn: api.getCandidates,
   refetchInterval: 15_000,
 })
+const commandQuery = useQuery({
+  queryKey: ['command-center', 'candidates-page'],
+  queryFn: api.getCommandCenter,
+  refetchInterval: 15_000,
+})
 
 const candidates = computed(() => candidatesQuery.data.value ?? [])
 const showAllCandidates = ref(false)
 const visibleCandidates = computed(() => (showAllCandidates.value ? candidates.value : candidates.value.slice(0, 6)))
+const latestRiskDecision = computed(() => commandQuery.data.value?.latest_risk_decision ?? null)
+const llmStatus = computed(() => commandQuery.data.value?.llm_status ?? null)
+const emptyBlockedReasons = computed(
+  () => latestRiskDecision.value?.evidence_pack?.governance_report?.promotion_gate?.blocked_reasons ?? [],
+)
 const candidateSummary = computed(() => {
   const summary = {
     total: candidates.value.length,
@@ -88,6 +98,9 @@ function lifecycleEtaKindLabel(value?: string): string {
 
 function resumeConditionLabel(value?: string): string {
   return displayLabel(t, 'resumeCondition', value)
+}
+function llmStatusLabel(value?: string): string {
+  return displayLabel(t, 'llmStatus', value)
 }
 
 function formatDateTime(value?: string | null): string {
@@ -177,6 +190,49 @@ function strategyTitle(value?: string | null): string {
           {{ showAllCandidates ? t('candidates.showLess') : t('candidates.showAll') }}
         </button>
       </div>
+
+      <Card v-if="visibleCandidates.length === 0" class="space-y-3 border border-amber-200 bg-amber-50/70">
+        <h3 class="text-base font-semibold text-amber-900">{{ t('candidates.emptyTitle') }}</h3>
+        <p class="text-sm text-amber-800">{{ t('candidates.emptyBody') }}</p>
+        <div class="grid gap-3 text-sm md:grid-cols-3">
+          <div>
+            <p class="text-xs uppercase tracking-widest text-amber-700">{{ t('candidates.emptyLatestAction') }}</p>
+            <p class="mt-1 font-semibold text-amber-900">
+              {{
+                latestRiskDecision?.action
+                  ? riskActionLabel(latestRiskDecision.action)
+                  : t('candidates.emptyNoDecision')
+              }}
+            </p>
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-widest text-amber-700">{{ t('candidates.emptyLatestDecisionAt') }}</p>
+            <p class="mt-1 font-semibold text-amber-900">{{ formatDateTime(latestRiskDecision?.created_at) }}</p>
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-widest text-amber-700">{{ t('candidates.emptyProviderStatus') }}</p>
+            <p class="mt-1 font-semibold text-amber-900">
+              {{
+                llmStatus
+                  ? `${llmStatus.provider} / ${llmStatus.model} / ${llmStatusLabel(llmStatus.status)}`
+                  : '--'
+              }}
+            </p>
+          </div>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-widest text-amber-700">{{ t('candidates.emptyReasons') }}</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <Badge v-for="reason in emptyBlockedReasons" :key="String(reason)" variant="warning">
+              {{ governanceReasonLabel(String(reason)) }}
+            </Badge>
+            <span v-if="!emptyBlockedReasons.length" class="text-sm text-amber-900">
+              {{ t('candidates.emptyNoReasons') }}
+            </span>
+          </div>
+        </div>
+        <p class="text-sm text-amber-900">{{ t('candidates.emptyArchiveHint') }}</p>
+      </Card>
 
       <Card v-for="item in visibleCandidates" :key="item.proposal.id" class="space-y-4">
         <div class="flex items-start justify-between gap-3">

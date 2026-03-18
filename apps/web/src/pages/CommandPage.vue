@@ -30,6 +30,7 @@ const acceptanceReportQuery = useQuery({
 const command = computed(() => commandQuery.data.value)
 const candidates = computed(() => candidatesQuery.data.value ?? [])
 const acceptanceReport = computed(() => acceptanceReportQuery.data.value)
+const llmStatus = computed(() => command.value?.llm_status ?? null)
 const runtimeStatus = computed(() => command.value?.runtime_status ?? null)
 const liveReadiness = computed(() => command.value?.live_readiness ?? null)
 const latestDecision = computed(() => command.value?.latest_risk_decision ?? null)
@@ -579,6 +580,13 @@ function statusLabel(value: BoardStatus): string {
         <div class="rounded-lg border border-slate-200/80 bg-white px-3 py-2">
           <p class="text-slate-500">{{ term('Provider Migration') }}</p>
           <p class="mt-1 font-semibold text-slate-900">{{ providerMigration?.current_provider ?? '--' }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-white px-3 py-2">
+          <p class="text-slate-500">当前模型类型</p>
+          <p class="mt-1 font-semibold text-slate-900">
+            {{ llmStatus?.provider ?? '--' }} / {{ llmStatus?.model ?? '--' }}
+          </p>
+          <p class="mt-1 text-xs text-slate-500">{{ displayLabel(t, 'llmStatus', llmStatus?.status) }}</p>
         </div>
         <div class="rounded-lg border border-slate-200/80 bg-white px-3 py-2">
           <p class="text-slate-500">{{ term('Acceptance Status') }}</p>
