@@ -505,6 +505,33 @@ class KnowledgeSuggestionDTO(BaseModel):
     updated_at: datetime
 
 
+class SlotGateDTO(BaseModel):
+    eligible: bool = False
+    blocked_reasons: list[str] = Field(default_factory=list)
+    summary: str | None = None
+
+
+class SlotFocusDTO(BaseModel):
+    mode: Literal["active", "challenger", "empty"]
+    strategy_title: str | None = None
+    symbol: str | None = None
+    proposal_id: str | None = None
+    stage: str | None = None
+    candidate_gate: SlotGateDTO = Field(default_factory=SlotGateDTO)
+    promotion_gate: SlotGateDTO = Field(default_factory=SlotGateDTO)
+    live_readiness_summary: str | None = None
+    primary_blocker: str | None = None
+    next_step: str | None = None
+
+
+class PaperSummaryDTO(BaseModel):
+    total_equity: float | None = None
+    position_count: int = 0
+    latest_execution_status: str | None = None
+    latest_execution_explanation: str | None = None
+    latest_nav_change: float | None = None
+
+
 class CommandCenterDTO(BaseModel):
     generated_at: datetime
     timezone: str
@@ -517,6 +544,8 @@ class CommandCenterDTO(BaseModel):
     live_readiness_history: list[LiveReadinessHistoryItemDTO] = Field(default_factory=list)
     live_readiness_change: LiveReadinessChangeDTO | None = None
     market_snapshot: MarketSnapshotDTO
+    slot_focus: SlotFocusDTO
+    paper_summary: PaperSummaryDTO
     active_strategy: ActiveStrategyDTO
     candidate_count: int
     latest_risk_decision: RiskDecisionDTO | None = None

@@ -308,7 +308,17 @@ class BacktestEngine:
     def load_data(self, ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
         """通过 DataProvider 加载数据"""
         logger.info(f"📥 [BacktestEngine] Loading {ticker} from {start_date} to {end_date}")
-        
+
+        # Historical admission/backtest should prefer the unified source manager so it can
+        # reuse cache and market-specific routing before hitting a single external provider.
+        try:
+            routed = get_source_manager().fetch_ohlcv(ticker, start_date, end_date)
+            if routed is not None and not routed.empty:
+                logger.info("✅ [BacktestEngine] Loaded data from source_manager routing chain")
+                return self._normalize_columns(routed)
+        except Exception as routed_exc:
+            logger.warning(f"⚠️ [BacktestEngine] source_manager primary load failed: {routed_exc}")
+
         try:
             data = self.data_provider.fetch_ohlcv(ticker, start_date, end_date)
             

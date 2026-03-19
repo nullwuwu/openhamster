@@ -1582,6 +1582,23 @@ def _sanitize_strategy_params(base_strategy: str, params: dict[str, object]) -> 
     return {key: value for key, value in params.items() if key in allowed}
 
 
+def _allowed_strategy_params(base_strategy: str) -> list[str]:
+    registry = get_strategy_registry()
+    definition = registry.get(base_strategy)
+    candidate_cls = definition.stream_cls or definition.vectorized_cls
+    if candidate_cls is None:
+        return []
+    try:
+        signature = inspect.signature(candidate_cls)
+    except (TypeError, ValueError):
+        return []
+    return sorted(
+        name
+        for name, parameter in signature.parameters.items()
+        if name != 'self' and parameter.kind in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+    )
+
+
 def _proposal_base_strategy_from_spec(title: str, strategy_dsl: dict[str, object] | None) -> str:
     params = strategy_dsl.get('params', {}) if isinstance(strategy_dsl, dict) else {}
     if isinstance(params, dict) and isinstance(params.get('base_strategy'), str) and params.get('base_strategy'):
@@ -1674,7 +1691,24 @@ def _proposal_backtest_gate(
 
 
 def _backtest_gate_bottom_line(gate: dict[str, object]) -> bool:
-    return bool(gate.get('available')) and bool(gate.get('eligible_for_paper'))
+    if not bool(gate.get('available')):
+        return False
+    if bool(gate.get('eligible_for_paper')):
+        return True
+    review = dict(gate.get('review', {}) or {})
+    verdict = str(review.get('verdict', '') or '')
+    hard_fails = [str(item) for item in list(review.get('hard_gates_failed', []) or [])]
+    return verdict in {Verdict.GO.value, Verdict.REVISE.value} and not hard_fails
+
+
+def _backtest_gate_candidate_ok(gate: dict[str, object] | None) -> bool:
+    if not isinstance(gate, dict):
+        return False
+    if not bool(gate.get('available')):
+        return False
+    review = dict(gate.get('review', {}) or {})
+    hard_fails = [str(item) for item in list(review.get('hard_gates_failed', []) or [])]
+    return not hard_fails
 
 
 def _backtest_metrics_for_evidence(gate: dict[str, object]) -> dict[str, float]:
@@ -2265,6 +2299,7 @@ def get_universe_selection(db: Session, *, refresh: bool = False, current_time: 
     try:
         candidates = fetch_hk_universe_candidates(
             top_n=max(1, int(settings.universe.top_n)),
+            min_list_days=max(0, int(settings.universe.min_list_days)),
             min_turnover_millions=float(settings.universe.min_turnover_millions),
             account_capital_hkd=float(settings.portfolio.default_capital),
             max_lot_cost_ratio=float(settings.universe.max_lot_cost_ratio),
@@ -2295,7 +2330,7 @@ def get_universe_selection(db: Session, *, refresh: bool = False, current_time: 
         "mode": settings.universe.mode,
         "market_scope": "HK",
         "selected_symbol": str(selected_candidate["symbol"]),
-        "source": "akshare",
+        "source": str(selected_candidate.get("source") or "dynamic_hk"),
         "generated_at": current_time.isoformat(),
         "selection_reason": str(selected_candidate.get("selection_reason") or "Selected as the strongest current HK candidate."),
         "top_factors": [str(item) for item in list(selected_candidate.get("reason_tags", []))[:4]],
@@ -3072,6 +3107,12 @@ def _normalize_strategy_agent_blueprints(
         if not features_used:
             features_used = ['volatility', 'macro_summary']
         raw_params = proposal.get('params', {})
+        params = raw_params if isinstance(raw_params, dict) else {}
+        sanitized_params = dict(params)
+        dropped_params: list[str] = []
+        if base_strategy != 'novel_composite':
+            sanitized_params = _sanitize_strategy_params(base_strategy, params)
+            dropped_params = sorted(key for key in params.keys() if key not in sanitized_params)
         knowledge_families_used = [
             str(item)
             for item in list(proposal.get('knowledge_families_used', []) or [])
@@ -3090,7 +3131,8 @@ def _normalize_strategy_agent_blueprints(
                 'baseline_delta_summary': str(proposal.get('baseline_delta_summary', '')).strip()[:240],
                 'novelty_claim': str(proposal.get('novelty_claim', '')).strip()[:240],
                 'features_used': features_used,
-                'params': raw_params if isinstance(raw_params, dict) else {},
+                'params': sanitized_params,
+                'dropped_params': dropped_params,
                 'source_kind': source_kind,
                 'provider_status': provider_status.status,
                 'provider_model': provider_status.model,
@@ -3165,6 +3207,7 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
         {
             'strategy_name': item.strategy_name,
             'default_params': item.default_params,
+            'allowed_params': _allowed_strategy_params(item.strategy_name),
             'description': item.description,
             'tags': list(definition.tags),
             'supported_markets': list(definition.supported_markets),
@@ -3304,6 +3347,12 @@ def _governance_action(
     settings_governance = get_settings().governance
     market_governance = _market_governance_profile(market_scope)
     blocked_reasons: list[str] = []
+    candidate_blocked_reasons: list[str] = []
+    promotion_blocked_reasons: list[str] = []
+    backtest_review = dict(backtest_gate.get('review', {}) or {}) if isinstance(backtest_gate, dict) else {}
+    backtest_hard_fails = [str(item) for item in list(backtest_review.get('hard_gates_failed', []) or [])]
+    backtest_verdict = str(backtest_review.get('verdict', '') or '')
+    backtest_soft_candidate = _backtest_gate_candidate_ok(backtest_gate)
     active_score = float(active_context['final_score']) if active_context else None
     score_delta = round(final_score - active_score, 1) if active_score is not None else None
     promoted_at = active_context.get('promoted_at') if active_context else None
@@ -3327,31 +3376,35 @@ def _governance_action(
     if replacing_mock_active:
         can_challenge_active = True
 
-    if not bottom_line_passed:
-        blocked_reasons.append('bottom_line_failed')
+    if not bottom_line_passed and not backtest_soft_candidate:
+        candidate_blocked_reasons.append('bottom_line_failed')
     if final_score < float(market_governance['keep_threshold']):
-        blocked_reasons.append('below_keep_threshold')
+        candidate_blocked_reasons.append('below_keep_threshold')
     if final_score < float(market_governance['promote_threshold']):
-        blocked_reasons.append('below_promote_threshold')
+        promotion_blocked_reasons.append('below_promote_threshold')
     if active_context and score_delta is not None and score_delta < float(market_governance['challenger_min_delta']) and not replacing_mock_active:
-        blocked_reasons.append('delta_below_threshold')
+        promotion_blocked_reasons.append('delta_below_threshold')
     if cooldown_remaining_days > 0 and not replacing_mock_active:
-        blocked_reasons.append('cooldown_active')
+        promotion_blocked_reasons.append('cooldown_active')
     if settings_governance.block_promotion_on_macro_degrade and bool(macro_status.get('degraded')):
-        blocked_reasons.append('macro_provider_degraded')
+        promotion_blocked_reasons.append('macro_provider_degraded')
     if settings_governance.require_backtest_before_paper:
         if not isinstance(backtest_gate, dict):
-            blocked_reasons.append('backtest_missing')
+            promotion_blocked_reasons.append('backtest_missing')
         elif not bool(backtest_gate.get('eligible_for_paper', False)):
-            blocked_reasons.extend(
+            promotion_blocked_reasons.extend(
                 [str(item) for item in list(backtest_gate.get('blocked_reasons', []) or [])] or ['backtest_not_passed']
             )
     knowledge_blocked_reasons = []
     if isinstance(knowledge_assessment, dict):
         knowledge_blocked_reasons = [str(item) for item in list(knowledge_assessment.get('blocked_reasons', []) or [])]
         for reason in knowledge_blocked_reasons:
-            if reason not in blocked_reasons:
-                blocked_reasons.append(reason)
+            if reason not in candidate_blocked_reasons:
+                candidate_blocked_reasons.append(reason)
+            if reason not in promotion_blocked_reasons:
+                promotion_blocked_reasons.append(reason)
+
+    blocked_reasons = list(dict.fromkeys([*candidate_blocked_reasons, *promotion_blocked_reasons]))
 
     promote_allowed = (
         bottom_line_passed
@@ -3364,13 +3417,22 @@ def _governance_action(
         and not (
             settings_governance.block_promotion_on_macro_degrade and bool(macro_status.get('degraded'))
         )
-        and not any(reason in {'knowledge_family_mismatch', 'knowledge_failure_mode_risk', 'knowledge_param_outlier', 'knowledge_low_novelty'} for reason in blocked_reasons)
+        and not any(reason in {'knowledge_family_mismatch', 'knowledge_failure_mode_risk', 'knowledge_param_outlier', 'knowledge_low_novelty'} for reason in promotion_blocked_reasons)
+    )
+
+    candidate_allowed = (
+        (bottom_line_passed or backtest_soft_candidate)
+        and final_score >= float(market_governance['keep_threshold'])
+        and not any(
+            reason in {'knowledge_family_mismatch', 'knowledge_failure_mode_risk', 'knowledge_param_outlier'}
+            for reason in candidate_blocked_reasons
+        )
     )
 
     if promote_allowed:
         status = ProposalStatus.ACTIVE
         action = RiskDecisionAction.PROMOTE_TO_PAPER
-    elif bottom_line_passed and final_score >= float(market_governance['keep_threshold']):
+    elif candidate_allowed:
         status = ProposalStatus.CANDIDATE
         action = RiskDecisionAction.KEEP_CANDIDATE
     else:
@@ -3402,9 +3464,15 @@ def _governance_action(
         },
         'promotion_gate': {
             'eligible': action == RiskDecisionAction.PROMOTE_TO_PAPER,
-            'blocked_reasons': blocked_reasons,
+            'blocked_reasons': list(dict.fromkeys(promotion_blocked_reasons)),
             'backtest_required': bool(settings_governance.require_backtest_before_paper),
             'backtest_summary': str(backtest_gate.get('summary', '')) if isinstance(backtest_gate, dict) else '',
+        },
+        'candidate_gate': {
+            'eligible': action in {RiskDecisionAction.KEEP_CANDIDATE, RiskDecisionAction.PROMOTE_TO_PAPER},
+            'blocked_reasons': list(dict.fromkeys(candidate_blocked_reasons)),
+            'backtest_candidate_ok': backtest_soft_candidate,
+            'bottom_line_passed': bool(bottom_line_passed),
         },
         'active_comparison': {
             'active_title': active_context.get('title') if active_context else None,
@@ -3463,7 +3531,7 @@ def _strategy_dsl(blueprint: dict[str, object], snapshot: dict[str, object], dig
             {'indicator': 'volatility', 'operator': 'lte', 'value': 0.035},
         ],
         'exit_rules': [
-            {'indicator': 'drawdown', 'operator': 'gte', 'value': 0.08},
+            {'indicator': 'drawdown', 'operator': 'gte', 'value': 0.06},
             {'indicator': 'EMA', 'operator': 'cross_below', 'lhs': 8, 'rhs': 21},
         ],
         'risk_rules': [
@@ -3472,8 +3540,8 @@ def _strategy_dsl(blueprint: dict[str, object], snapshot: dict[str, object], dig
             {'rule': 'daily_rebalance_only', 'value': True},
             {'rule': 'market_execution_constraints', 'value': market_profile.get('execution_constraints', [])},
         ],
-        'position_sizing': {'mode': 'fixed_fraction', 'value': 0.25},
-        'holding_constraints': {'min_holding_days': 5, 'cooldown_days': market_governance['cooldown_days']},
+        'position_sizing': {'mode': 'fixed_fraction', 'value': 0.18},
+        'holding_constraints': {'min_holding_days': 8, 'cooldown_days': market_governance['cooldown_days']},
         'features_used': blueprint['features_used'],
         'params': {'base_strategy': base_strategy, 'symbol': str(snapshot['symbol']), **(params if isinstance(params, dict) else {})},
     }

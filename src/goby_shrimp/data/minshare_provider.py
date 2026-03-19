@@ -100,8 +100,11 @@ class MinShareProvider(DataProvider):
         if not self.hk_rt_token:
             raise ValueError("MINISHARE_HK_RT_TOKEN is required for HK realtime daily")
         module = self._import_minishare()
-        direct_ts_code = normalize_tushare_symbol(ticker)
         api = module.pro_api(self.hk_rt_token)
+        raw_ticker = str(ticker or "").strip().upper()
+        if "*" in raw_ticker:
+            return api.rt_hk_k_ms(ts_code=raw_ticker)
+        direct_ts_code = normalize_tushare_symbol(raw_ticker)
         try:
             return api.rt_hk_k_ms(ts_code=direct_ts_code)
         except Exception as exc:

@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException,
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..runtime import build_pipeline_scheduler
@@ -58,6 +59,9 @@ from .schemas import (
     RuntimeLogDTO,
     RuntimeLLMUpdate,
     RunMetricSnapshotDTO,
+    SlotFocusDTO,
+    SlotGateDTO,
+    PaperSummaryDTO,
     StrategyProposalDTO,
     StrategySnapshotDTO,
 )
@@ -442,17 +446,160 @@ def _read_runtime_log(stream: str, *, lines: int = 120) -> RuntimeLogDTO:
         raise HTTPException(status_code=500, detail=f"Failed to read runtime log: {exc}") from exc
 
 
+def _governance_block(report: dict[str, object] | None, key: str) -> dict[str, object]:
+    if not isinstance(report, dict):
+        return {}
+    value = report.get(key, {})
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _paper_summary(paper_raw: dict[str, object], latest_execution: dict[str, object] | None) -> PaperSummaryDTO:
+    nav_rows = list(paper_raw.get("nav", []) or [])
+    positions = list(paper_raw.get("positions", []) or [])
+    latest_equity = None
+    latest_nav_change = None
+    if nav_rows:
+        latest_equity = float(nav_rows[0].get("total_equity", 0.0) or 0.0)
+        if len(nav_rows) >= 2:
+            previous_equity = float(nav_rows[1].get("total_equity", 0.0) or 0.0)
+            latest_nav_change = round(latest_equity - previous_equity, 2)
+    return PaperSummaryDTO(
+        total_equity=latest_equity,
+        position_count=len(positions),
+        latest_execution_status=str(latest_execution.get("status")) if latest_execution else None,
+        latest_execution_explanation=str(latest_execution.get("explanation")) if latest_execution else None,
+        latest_nav_change=latest_nav_change,
+    )
+
+
+def _candidate_gate_snapshot(proposal: StrategyProposal | None, live_readiness: dict[str, object]) -> SlotGateDTO:
+    if proposal is None:
+        return SlotGateDTO(eligible=False, blocked_reasons=list(live_readiness.get("blockers", [])[:3]), summary=live_readiness.get("summary"))
+    governance_report = dict((proposal.evidence_pack or {}).get("governance_report", {}) or {})
+    candidate_gate = _governance_block(governance_report, "candidate_gate")
+    if candidate_gate:
+        return SlotGateDTO(
+            eligible=bool(candidate_gate.get("eligible", False)),
+            blocked_reasons=[str(item) for item in list(candidate_gate.get("blocked_reasons", []) or [])],
+            summary="候选池准入",
+        )
+    quality_report = dict((proposal.evidence_pack or {}).get("quality_report", {}) or {})
+    backtest_gate = dict(quality_report.get("backtest_gate", {}) or {})
+    review = dict(backtest_gate.get("review", {}) or {})
+    hard_fails = [str(item) for item in list(review.get("hard_gates_failed", []) or [])]
+    eligible = bool(backtest_gate.get("available")) and not hard_fails and proposal.final_score >= 68.0
+    blocked = [] if eligible else (hard_fails or ["below_keep_threshold"])
+    return SlotGateDTO(eligible=eligible, blocked_reasons=blocked, summary="候选池准入")
+
+
+def _promotion_gate_snapshot(proposal: StrategyProposal | None, live_readiness: dict[str, object]) -> SlotGateDTO:
+    if proposal is None:
+        return SlotGateDTO(eligible=False, blocked_reasons=list(live_readiness.get("blockers", [])[:3]), summary=live_readiness.get("summary"))
+    governance_report = dict((proposal.evidence_pack or {}).get("governance_report", {}) or {})
+    promotion_gate = _governance_block(governance_report, "promotion_gate")
+    if promotion_gate:
+        return SlotGateDTO(
+            eligible=bool(promotion_gate.get("eligible", False)),
+            blocked_reasons=[str(item) for item in list(promotion_gate.get("blocked_reasons", []) or [])],
+            summary=str(promotion_gate.get("backtest_summary") or "模拟盘准入"),
+        )
+    return SlotGateDTO(eligible=False, blocked_reasons=[], summary="模拟盘准入")
+
+
+def _resolve_slot_focus(
+    db: Session,
+    *,
+    active: StrategyProposal | None,
+    runtime_status: dict[str, object],
+    live_readiness: dict[str, object],
+) -> SlotFocusDTO:
+    focus_proposal = active
+    mode = "active" if active is not None else "empty"
+    if focus_proposal is None:
+        candidates = [item for item in list_candidate_strategies(db) if item.status.value == "candidate"]
+        if candidates:
+            focus_proposal = candidates[0]
+            mode = "challenger"
+        else:
+            batches = list_research_batches(db, limit=4)
+            batch_candidates: list[StrategyProposal] = []
+            for batch in batches:
+                batch_symbols = [str(item) for item in list(batch.research_symbols or []) if str(item).strip()]
+                if not batch_symbols:
+                    continue
+                records = list(
+                    db.execute(
+                        select(StrategyProposal.id)
+                        .where(
+                            StrategyProposal.symbol.in_(batch_symbols),
+                            StrategyProposal.created_at >= batch.created_at,
+                        )
+                        .order_by(StrategyProposal.final_score.desc(), StrategyProposal.created_at.desc())
+                        .limit(6)
+                    ).scalars()
+                )
+                for proposal_id in records:
+                    proposal = get_strategy_proposal(db, proposal_id)
+                    if proposal is not None:
+                        batch_candidates.append(proposal)
+                if batch_candidates:
+                    break
+            if batch_candidates:
+                batch_candidates.sort(
+                    key=lambda item: (
+                        bool(_candidate_gate_snapshot(item, live_readiness).eligible),
+                        item.final_score,
+                        item.created_at,
+                    ),
+                    reverse=True,
+                )
+                focus_proposal = batch_candidates[0]
+                mode = "challenger"
+
+    candidate_gate = _candidate_gate_snapshot(focus_proposal, live_readiness)
+    promotion_gate = _promotion_gate_snapshot(focus_proposal, live_readiness)
+    lifecycle = dict(((focus_proposal.evidence_pack or {}).get("governance_report", {}) or {}).get("lifecycle", {}) or {}) if focus_proposal else {}
+    primary_blocker = None
+    if candidate_gate.blocked_reasons:
+        primary_blocker = candidate_gate.blocked_reasons[0]
+    elif promotion_gate.blocked_reasons:
+        primary_blocker = promotion_gate.blocked_reasons[0]
+    elif live_readiness.get("blockers"):
+        primary_blocker = str(list(live_readiness.get("blockers", []) or [])[0])
+    next_step = None
+    if lifecycle.get("next_step") is not None:
+        next_step = str(lifecycle.get("next_step"))
+    elif live_readiness.get("next_actions"):
+        next_step = str(list(live_readiness.get("next_actions", []) or [])[0])
+    elif runtime_status.get("current_stage") is not None:
+        next_step = str(runtime_status.get("current_stage"))
+    return SlotFocusDTO(
+        mode=mode,
+        strategy_title=focus_proposal.title if focus_proposal else None,
+        symbol=focus_proposal.symbol if focus_proposal else None,
+        proposal_id=focus_proposal.id if focus_proposal else None,
+        stage=str(runtime_status.get("current_stage")) if runtime_status.get("current_stage") is not None else None,
+        candidate_gate=candidate_gate,
+        promotion_gate=promotion_gate,
+        live_readiness_summary=str(live_readiness.get("summary", "")) if live_readiness else None,
+        primary_blocker=primary_blocker,
+        next_step=next_step,
+    )
+
+
 @router.get("/command", response_model=CommandCenterDTO)
 def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
     active = get_active_strategy(db)
     latest_decision = get_latest_risk_decision(db)
     snapshot = build_market_snapshot(db)
+    runtime_status = get_pipeline_runtime_status(db)
     paper_raw = fetch_paper_data(limit=30)
+    latest_execution_payload = get_latest_paper_execution(db, active)
     paper_dto = PaperTradingDTO(
         nav=[PaperNavPointDTO(**item) for item in paper_raw["nav"]],
         orders=[PaperOrderDTO(**item) for item in paper_raw["orders"]],
         positions=[PaperPositionDTO(**item) for item in paper_raw["positions"]],
-        latest_execution=PaperExecutionDTO(**latest_execution) if (latest_execution := get_latest_paper_execution(db, active)) else None,
+        latest_execution=PaperExecutionDTO(**latest_execution_payload) if latest_execution_payload else None,
     )
     latest_digest = snapshot["event_digest"]
     provider_migration = build_provider_migration_summary(db)
@@ -461,11 +608,13 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
     live_readiness = build_live_readiness(db)
     live_readiness_history = build_live_readiness_history(db, limit=8)
     live_readiness_change = build_live_readiness_change(db, live_readiness_history)
+    slot_focus = _resolve_slot_focus(db, active=active, runtime_status=runtime_status, live_readiness=live_readiness)
+    paper_summary = _paper_summary(paper_raw, latest_execution_payload)
     return CommandCenterDTO(
         generated_at=now_tz(),
         timezone="Asia/Shanghai",
         llm_status=_to_llm_status_dto(get_current_llm_status(db)),
-        runtime_status=_to_pipeline_runtime_status_dto(get_pipeline_runtime_status(db)),
+        runtime_status=_to_pipeline_runtime_status_dto(runtime_status),
         runtime_sync_history=_to_runtime_sync_history_dto(runtime_sync_history),
         provider_migration=_to_provider_migration_summary_dto(provider_migration),
         provider_migration_history=_to_provider_migration_history_dto(provider_migration_history),
@@ -512,6 +661,8 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
             event_digest=_to_digest_dto(snapshot["event_digest"]),
             event_stream_preview=[_to_event_dto(record) for record in snapshot["event_stream_preview"]],
         ),
+        slot_focus=slot_focus,
+        paper_summary=paper_summary,
         active_strategy=ActiveStrategyDTO(
             proposal=_to_proposal_dto(active) if active else None,
             latest_decision=_to_risk_decision_dto(active.decisions[-1]) if active and active.decisions else None,

@@ -4,6 +4,7 @@ OHLCV 本地增量缓存
 from __future__ import annotations
 
 import sqlite3
+from datetime import timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -82,6 +83,22 @@ class OHLCVCache:
             return str(row[0])
         return None
 
+    def get_date_bounds(self, symbol: str) -> tuple[str | None, str | None]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT MIN(trade_date), MAX(trade_date)
+                FROM ohlcv_cache
+                WHERE symbol = ?
+                """,
+                (symbol,),
+            ).fetchone()
+        if not row:
+            return None, None
+        earliest = str(row[0]) if row[0] is not None else None
+        latest = str(row[1]) if row[1] is not None else None
+        return earliest, latest
+
     def upsert(self, symbol: str, df: pd.DataFrame) -> None:
         if df.empty:
             return
@@ -123,12 +140,51 @@ class OHLCVCache:
         end: str,
         loader: Callable[[str, str], pd.DataFrame | None],
     ) -> pd.DataFrame:
+        tolerated_gap_days = 3
         cached = self.get_range(symbol=symbol, start=start, end=end)
-        last_date = self.get_last_trade_date(symbol)
-        if last_date is not None and last_date >= end and not cached.empty:
+        earliest_date, last_date = self.get_date_bounds(symbol)
+        if (
+            earliest_date is not None
+            and last_date is not None
+            and earliest_date <= start
+            and last_date >= end
+            and not cached.empty
+        ):
             return cached
-        load_start = start if last_date is None else max(start, last_date)
-        loaded = loader(load_start, end)
-        if loaded is not None and not loaded.empty:
-            self.upsert(symbol=symbol, df=loaded)
+
+        if earliest_date is None or last_date is None:
+            try:
+                loaded = loader(start, end)
+            except Exception:
+                loaded = None
+            if loaded is not None and not loaded.empty:
+                self.upsert(symbol=symbol, df=loaded)
+            return self.get_range(symbol=symbol, start=start, end=end)
+
+        if start < earliest_date:
+            earliest_ts = pd.Timestamp(earliest_date)
+            requested_start = pd.Timestamp(start)
+            head_gap_days = max(0, (earliest_ts - requested_start).days)
+            head_end = (earliest_ts - timedelta(days=1)).strftime("%Y-%m-%d")
+            if start <= head_end:
+                if head_gap_days > tolerated_gap_days:
+                    try:
+                        head_loaded = loader(start, head_end)
+                    except Exception:
+                        head_loaded = None
+                    if head_loaded is not None and not head_loaded.empty:
+                        self.upsert(symbol=symbol, df=head_loaded)
+
+        if last_date < end:
+            last_ts = pd.Timestamp(last_date)
+            requested_end = pd.Timestamp(end)
+            tail_gap_days = max(0, (requested_end - last_ts).days)
+            tail_start = (last_ts + timedelta(days=1)).strftime("%Y-%m-%d")
+            if tail_start <= end and tail_gap_days > tolerated_gap_days:
+                try:
+                    tail_loaded = loader(tail_start, end)
+                except Exception:
+                    tail_loaded = None
+                if tail_loaded is not None and not tail_loaded.empty:
+                    self.upsert(symbol=symbol, df=tail_loaded)
         return self.get_range(symbol=symbol, start=start, end=end)

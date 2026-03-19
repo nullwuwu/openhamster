@@ -17,7 +17,11 @@ def strategy_agent_system_prompt() -> str:
         'External candidate knowledge is supplemental prior art and must not outweigh builtin governance knowledge. '
         'You may recombine baseline ideas into a new thesis, but stay within long-only, no-leverage, daily-rebalance constraints. '
         'Respect the supplied market profile and prefer baselines that fit the current market structure. '
-        'Baseline strategies are priors, not hard limits. If none fit directly, use novel_composite as the anchor strategy label.'
+        'Baseline strategies are priors, not hard limits. If none fit directly, use novel_composite as the anchor strategy label. '
+        'Only emit params that are explicitly listed in allowed_params for the chosen base_strategy. '
+        'Do not invent unsupported knobs, hidden risk controls, or extra indicators that the executor cannot run. '
+        'Prefer simple, defensive variants with lower turnover, longer holding periods, and drawdown control over complex feature stacking. '
+        'If a proposal is only a mild parameter change from a baseline, say so explicitly in baseline_delta_summary and novelty_claim.'
     )
 
 
@@ -65,6 +69,14 @@ def build_strategy_agent_payload(
                     'features_used': ['SMA', 'EMA', 'RSI', 'MACD', 'ATR', 'ADX', 'Bollinger', 'Donchian', 'ROC', 'Volume MA', 'volatility', 'drawdown', 'macro_summary'],
                     'params': {'any': 'json object'},
                 }
-            ]
+            ],
+            'generation_rules': {
+                'max_proposals': 3,
+                'prefer_defensive': True,
+                'prefer_lower_turnover': True,
+                'prefer_longer_holding': True,
+                'params_must_be_subset_of_allowed_params': True,
+                'unsupported_params_will_be_dropped': True,
+            },
         },
     }

@@ -592,6 +592,33 @@ export interface KnowledgeSuggestion {
   updated_at: string
 }
 
+export interface SlotGate {
+  eligible: boolean
+  blocked_reasons: string[]
+  summary?: string | null
+}
+
+export interface SlotFocus {
+  mode: 'active' | 'challenger' | 'empty'
+  strategy_title?: string | null
+  symbol?: string | null
+  proposal_id?: string | null
+  stage?: string | null
+  candidate_gate: SlotGate
+  promotion_gate: SlotGate
+  live_readiness_summary?: string | null
+  primary_blocker?: string | null
+  next_step?: string | null
+}
+
+export interface PaperSummary {
+  total_equity?: number | null
+  position_count: number
+  latest_execution_status?: string | null
+  latest_execution_explanation?: string | null
+  latest_nav_change?: number | null
+}
+
 export interface CommandCenter {
   generated_at: string
   timezone: string
@@ -604,6 +631,8 @@ export interface CommandCenter {
   live_readiness_history: LiveReadinessHistoryItem[]
   live_readiness_change: LiveReadinessChange | null
   market_snapshot: MarketSnapshot
+  slot_focus: SlotFocus
+  paper_summary: PaperSummary
   active_strategy: ActiveStrategy
   candidate_count: number
   latest_risk_decision: RiskDecision | null

@@ -64,6 +64,90 @@ def _lot_cost(symbol: str, latest_price: float) -> float:
     return round(lot_size * latest_price, 2)
 
 
+def _is_ordinary_hk_equity(*, name: str, fullname: str | None, market: str | None) -> bool:
+    resolved_market = str(market or "").strip()
+    if resolved_market and resolved_market not in {"主板", "创业板"}:
+        return False
+
+    combined = f"{name} {fullname or ''}".upper()
+    exclusion_terms = [
+        "ETF",
+        "ETP",
+        "REIT",
+        "TRUST",
+        "FUND",
+        "INDEX",
+        "BOND",
+        "杠杆",
+        "反向",
+        "基金",
+        "房托",
+        "信托",
+        "债",
+        "货币",
+        "期货",
+        "牛熊",
+    ]
+    return not any(term in combined for term in exclusion_terms)
+
+
+def _fetch_minshare_market_frame(min_list_days: int) -> pd.DataFrame:
+    from .minshare_provider import MinShareProvider
+
+    provider = MinShareProvider()
+    basics = provider.fetch_hk_basic()
+    if basics is None or basics.empty:
+        return pd.DataFrame()
+
+    basic_frame = basics.copy()
+    basic_frame["ts_code"] = basic_frame["ts_code"].astype(str).str.upper().str.strip()
+    basic_frame = basic_frame[basic_frame["list_status"].astype(str).str.upper() == "L"]
+    basic_frame = basic_frame[
+        basic_frame.apply(
+            lambda row: _is_ordinary_hk_equity(
+                name=str(row.get("name", "")).strip(),
+                fullname=str(row.get("fullname", "")).strip() or None,
+                market=str(row.get("market", "")).strip() or None,
+            ),
+            axis=1,
+        )
+    ]
+
+    if min_list_days > 0 and "list_date" in basic_frame.columns:
+        cutoff = (datetime.now() - timedelta(days=min_list_days)).strftime("%Y%m%d")
+        basic_frame = basic_frame[
+            basic_frame["list_date"].astype(str).str.fullmatch(r"\d{8}") & (basic_frame["list_date"].astype(str) <= cutoff)
+        ]
+
+    realtime_frames: list[pd.DataFrame] = []
+    for prefix in [f"{index:02d}" for index in range(10)]:
+        try:
+            frame = provider.fetch_hk_rt_daily(f"{prefix}*.HK")
+        except Exception:
+            continue
+        if frame is None or frame.empty:
+            continue
+        realtime_frames.append(frame.copy())
+
+    if not realtime_frames:
+        return pd.DataFrame()
+
+    realtime = pd.concat(realtime_frames, ignore_index=True)
+    realtime["ts_code"] = realtime["ts_code"].astype(str).str.upper().str.strip()
+    realtime = realtime.drop_duplicates(subset=["ts_code"], keep="last")
+    merged = realtime.merge(basic_frame, on="ts_code", how="inner", suffixes=("", "_basic"))
+    return merged
+
+
+def _fetch_akshare_market_frame() -> pd.DataFrame:
+    import akshare as ak
+
+    frame = ak.stock_hk_spot_em()
+    if frame is None or frame.empty:
+        return pd.DataFrame()
+    return frame
+
+
 def _apply_history_signals(candidate: dict[str, object], history: pd.DataFrame) -> None:
     factor_scores = dict(candidate.get("factor_scores", {}) or {})
     reason_tags = list(candidate.get("reason_tags", []) or [])
@@ -89,6 +173,10 @@ def _apply_history_signals(candidate: dict[str, object], history: pd.DataFrame) 
     return_60d = ((latest_close / float(closes.iloc[-61])) - 1.0) * 100 if len(closes) >= 61 else None
     returns = closes.pct_change().dropna()
     volatility_20d = float(returns.tail(20).std() * 100) if len(returns) >= 20 else None
+    rolling_peak = closes.cummax()
+    drawdowns = (closes / rolling_peak) - 1.0
+    max_drawdown_120d = float(drawdowns.tail(120).min() * -100) if len(drawdowns) >= 60 else None
+    max_drawdown_250d = float(drawdowns.tail(250).min() * -100) if len(drawdowns) >= 120 else None
 
     trend_score = 0.0
     if return_20d is not None and return_60d is not None:
@@ -110,19 +198,44 @@ def _apply_history_signals(candidate: dict[str, object], history: pd.DataFrame) 
             volatility_score += 5.0
         elif volatility_20d >= 4.5:
             reason_tags.append("high_short_term_volatility")
-            volatility_score -= 6.0
+            volatility_score -= 14.0
         volatility_score += _bounded(3.8 - volatility_20d, lower=-4.0, upper=4.0)
+
+    crowding_score = 0.0
+    if return_20d is not None and return_20d >= 25.0:
+        reason_tags.append("overextended_short_term")
+        crowding_score -= _bounded((return_20d - 25.0) * 0.35, lower=6.0, upper=16.0)
+    if return_60d is not None and return_60d >= 55.0:
+        reason_tags.append("crowded_trend")
+        crowding_score -= _bounded((return_60d - 55.0) * 0.18, lower=4.0, upper=12.0)
+
+    drawdown_score = 0.0
+    drawdown_reference = max_drawdown_250d if max_drawdown_250d is not None else max_drawdown_120d
+    if drawdown_reference is not None:
+        if drawdown_reference <= 12.0:
+            reason_tags.append("resilient_drawdown_profile")
+            drawdown_score += 8.0
+        elif drawdown_reference >= 22.0:
+            reason_tags.append("historical_drawdown_risk")
+            drawdown_score -= _bounded((drawdown_reference - 22.0) * 0.9, lower=14.0, upper=24.0)
+        elif drawdown_reference >= 16.0:
+            reason_tags.append("elevated_drawdown_profile")
+            drawdown_score -= _bounded((drawdown_reference - 16.0) * 1.5, lower=8.0, upper=16.0)
 
     factor_scores["history_quality"] = 6.0
     reason_tags.append("history_confirmed")
     factor_scores["trend_persistence"] = round(trend_score, 2)
     factor_scores["volatility_regime"] = round(volatility_score, 2)
+    factor_scores["crowding_penalty"] = round(crowding_score, 2)
+    factor_scores["drawdown_profile"] = round(drawdown_score, 2)
     candidate["factor_scores"] = factor_scores
     candidate["return_20d_pct"] = round(return_20d, 2) if return_20d is not None else None
     candidate["return_60d_pct"] = round(return_60d, 2) if return_60d is not None else None
     candidate["volatility_20d_pct"] = round(volatility_20d, 2) if volatility_20d is not None else None
+    candidate["max_drawdown_120d_pct"] = round(max_drawdown_120d, 2) if max_drawdown_120d is not None else None
+    candidate["max_drawdown_250d_pct"] = round(max_drawdown_250d, 2) if max_drawdown_250d is not None else None
     candidate["reason_tags"] = list(dict.fromkeys(reason_tags))
-    candidate["score"] = round(float(candidate.get("score", 0.0) or 0.0) + trend_score + volatility_score, 2)
+    candidate["score"] = round(float(candidate.get("score", 0.0) or 0.0) + trend_score + volatility_score + crowding_score + drawdown_score, 2)
 
 def _selection_reason(tags: list[str]) -> str:
     mapping = {
@@ -139,6 +252,11 @@ def _selection_reason(tags: list[str]) -> str:
         "trend_decay": "Recent and medium-term trend both weaken the setup.",
         "stable_trend": "Short-term volatility remains stable enough for cleaner execution.",
         "high_short_term_volatility": "Short-term volatility is elevated and can destabilize entries.",
+        "overextended_short_term": "Recent run-up is overextended and can invite sharp mean reversion.",
+        "crowded_trend": "Crowded medium-term trend can reverse violently after momentum exhaustion.",
+        "resilient_drawdown_profile": "Recent historical drawdown stayed contained and improves governance fit.",
+        "elevated_drawdown_profile": "Historical drawdown is elevated and weakens paper-admission odds.",
+        "historical_drawdown_risk": "Historical drawdown is too deep and often fails current risk gates.",
         "history_confirmed": "Recent multi-week history is available and supports ranking confidence.",
         "history_gap_penalty": "Limited recent history reduces ranking confidence for this symbol.",
     }
@@ -155,6 +273,11 @@ def _selection_reason(tags: list[str]) -> str:
         "negative_momentum",
         "trend_decay",
         "high_short_term_volatility",
+        "overextended_short_term",
+        "crowded_trend",
+        "resilient_drawdown_profile",
+        "elevated_drawdown_profile",
+        "historical_drawdown_risk",
         "history_gap_penalty",
         "volatile_range",
         "penny_stock_penalty",
@@ -166,28 +289,41 @@ def _selection_reason(tags: list[str]) -> str:
 def fetch_hk_universe_candidates(
     *,
     top_n: int,
+    min_list_days: int,
     min_turnover_millions: float,
     account_capital_hkd: float,
     max_lot_cost_ratio: float,
 ) -> list[dict[str, object]]:
-    import akshare as ak
-
-    frame = ak.stock_hk_spot_em()
+    frame = pd.DataFrame()
+    source_name = "minshare_rt"
+    minshare_error: Exception | None = None
+    try:
+        frame = _fetch_minshare_market_frame(min_list_days)
+    except Exception as exc:
+        minshare_error = exc
     if frame is None or frame.empty:
+        source_name = "akshare"
+        frame = _fetch_akshare_market_frame()
+    if frame is None or frame.empty:
+        if minshare_error is not None:
+            raise RuntimeError(f"minshare universe failed: {minshare_error}")
         return []
 
-    code_col = _pick_column(frame, "代码", "symbol", "代码 ")
+    code_col = _pick_column(frame, "代码", "symbol", "代码 ", "ts_code")
     name_col = _pick_column(frame, "名称", "name")
     price_col = _pick_column(frame, "最新价", "close", "现价")
     pct_col = _pick_column(frame, "涨跌幅", "pct_chg", "涨跌幅%")
     amount_col = _pick_column(frame, "成交额", "amount")
     amplitude_col = _pick_column(frame, "振幅", "amplitude")
+    trade_unit_col = _pick_column(frame, "trade_unit")
     if code_col is None or name_col is None:
         return []
 
     candidates: list[dict[str, object]] = []
     for _, row in frame.iterrows():
         raw_code = str(row.get(code_col, "")).strip()
+        if raw_code.upper().endswith(".HK"):
+            raw_code = raw_code[:-3]
         if not raw_code.isdigit():
             continue
         symbol = normalize_symbol(f"{raw_code}.HK", market="hk")
@@ -200,7 +336,8 @@ def fetch_hk_universe_candidates(
             continue
         if turnover_millions < min_turnover_millions:
             continue
-        lot_cost_hkd = _lot_cost(symbol, latest_price)
+        trade_unit = int(_to_float(row.get(trade_unit_col)) or 100) if trade_unit_col else 100
+        lot_cost_hkd = round(trade_unit * latest_price, 2)
         affordability_ratio = lot_cost_hkd / max(account_capital_hkd, 1.0)
         if lot_cost_hkd > account_capital_hkd or affordability_ratio > max_lot_cost_ratio:
             continue
@@ -241,7 +378,7 @@ def fetch_hk_universe_candidates(
                 },
                 "reason_tags": reason_tags,
                 "selection_reason": _selection_reason(reason_tags),
-                "source": "akshare",
+                "source": source_name,
             }
         )
 
@@ -252,7 +389,7 @@ def fetch_hk_universe_candidates(
         from .source_manager import get_source_manager
 
         source_manager = get_source_manager()
-        history_start = (datetime.now() - timedelta(days=150)).date().isoformat()
+        history_start = (datetime.now() - timedelta(days=420)).date().isoformat()
         history_end = datetime.now().date().isoformat()
         for candidate in candidates[:enrich_limit]:
             try:
