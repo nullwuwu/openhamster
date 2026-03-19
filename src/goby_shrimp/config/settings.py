@@ -26,6 +26,9 @@ class LLMSettings(BaseModel):
     model: str = "MiniMax-M2.7"
     temperature: float = 0.3
     max_output_tokens: int = 4096
+    request_timeout_seconds: float = 60.0
+    retry_attempts: int = 2
+    retry_backoff_seconds: float = 2.0
 
 
 class StrategySettings(BaseModel):

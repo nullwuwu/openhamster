@@ -152,6 +152,7 @@ const messages = {
       },
       governanceReason: {
         bottom_line_failed: '底线门禁未通过',
+        llm_mock_fallback: '模型回退到 Mock，本轮结果不纳入真实候选',
         backtest_review_required: '回测需要人工复核',
         below_keep_threshold: '低于保留候选阈值',
         below_promote_threshold: '低于晋级阈值',
@@ -911,6 +912,7 @@ const messages = {
       },
       governanceReason: {
         bottom_line_failed: 'Bottom-line Gate Failed',
+        llm_mock_fallback: 'LLM Fell Back To Mock; Excluded From Real Candidate Flow',
         backtest_review_required: 'Backtest Review Required',
         below_keep_threshold: 'Below Keep Threshold',
         below_promote_threshold: 'Below Promote Threshold',

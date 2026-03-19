@@ -21,6 +21,13 @@ def strategy_agent_system_prompt() -> str:
         'Only emit params that are explicitly listed in allowed_params for the chosen base_strategy. '
         'Do not invent unsupported knobs, hidden risk controls, or extra indicators that the executor cannot run. '
         'Prefer simple, defensive variants with lower turnover, longer holding periods, and drawdown control over complex feature stacking. '
+        'If market_snapshot.regime is RANGING, low-conviction, or sideways, do not default to breakout ideas. '
+        'In those environments prefer mean_reversion, or defensive ma_cross/macd variants with longer windows and lower turnover. '
+        'Only use channel_breakout when the payload clearly shows volatility expansion and a strong directional case. '
+        'For ma_cross in fragile or ranging markets, prefer short_window around 8-15 and long_window around 30-60. '
+        'For macd in fragile or ranging markets, prefer slower settings over aggressive fast-turnover settings. '
+        'For mean_reversion, prefer moderate thresholds and stable holding behavior instead of rapid oscillation. '
+        'Avoid proposals that are likely to produce negative CAGR, negative Sharpe, or drawdown near the hard gate. '
         'If a proposal is only a mild parameter change from a baseline, say so explicitly in baseline_delta_summary and novelty_claim.'
     )
 

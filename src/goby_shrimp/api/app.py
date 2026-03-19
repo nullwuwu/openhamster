@@ -516,7 +516,11 @@ def _resolve_slot_focus(
     focus_proposal = active
     mode = "active" if active is not None else "empty"
     if focus_proposal is None:
-        candidates = [item for item in list_candidate_strategies(db) if item.status.value == "candidate"]
+        candidates = [
+            item
+            for item in list_candidate_strategies(db)
+            if item.status.value == "candidate" and item.source_kind != "mock"
+        ]
         if candidates:
             focus_proposal = candidates[0]
             mode = "challenger"
@@ -540,7 +544,7 @@ def _resolve_slot_focus(
                 )
                 for proposal_id in records:
                     proposal = get_strategy_proposal(db, proposal_id)
-                    if proposal is not None:
+                    if proposal is not None and proposal.source_kind != "mock":
                         batch_candidates.append(proposal)
                 if batch_candidates:
                     break

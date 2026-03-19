@@ -1639,7 +1639,8 @@ def _proposal_backtest_gate(
             start_date=start_date,
             end_date=end_date,
             initial_capital=float(settings.portfolio.default_capital),
-            is_first_live=bool(settings.yellow_flags.first_live_deployment),
+            # This gate is for paper admission, not live deployment approval.
+            is_first_live=False,
         )
         review = risk_gate_review(result)
         blocked_reasons: list[str] = []
@@ -3378,6 +3379,9 @@ def _governance_action(
 
     if not bottom_line_passed and not backtest_soft_candidate:
         candidate_blocked_reasons.append('bottom_line_failed')
+    if proposal_source_kind == 'mock':
+        candidate_blocked_reasons.append('llm_mock_fallback')
+        promotion_blocked_reasons.append('llm_mock_fallback')
     if final_score < float(market_governance['keep_threshold']):
         candidate_blocked_reasons.append('below_keep_threshold')
     if final_score < float(market_governance['promote_threshold']):
@@ -3423,6 +3427,7 @@ def _governance_action(
     candidate_allowed = (
         (bottom_line_passed or backtest_soft_candidate)
         and final_score >= float(market_governance['keep_threshold'])
+        and proposal_source_kind != 'mock'
         and not any(
             reason in {'knowledge_family_mismatch', 'knowledge_failure_mode_risk', 'knowledge_param_outlier'}
             for reason in candidate_blocked_reasons
@@ -6014,7 +6019,10 @@ def list_candidate_strategies(db: Session) -> list[StrategyProposal]:
         db.execute(
             select(StrategyProposal)
             .options(selectinload(StrategyProposal.decisions))
-            .where(StrategyProposal.status.in_([ProposalStatus.CANDIDATE, ProposalStatus.ACTIVE]))
+            .where(
+                StrategyProposal.status.in_([ProposalStatus.CANDIDATE, ProposalStatus.ACTIVE]),
+                StrategyProposal.source_kind != 'mock',
+            )
             .order_by(StrategyProposal.final_score.desc(), StrategyProposal.created_at.desc())
         ).scalars()
     )

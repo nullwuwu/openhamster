@@ -61,16 +61,17 @@ def risk_gate_review(result: BacktestResult) -> ReviewOutput:
         yellow_flags.append("首次实盘部署，必须人工确认")
 
     # 🟢 效用分
-    w = settings.weights
-    score = round(
-        result.cagr * w.cagr * 100
-        + result.sharpe * w.sharpe * 10
-        - result.max_drawdown * w.max_dd * 100
-        - result.annual_turnover * w.turnover,
-        1,
-    )
+    # Calibrated for paper admission:
+    # - Hard gates already remove catastrophic drawdown / bad data windows.
+    # - Utility should clearly separate "positive and stable enough to try"
+    #   from "not disastrous, but still economically weak".
+    cagr_term = result.cagr * 100.0
+    sharpe_term = result.sharpe * 4.0
+    drawdown_penalty = result.max_drawdown * 100.0 * 0.20
+    turnover_penalty = min(result.annual_turnover, 30.0) * 0.05
+    score = round(cagr_term + sharpe_term - drawdown_penalty - turnover_penalty, 1)
 
-    verdict = Verdict.GO if score >= 5.0 else Verdict.REVISE
+    verdict = Verdict.GO if score >= 4.0 else Verdict.REVISE
 
     logger.info(
         "🟢 %s — utility=%.1f, yellow_flags=%s",
@@ -82,5 +83,5 @@ def risk_gate_review(result: BacktestResult) -> ReviewOutput:
         requires_human_approve=len(yellow_flags) > 0,
         yellow_flags_triggered=yellow_flags,
         utility_score=score,
-        reasoning=f"效用分 {score}，阈值 5.0",
+        reasoning=f"效用分 {score}，阈值 4.0",
     )

@@ -23,9 +23,10 @@ class MiniMaxClient:
         self.model = settings.llm.model
         self.temperature = settings.llm.temperature
         self.max_output_tokens = settings.llm.max_output_tokens
+        self.request_timeout_seconds = settings.llm.request_timeout_seconds
         if not self.api_key:
             raise ValueError("MINIMAX_API_KEY not set (env or config.integrations.minimax_api_key)")
-        self.client = httpx.Client(timeout=60.0)
+        self.client = httpx.Client(timeout=self.request_timeout_seconds)
 
     def chat(
         self,

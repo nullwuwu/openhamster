@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
@@ -231,41 +232,74 @@ class LLMGateway:
 
         adapter = self._make_adapter(provider)
         try:
-            payload = adapter.invoke_json(system=system, user=user, temperature=temperature)
-            success_status = LLMStatus(
-                provider=provider,
-                model=adapter.model,
-                status=LLMStatusCode.READY,
-                message=f"{provider} responded successfully.",
-                using_mock_fallback=False,
-            )
-            self._persist_status(db, success_status)
-            return LLMInvocationResult(payload=payload, source_kind=provider, status=success_status)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in {401, 403}:
-                code = LLMStatusCode.AUTH_ERROR
-            elif exc.response.status_code == 429:
-                code = LLMStatusCode.RATE_LIMITED
-            else:
-                code = LLMStatusCode.PROVIDER_ERROR
-            message = f"{provider} request failed with HTTP {exc.response.status_code}."
-        except httpx.TransportError as exc:
-            code = LLMStatusCode.NETWORK_ERROR
-            message = f"{provider} network error: {exc}"
-        except json.JSONDecodeError as exc:
-            code = LLMStatusCode.PARSE_ERROR
-            message = f"{provider} returned non-JSON output: {exc}"
-        except Exception as exc:
-            code = LLMStatusCode.PROVIDER_ERROR
-            message = f"{provider} provider error: {exc}"
+            settings = get_settings()
+            retry_attempts = max(0, int(settings.llm.retry_attempts))
+            retry_backoff_seconds = max(0.0, float(settings.llm.retry_backoff_seconds))
+            last_code: str | None = None
+            last_message: str | None = None
+            for attempt in range(retry_attempts + 1):
+                try:
+                    payload = adapter.invoke_json(system=system, user=user, temperature=temperature)
+                    success_status = LLMStatus(
+                        provider=provider,
+                        model=adapter.model,
+                        status=LLMStatusCode.READY,
+                        message=(
+                            f"{provider} responded successfully after retry {attempt}."
+                            if attempt > 0
+                            else f"{provider} responded successfully."
+                        ),
+                        using_mock_fallback=False,
+                    )
+                    self._persist_status(db, success_status)
+                    return LLMInvocationResult(payload=payload, source_kind=provider, status=success_status)
+                except httpx.HTTPStatusError as exc:
+                    status_code = exc.response.status_code
+                    if status_code in {401, 403}:
+                        code = LLMStatusCode.AUTH_ERROR
+                    elif status_code == 429:
+                        code = LLMStatusCode.RATE_LIMITED
+                    else:
+                        code = LLMStatusCode.PROVIDER_ERROR
+                    message = f"{provider} request failed with HTTP {status_code}."
+                    retryable = status_code in {408, 409, 425, 429} or status_code >= 500
+                except httpx.TransportError as exc:
+                    code = LLMStatusCode.NETWORK_ERROR
+                    message = f"{provider} network error: {exc}"
+                    retryable = True
+                except json.JSONDecodeError as exc:
+                    code = LLMStatusCode.PARSE_ERROR
+                    message = f"{provider} returned non-JSON output: {exc}"
+                    retryable = False
+                except Exception as exc:
+                    code = LLMStatusCode.PROVIDER_ERROR
+                    message = f"{provider} provider error: {exc}"
+                    retryable = False
+
+                last_code = code
+                last_message = message
+                if attempt < retry_attempts and retryable:
+                    wait_seconds = retry_backoff_seconds * (attempt + 1)
+                    logger.warning(
+                        "LLM %s attempt %s/%s failed for task=%s with %s; retrying in %.1fs",
+                        provider,
+                        attempt + 1,
+                        retry_attempts + 1,
+                        task,
+                        code,
+                        wait_seconds,
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+                break
         finally:
             adapter.close()
 
         fallback_status = LLMStatus(
             provider=provider,
             model=get_settings().llm.model,
-            status=code,
-            message=message,
+            status=last_code or LLMStatusCode.PROVIDER_ERROR,
+            message=last_message or f"{provider} provider error.",
             using_mock_fallback=True,
         )
         self._persist_status(db, fallback_status)
