@@ -21,6 +21,7 @@ def research_debate_system_prompt() -> str:
         'Write all natural-language fields in Simplified Chinese for a Chinese-language operator dashboard. '
         'Assess whether the proposal fits the supplied market profile rather than a generic equity market. '
         'Use the supplied strategy knowledge to judge fit, failure modes, and whether the idea is merely a thin baseline variation. '
+        'When external candidate knowledge is supplied, treat it as supporting methodology context rather than hard gate logic. '
         'Do not decide promotion. Do not mention execution outside paper trading constraints.'
     )
 

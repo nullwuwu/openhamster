@@ -162,6 +162,7 @@ export interface UniverseSelection {
   benchmark_symbol?: string | null
   benchmark_gap?: number | null
   benchmark_candidate?: UniverseCandidate | null
+  research_symbols?: string[]
   candidates: UniverseCandidate[]
 }
 
@@ -467,6 +468,14 @@ export interface PipelineRuntimeStatus {
   process_uptime_seconds?: number
   startup_mode?: string
   local_logs_available: boolean
+  research_batch_size?: number
+  research_symbols?: string[]
+  research_symbol_states?: Array<Record<string, unknown>>
+  current_symbol?: string | null
+  current_symbol_stage?: string | null
+  batch_progress?: Record<string, number>
+  current_batch_id?: string | null
+  paper_slot_count?: number
 }
 
 export interface RuntimeSyncHistoryItem {
@@ -541,6 +550,46 @@ export interface RuntimeLog {
   exists: boolean
   updated_at?: string | null
   lines: string[]
+}
+
+export interface ResearchBatch {
+  batch_id: string
+  market_scope: string
+  status: string
+  research_symbols: string[]
+  selected_challenger_symbol?: string | null
+  summary_payload: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface KnowledgeSource {
+  source_id: string
+  source_name: string
+  source_kind: string
+  publisher: string
+  url: string
+  license_note: string
+  trust_tier: string
+  enabled: boolean
+  last_reviewed_at?: string | null
+}
+
+export interface KnowledgeSuggestion {
+  suggestion_id: string
+  family_key: string
+  market_scope: string
+  origin: string
+  suggestion_type: string
+  current_value: Record<string, unknown>
+  suggested_value: Record<string, unknown>
+  rationale_zh: string
+  confidence: number
+  evidence_counts: Record<string, unknown>
+  linked_source_ids: string[]
+  status: string
+  created_at: string
+  updated_at: string
 }
 
 export interface CommandCenter {

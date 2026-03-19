@@ -39,6 +39,10 @@ const macroStatus = computed(() => command.value?.market_snapshot.macro_status ?
 const universeSelection = computed(() => command.value?.market_snapshot.universe_selection ?? null)
 const activeProposal = computed(() => command.value?.active_strategy.proposal ?? null)
 const providerMigration = computed(() => command.value?.provider_migration ?? null)
+const researchSymbolStates = computed<Array<Record<string, unknown>>>(() => {
+  const states = runtimeStatus.value?.research_symbol_states
+  return Array.isArray(states) ? states.map((item) => item as Record<string, unknown>) : []
+})
 const activeKnowledgeFamilies = computed<string[]>(() => {
   const families = activeProposal.value?.evidence_pack?.quality_report?.knowledge_families_used
   return Array.isArray(families) ? families.map((item) => String(item)) : []
@@ -504,6 +508,53 @@ function statusLabel(value: BoardStatus): string {
     <Card v-if="isSampleMode" class="border border-amber-200 bg-amber-50/80">
       <h3 class="text-sm font-semibold text-amber-900">{{ t('command.sampleModeTitle') }}</h3>
       <p class="mt-1 text-sm text-amber-800">{{ t('command.sampleModeBody') }}</p>
+    </Card>
+
+    <Card class="border border-slate-200/80 bg-white">
+      <div>
+        <h3 class="text-sm font-semibold text-slate-900">{{ t('command.researchBatchTitle') }}</h3>
+        <p class="mt-1 text-sm text-slate-600">{{ t('command.researchBatchBody') }}</p>
+      </div>
+      <div class="mt-4 grid gap-3 text-sm md:grid-cols-4">
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-3">
+          <p class="text-slate-500">{{ t('command.researchSymbols') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">
+            {{ (runtimeStatus?.research_symbols ?? universeSelection?.research_symbols ?? []).join(' / ') || '--' }}
+          </p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-3">
+          <p class="text-slate-500">{{ t('command.batchProgress') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">
+            {{ runtimeStatus?.batch_progress?.completed ?? 0 }} / {{ runtimeStatus?.batch_progress?.total ?? runtimeStatus?.research_batch_size ?? 0 }}
+          </p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-3">
+          <p class="text-slate-500">{{ t('command.currentSymbol') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ runtimeStatus?.current_symbol ?? '--' }}</p>
+          <p class="mt-1 text-xs text-slate-500">{{ runtimeStatus?.current_symbol_stage ?? '--' }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-3">
+          <p class="text-slate-500">{{ t('command.paperSlotCount') }}</p>
+          <p class="mt-1 font-semibold text-slate-900">{{ runtimeStatus?.paper_slot_count ?? 1 }}</p>
+        </div>
+      </div>
+      <div v-if="researchSymbolStates.length" class="mt-4 grid gap-3 lg:grid-cols-3">
+        <div
+          v-for="item in researchSymbolStates"
+          :key="String(item.symbol ?? item.batch_rank ?? item.proposal_count ?? 'state')"
+          class="rounded-lg border border-slate-200/80 bg-white px-3 py-3 text-sm"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <p class="font-semibold text-slate-900">{{ String(item.symbol ?? '--') }}</p>
+            <Badge :variant="Boolean(item.selected_for_paper_comparison) ? 'success' : 'neutral'">
+              {{ Boolean(item.selected_for_paper_comparison) ? t('command.selectedChallenger') : t('common.status') }}
+            </Badge>
+          </div>
+          <p class="mt-2 text-slate-600">
+            {{ t('common.score') }}: {{ item.best_final_score ?? '--' }}
+          </p>
+        </div>
+      </div>
     </Card>
 
     <Card class="border border-slate-200/80 bg-white">

@@ -33,6 +33,8 @@ from .schemas import (
     ExperimentRunCreate,
     ExperimentRunDTO,
     LLMStatusDTO,
+    KnowledgeSourceDTO,
+    KnowledgeSuggestionDTO,
     LiveReadinessChangeDTO,
     LiveReadinessDTO,
     LiveReadinessHistoryItemDTO,
@@ -51,6 +53,7 @@ from .schemas import (
     ProviderCohortDTO,
     ProviderCohortHistoryItemDTO,
     ProviderMigrationSummaryDTO,
+    ResearchBatchDTO,
     RiskDecisionDTO,
     RuntimeLogDTO,
     RuntimeLLMUpdate,
@@ -74,8 +77,10 @@ from .services import (
     get_active_strategy,
     get_backtest_run_with_metrics,
     get_current_llm_status,
+    get_knowledge_suggestion,
     get_latest_paper_execution,
     get_pipeline_runtime_status,
+    get_research_batch,
     get_experiment_run_with_metrics,
     get_latest_risk_decision,
     get_strategy_proposal,
@@ -85,7 +90,10 @@ from .services import (
     list_event_digests,
     list_event_stream,
     list_experiment_runs_with_metrics,
+    list_knowledge_sources,
+    list_knowledge_suggestions,
     list_risk_decisions,
+    list_research_batches,
     list_strategy_proposals,
     now_tz,
     set_runtime_llm_provider,
@@ -331,6 +339,18 @@ def _to_pipeline_runtime_status_dto(status: dict[str, object]) -> PipelineRuntim
         process_uptime_seconds=uptime_seconds,
         startup_mode=startup_mode,
         local_logs_available=local_logs_available,
+        research_batch_size=int(status.get('research_batch_size', 0) or 0),
+        research_symbols=[str(item) for item in list(status.get('research_symbols', []) or [])],
+        research_symbol_states=[
+            dict(item)
+            for item in list(status.get('research_symbol_states', []) or [])
+            if isinstance(item, dict)
+        ],
+        current_symbol=str(status.get('current_symbol')) if status.get('current_symbol') is not None else None,
+        current_symbol_stage=str(status.get('current_symbol_stage')) if status.get('current_symbol_stage') is not None else None,
+        batch_progress={str(key): int(value) for key, value in dict(status.get('batch_progress', {}) or {}).items()},
+        current_batch_id=str(status.get('current_batch_id')) if status.get('current_batch_id') is not None else None,
+        paper_slot_count=int(status.get('paper_slot_count', 1) or 1),
     )
 
 
@@ -347,6 +367,52 @@ def _to_provider_migration_summary_dto(summary: dict[str, object]) -> ProviderMi
         current=ProviderCohortDTO(**dict(summary.get("current", {}) or {})),
         previous=ProviderCohortDTO(**previous) if previous else None,
         deltas={str(key): float(value) for key, value in dict(summary.get("deltas", {}) or {}).items()},
+    )
+
+
+def _to_research_batch_dto(record) -> ResearchBatchDTO:
+    return ResearchBatchDTO(
+        batch_id=record.batch_id,
+        market_scope=record.market_scope,
+        status=record.status,
+        research_symbols=list(record.research_symbols),
+        selected_challenger_symbol=record.selected_challenger_symbol,
+        summary_payload=dict(record.summary_payload),
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def _to_knowledge_source_dto(record) -> KnowledgeSourceDTO:
+    return KnowledgeSourceDTO(
+        source_id=record.source_id,
+        source_name=record.source_name,
+        source_kind=record.source_kind,
+        publisher=record.publisher,
+        url=record.url,
+        license_note=record.license_note,
+        trust_tier=record.trust_tier,
+        enabled=record.enabled,
+        last_reviewed_at=record.last_reviewed_at,
+    )
+
+
+def _to_knowledge_suggestion_dto(record) -> KnowledgeSuggestionDTO:
+    return KnowledgeSuggestionDTO(
+        suggestion_id=record.suggestion_id,
+        family_key=record.family_key,
+        market_scope=record.market_scope,
+        origin=record.origin,
+        suggestion_type=record.suggestion_type,
+        current_value=dict(record.current_value),
+        suggested_value=dict(record.suggested_value),
+        rationale_zh=record.rationale_zh,
+        confidence=record.confidence,
+        evidence_counts=dict(record.evidence_counts),
+        linked_source_ids=list(record.linked_source_ids),
+        status=record.status,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
     )
 
 
@@ -433,6 +499,10 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
                 benchmark_candidate=UniverseCandidateDTO(**dict(snapshot["universe_selection"]).get("benchmark_candidate"))
                 if dict(snapshot["universe_selection"]).get("benchmark_candidate")
                 else None,
+                research_symbols=[
+                    str(item)
+                    for item in list(dict(snapshot["universe_selection"]).get("research_symbols", []))
+                ],
                 candidates=[
                     UniverseCandidateDTO(**candidate)
                     for candidate in list(dict(snapshot["universe_selection"]).get("candidates", []))
@@ -544,6 +614,19 @@ def get_research_proposal(proposal_id: str, db: Session = Depends(get_db)) -> St
     return _to_proposal_dto(proposal)
 
 
+@router.get("/research/batches", response_model=list[ResearchBatchDTO])
+def get_research_batches(limit: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db)) -> list[ResearchBatchDTO]:
+    return [_to_research_batch_dto(record) for record in list_research_batches(db, limit=limit)]
+
+
+@router.get("/research/batches/{batch_id}", response_model=ResearchBatchDTO)
+def get_research_batch_detail(batch_id: str, db: Session = Depends(get_db)) -> ResearchBatchDTO:
+    record = get_research_batch(db, batch_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Research batch not found")
+    return _to_research_batch_dto(record)
+
+
 @router.get("/paper/active-strategy", response_model=ActiveStrategyDTO)
 def get_paper_active_strategy(db: Session = Depends(get_db)) -> ActiveStrategyDTO:
     active = get_active_strategy(db)
@@ -578,6 +661,24 @@ def get_risk_decisions(limit: int = Query(default=50, ge=1, le=200), db: Session
 @router.get("/audit/events", response_model=list[AuditRecordDTO])
 def get_audit_events(limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)) -> list[AuditRecordDTO]:
     return [_to_audit_dto(record) for record in list_audit_records(db, limit=limit)]
+
+
+@router.get("/knowledge/sources", response_model=list[KnowledgeSourceDTO])
+def get_knowledge_sources(db: Session = Depends(get_db)) -> list[KnowledgeSourceDTO]:
+    return [_to_knowledge_source_dto(record) for record in list_knowledge_sources(db)]
+
+
+@router.get("/knowledge/suggestions", response_model=list[KnowledgeSuggestionDTO])
+def get_knowledge_suggestions(limit: int = Query(default=100, ge=1, le=200), db: Session = Depends(get_db)) -> list[KnowledgeSuggestionDTO]:
+    return [_to_knowledge_suggestion_dto(record) for record in list_knowledge_suggestions(db, limit=limit)]
+
+
+@router.get("/knowledge/suggestions/{suggestion_id}", response_model=KnowledgeSuggestionDTO)
+def get_knowledge_suggestion_detail(suggestion_id: str, db: Session = Depends(get_db)) -> KnowledgeSuggestionDTO:
+    record = get_knowledge_suggestion(db, suggestion_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Knowledge suggestion not found")
+    return _to_knowledge_suggestion_dto(record)
 
 
 @router.get("/events/daily-digests", response_model=list[DailyEventDigestDTO])

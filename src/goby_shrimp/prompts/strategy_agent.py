@@ -14,6 +14,7 @@ def strategy_agent_system_prompt() -> str:
         'Return JSON only. Create up to 3 candidate strategy proposals. '
         'Write all free-text fields in Simplified Chinese for a Chinese-language operator dashboard. '
         'Treat supplied strategy knowledge as structured prior art: use it to anchor reasoning, not to copy a finished strategy verbatim. '
+        'External candidate knowledge is supplemental prior art and must not outweigh builtin governance knowledge. '
         'You may recombine baseline ideas into a new thesis, but stay within long-only, no-leverage, daily-rebalance constraints. '
         'Respect the supplied market profile and prefer baselines that fit the current market structure. '
         'Baseline strategies are priors, not hard limits. If none fit directly, use novel_composite as the anchor strategy label.'
@@ -29,6 +30,7 @@ def build_strategy_agent_payload(
     market_profile: dict[str, Any],
     baseline_strategies: list[dict[str, Any]],
     strategy_knowledge: list[dict[str, Any]],
+    external_candidate_knowledge: list[dict[str, Any]],
     knowledge_preferences: list[str],
     knowledge_discouraged: list[str],
     baseline_family_map: dict[str, list[str]],
@@ -47,6 +49,7 @@ def build_strategy_agent_payload(
         'market_profile': market_profile,
         'baseline_strategies': baseline_strategies,
         'strategy_knowledge': strategy_knowledge,
+        'external_candidate_knowledge': external_candidate_knowledge,
         'knowledge_preferences': knowledge_preferences,
         'knowledge_discouraged': knowledge_discouraged,
         'baseline_family_map': baseline_family_map,

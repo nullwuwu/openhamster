@@ -244,6 +244,91 @@ class AuditRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ResearchBatch(Base):
+    __tablename__ = "research_batches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    batch_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    market_scope: Mapped[str] = mapped_column(String(16), nullable=False, default="HK")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running", index=True)
+    research_symbols: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    selected_challenger_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    summary_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class KnowledgeSource(Base):
+    __tablename__ = "knowledge_sources"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    source_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    source_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="documentation")
+    publisher: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    license_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    trust_tier: Mapped[str] = mapped_column(String(32), nullable=False, default="whitelist")
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExternalKnowledgeEntry(Base):
+    __tablename__ = "external_knowledge_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    entry_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    source_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    summary_zh: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    family_keys: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    market_scope: Mapped[str] = mapped_column(String(16), nullable=False, default="HK")
+    content_type: Mapped[str] = mapped_column(String(32), nullable=False, default="methodology")
+    source_excerpt_ref: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    structured_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="proposed")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class KnowledgeObservation(Base):
+    __tablename__ = "knowledge_observations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    observation_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    proposal_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("strategy_proposals.id"), nullable=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    market_scope: Mapped[str] = mapped_column(String(16), nullable=False, default="HK")
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, default="internal")
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="proposal")
+    provider_status: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    family_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class KnowledgeSuggestion(Base):
+    __tablename__ = "knowledge_suggestions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    suggestion_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    family_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    market_scope: Mapped[str] = mapped_column(String(16), nullable=False, default="HK")
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, default="internal")
+    suggestion_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    current_value: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    suggested_value: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    rationale_zh: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    evidence_counts: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    linked_source_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="proposed", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class RuntimeSetting(Base):
     __tablename__ = "runtime_settings"
 

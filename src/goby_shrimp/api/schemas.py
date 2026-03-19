@@ -246,6 +246,7 @@ class UniverseSelectionDTO(BaseModel):
     benchmark_symbol: str | None = None
     benchmark_gap: float | None = None
     benchmark_candidate: UniverseCandidateDTO | None = None
+    research_symbols: list[str] = Field(default_factory=list)
     candidates: list[UniverseCandidateDTO] = Field(default_factory=list)
 
 
@@ -380,6 +381,14 @@ class PipelineRuntimeStatusDTO(BaseModel):
     process_uptime_seconds: int | None = None
     startup_mode: str | None = None
     local_logs_available: bool = False
+    research_batch_size: int = 0
+    research_symbols: list[str] = Field(default_factory=list)
+    research_symbol_states: list[dict[str, Any]] = Field(default_factory=list)
+    current_symbol: str | None = None
+    current_symbol_stage: str | None = None
+    batch_progress: dict[str, int] = Field(default_factory=dict)
+    current_batch_id: str | None = None
+    paper_slot_count: int = 1
 
 
 class RuntimeSyncHistoryItemDTO(BaseModel):
@@ -454,6 +463,46 @@ class RuntimeLogDTO(BaseModel):
     exists: bool = False
     updated_at: datetime | None = None
     lines: list[str] = Field(default_factory=list)
+
+
+class ResearchBatchDTO(BaseModel):
+    batch_id: str
+    market_scope: str
+    status: str
+    research_symbols: list[str] = Field(default_factory=list)
+    selected_challenger_symbol: str | None = None
+    summary_payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeSourceDTO(BaseModel):
+    source_id: str
+    source_name: str
+    source_kind: str
+    publisher: str
+    url: str
+    license_note: str
+    trust_tier: str
+    enabled: bool
+    last_reviewed_at: datetime | None = None
+
+
+class KnowledgeSuggestionDTO(BaseModel):
+    suggestion_id: str
+    family_key: str
+    market_scope: str
+    origin: str
+    suggestion_type: str
+    current_value: dict[str, Any] = Field(default_factory=dict)
+    suggested_value: dict[str, Any] = Field(default_factory=dict)
+    rationale_zh: str
+    confidence: float
+    evidence_counts: dict[str, Any] = Field(default_factory=dict)
+    linked_source_ids: list[str] = Field(default_factory=list)
+    status: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class CommandCenterDTO(BaseModel):

@@ -59,9 +59,14 @@ from .models import (
     DailyEventDigest,
     EventRecord,
     EventType,
+    ExternalKnowledgeEntry,
     ExperimentKind,
     ExperimentRun,
+    KnowledgeObservation,
+    KnowledgeSource,
+    KnowledgeSuggestion,
     ProposalStatus,
+    ResearchBatch,
     RiskDecision,
     RiskDecisionAction,
     RunMetricSnapshot,
@@ -75,6 +80,126 @@ _PIPELINE_STATUS_KEY = "pipeline.runtime.status"
 _UNIVERSE_SELECTION_KEY = "universe.selection"
 _PIPELINE_SYNC_LOCK = Lock()
 
+_EXTERNAL_KNOWLEDGE_SOURCES: tuple[dict[str, object], ...] = (
+    {
+        "source_id": "quantconnect_lean",
+        "source_name": "QuantConnect LEAN",
+        "source_kind": "documentation",
+        "publisher": "QuantConnect",
+        "url": "https://www.quantconnect.com/docs/v2/writing-algorithms/key-concepts/algorithm-engine",
+        "license_note": "Reference documentation, summarized into structured methodology notes.",
+        "trust_tier": "whitelist",
+    },
+    {
+        "source_id": "quantstart_qstrader",
+        "source_name": "QSTrader / QuantStart",
+        "source_kind": "framework_docs",
+        "publisher": "QuantStart",
+        "url": "https://www.quantstart.com/qstrader",
+        "license_note": "Framework overview and methodology summaries only.",
+        "trust_tier": "whitelist",
+    },
+    {
+        "source_id": "backtrader_docs",
+        "source_name": "Backtrader",
+        "source_kind": "documentation",
+        "publisher": "Backtrader",
+        "url": "https://www.backtrader.com/docu/",
+        "license_note": "Official documentation references summarized into structured fields.",
+        "trust_tier": "whitelist",
+    },
+    {
+        "source_id": "quantlib_docs",
+        "source_name": "QuantLib",
+        "source_kind": "documentation",
+        "publisher": "QuantLib",
+        "url": "https://www.quantlib.org/docs.shtml",
+        "license_note": "Official documentation references summarized into structured fields.",
+        "trust_tier": "whitelist",
+    },
+    {
+        "source_id": "awesome_systematic_trading",
+        "source_name": "awesome-systematic-trading",
+        "source_kind": "index",
+        "publisher": "Community Index",
+        "url": "https://github.com/paperswithbacktest/awesome-systematic-trading",
+        "license_note": "Index only; not used as direct gate evidence.",
+        "trust_tier": "index_only",
+    },
+)
+
+_EXTERNAL_KNOWLEDGE_ENTRIES: tuple[dict[str, object], ...] = (
+    {
+        "entry_id": "ext_trend_following_v1",
+        "source_id": "quantconnect_lean",
+        "title": "趋势跟随方法论补充",
+        "summary_zh": "外部方法论强调趋势策略应配合持仓控制与现实执行约束，而不只是信号本身。",
+        "family_keys": ["trend_following"],
+        "market_scope": "HK",
+        "content_type": "methodology",
+        "source_excerpt_ref": "lean-trend-methodology",
+        "structured_payload": {
+            "family_key": "trend_following",
+            "summary_zh": "趋势策略需要把趋势确认与持仓控制一起设计。",
+            "core_logic_zh": "不是只看穿越信号，而是把趋势延续、风险预算、执行约束合并考虑。",
+            "preferred_market_conditions": ["bullish", "persistent_trend"],
+            "discouraged_market_conditions": ["range_bound"],
+            "common_indicators": ["SMA", "EMA", "MACD"],
+            "common_failure_modes": ["sideways_whipsaw", "late_trend_entry"],
+            "parameter_priors": {"short_window": {"min": 5, "max": 20}, "long_window": {"min": 20, "max": 90}},
+            "risk_flags": ["range_market_whipsaw"],
+            "novelty_expectation": "合理创新应在趋势确认、风险预算或退出节奏上有清晰变化。",
+            "source_refs": ["quantconnect_lean"],
+        },
+    },
+    {
+        "entry_id": "ext_mean_reversion_v1",
+        "source_id": "quantstart_qstrader",
+        "title": "均值回归方法论补充",
+        "summary_zh": "研究型框架通常把均值回归视为状态敏感策略，需要区分震荡与趋势失效环境。",
+        "family_keys": ["mean_reversion"],
+        "market_scope": "HK",
+        "content_type": "methodology",
+        "source_excerpt_ref": "qstrader-mean-reversion-methodology",
+        "structured_payload": {
+            "family_key": "mean_reversion",
+            "summary_zh": "均值回归更依赖环境过滤，不能把所有下跌都视为回归机会。",
+            "core_logic_zh": "先识别震荡或波动收敛环境，再在过度偏离时押注回归。",
+            "preferred_market_conditions": ["range_bound", "volatility_compression"],
+            "discouraged_market_conditions": ["strong_trend", "breakout_expansion"],
+            "common_indicators": ["RSI", "Bollinger"],
+            "common_failure_modes": ["falling_knife", "trend_dominance"],
+            "parameter_priors": {"oversold": {"min": 15, "max": 35}},
+            "risk_flags": ["trend_fade_risk"],
+            "novelty_expectation": "合理创新应增加状态过滤或退出条件，而不是只改阈值。",
+            "source_refs": ["quantstart_qstrader"],
+        },
+    },
+    {
+        "entry_id": "ext_breakout_v1",
+        "source_id": "backtrader_docs",
+        "title": "突破策略方法论补充",
+        "summary_zh": "突破策略的关键不只在通道窗口，还在确认逻辑与假突破处理。",
+        "family_keys": ["breakout", "volatility_filter"],
+        "market_scope": "HK",
+        "content_type": "methodology",
+        "source_excerpt_ref": "backtrader-breakout-methodology",
+        "structured_payload": {
+            "family_key": "breakout",
+            "summary_zh": "突破策略更看重确认与波动过滤的配合。",
+            "core_logic_zh": "区间突破后若没有波动或量能确认，假突破风险会显著上升。",
+            "preferred_market_conditions": ["breakout_expansion", "orderly_expansion"],
+            "discouraged_market_conditions": ["low_conviction", "range_bound"],
+            "common_indicators": ["Donchian", "ATR"],
+            "common_failure_modes": ["false_breakout", "post_breakout_reversal"],
+            "parameter_priors": {"channel_window": {"min": 15, "max": 55}},
+            "risk_flags": ["false_breakout_risk"],
+            "novelty_expectation": "合理创新应体现确认逻辑变化，而不是只改窗口。",
+            "source_refs": ["backtrader_docs"],
+        },
+    },
+)
+
 
 def now_tz() -> datetime:
     settings = get_settings()
@@ -84,6 +209,294 @@ def now_tz() -> datetime:
 def stable_hash(payload: object) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 
+
+def _seed_external_knowledge(db: Session, *, current_time: datetime | None = None) -> None:
+    current_time = current_time or now_tz()
+    existing_sources = {
+        item.source_id: item
+        for item in db.execute(select(KnowledgeSource)).scalars()
+    }
+    for payload in _EXTERNAL_KNOWLEDGE_SOURCES:
+        source_id = str(payload["source_id"])
+        record = existing_sources.get(source_id)
+        if record is None:
+            db.add(
+                KnowledgeSource(
+                    source_id=source_id,
+                    source_name=str(payload["source_name"]),
+                    source_kind=str(payload["source_kind"]),
+                    publisher=str(payload["publisher"]),
+                    url=str(payload["url"]),
+                    license_note=str(payload["license_note"]),
+                    trust_tier=str(payload["trust_tier"]),
+                    enabled=True,
+                    last_reviewed_at=current_time,
+                    created_at=current_time,
+                    updated_at=current_time,
+                )
+            )
+
+    existing_entries = {
+        item.entry_id: item
+        for item in db.execute(select(ExternalKnowledgeEntry)).scalars()
+    }
+    for payload in _EXTERNAL_KNOWLEDGE_ENTRIES:
+        entry_id = str(payload["entry_id"])
+        record = existing_entries.get(entry_id)
+        if record is None:
+            db.add(
+                ExternalKnowledgeEntry(
+                    entry_id=entry_id,
+                    source_id=str(payload["source_id"]),
+                    title=str(payload["title"]),
+                    summary_zh=str(payload["summary_zh"]),
+                    family_keys=[str(item) for item in list(payload["family_keys"])],
+                    market_scope=str(payload["market_scope"]),
+                    content_type=str(payload["content_type"]),
+                    source_excerpt_ref=str(payload["source_excerpt_ref"]),
+                    structured_payload=dict(payload["structured_payload"]),
+                    status="proposed",
+                    created_at=current_time,
+                    updated_at=current_time,
+                )
+            )
+    db.flush()
+
+
+def _external_knowledge_payload_for_market(db: Session, market_scope: str) -> list[dict[str, object]]:
+    _seed_external_knowledge(db)
+    records = list(
+        db.execute(
+            select(ExternalKnowledgeEntry)
+            .where(
+                ExternalKnowledgeEntry.market_scope == market_scope,
+                ExternalKnowledgeEntry.status == "proposed",
+            )
+            .order_by(ExternalKnowledgeEntry.created_at.asc())
+        ).scalars()
+    )
+    return [
+        {
+            "entry_id": record.entry_id,
+            "source_id": record.source_id,
+            "title": record.title,
+            "summary_zh": record.summary_zh,
+            "family_keys": list(record.family_keys),
+            "structured_payload": dict(record.structured_payload),
+        }
+        for record in records
+    ]
+
+
+def _record_knowledge_observation(
+    db: Session,
+    *,
+    proposal: StrategyProposal,
+    source_kind: str,
+    payload: dict[str, object],
+    current_time: datetime,
+) -> None:
+    if proposal.provider_status == "mock":
+        return
+    families = [
+        str(item)
+        for item in list(dict(proposal.evidence_pack or {}).get("knowledge_families_used", []) or [])
+        if str(item).strip()
+    ]
+    for family in families:
+        observation_id = f"knowledge-observation-{stable_hash([proposal.id, source_kind, family, current_time.isoformat()])}"
+        exists = db.execute(
+            select(KnowledgeObservation).where(KnowledgeObservation.observation_id == observation_id)
+        ).scalars().first()
+        if exists is not None:
+            continue
+        db.add(
+            KnowledgeObservation(
+                observation_id=observation_id,
+                proposal_id=proposal.id,
+                symbol=proposal.symbol,
+                market_scope=proposal.market_scope,
+                origin="internal",
+                source_kind=source_kind,
+                provider_status=proposal.provider_status,
+                family_key=family,
+                payload=payload,
+                created_at=current_time,
+            )
+        )
+        _record_system_audit(
+            db,
+            event_type='knowledge_observation_recorded',
+            entity_type='knowledge_observation',
+            entity_id=observation_id,
+            payload={
+                'proposal_id': proposal.id,
+                'symbol': proposal.symbol,
+                'family_key': family,
+                'source_kind': source_kind,
+            },
+            created_at=current_time,
+            run_id=proposal.run_id,
+        )
+
+
+def _refresh_knowledge_suggestions(db: Session, *, market_scope: str, current_time: datetime) -> None:
+    _seed_external_knowledge(db, current_time=current_time)
+    observations = list(
+        db.execute(
+            select(KnowledgeObservation).where(
+                KnowledgeObservation.market_scope == market_scope,
+                KnowledgeObservation.origin == "internal",
+                KnowledgeObservation.provider_status != "mock",
+            )
+        ).scalars()
+    )
+    grouped: dict[str, list[KnowledgeObservation]] = {}
+    for item in observations:
+        grouped.setdefault(item.family_key, []).append(item)
+
+    existing = {
+        (item.origin, item.family_key, item.suggestion_type): item
+        for item in db.execute(select(KnowledgeSuggestion).where(KnowledgeSuggestion.market_scope == market_scope)).scalars()
+    }
+
+    for family_key, items in grouped.items():
+        proposal_count = sum(1 for item in items if item.source_kind == "proposal")
+        backtest_count = sum(1 for item in items if item.source_kind == "backtest")
+        paper_count = sum(1 for item in items if item.source_kind == "paper")
+        if proposal_count < 3:
+            continue
+        fragile_hits = sum(
+            1
+            for item in items
+            if str(dict(item.payload).get("knowledge_fit_assessment", "")) in {"fragile", "mismatch"}
+        )
+        novelty_low_hits = sum(
+            1
+            for item in items
+            if str(dict(item.payload).get("novelty_assessment", "")) == "low"
+        )
+        suggestion_type = "failure_mode_strengthened" if fragile_hits >= max(2, proposal_count // 2) else "novelty_expectation_refined"
+        rationale = (
+            f"最近 {proposal_count} 条真实提案中，{family_key} 家族多次出现脆弱或失配迹象。"
+            if suggestion_type == "failure_mode_strengthened"
+            else f"最近 {proposal_count} 条真实提案中，{family_key} 家族出现较多轻微变体，需要强化新颖性要求。"
+        )
+        suggested_value = {
+            "family_key": family_key,
+            "proposal_count": proposal_count,
+            "fragile_hits": fragile_hits,
+            "low_novelty_hits": novelty_low_hits,
+        }
+        key = ("internal", family_key, suggestion_type)
+        record = existing.get(key)
+        confidence = round(min(0.95, 0.45 + proposal_count * 0.05 + paper_count * 0.03 + backtest_count * 0.02), 2)
+        if record is None:
+            db.add(
+                KnowledgeSuggestion(
+                    suggestion_id=f"knowledge-suggestion-{stable_hash([market_scope, family_key, suggestion_type, 'internal'])}",
+                    family_key=family_key,
+                    market_scope=market_scope,
+                    origin="internal",
+                    suggestion_type=suggestion_type,
+                    current_value={},
+                    suggested_value=suggested_value,
+                    rationale_zh=rationale,
+                    confidence=confidence,
+                    evidence_counts={
+                        "proposal": proposal_count,
+                        "backtest": backtest_count,
+                        "paper": paper_count,
+                    },
+                    linked_source_ids=[],
+                    status="proposed",
+                    created_at=current_time,
+                    updated_at=current_time,
+                )
+            )
+            _record_system_audit(
+                db,
+                event_type='knowledge_suggestion_generated',
+                entity_type='knowledge_suggestion',
+                entity_id=f"knowledge-suggestion-{stable_hash([market_scope, family_key, suggestion_type, 'internal'])}",
+                payload={
+                    'origin': 'internal',
+                    'family_key': family_key,
+                    'suggestion_type': suggestion_type,
+                },
+                created_at=current_time,
+            )
+        else:
+            record.suggested_value = suggested_value
+            record.rationale_zh = rationale
+            record.confidence = confidence
+            record.evidence_counts = {
+                "proposal": proposal_count,
+                "backtest": backtest_count,
+                "paper": paper_count,
+            }
+            record.updated_at = current_time
+
+    external_entries = list(
+        db.execute(
+            select(ExternalKnowledgeEntry).where(
+                ExternalKnowledgeEntry.market_scope == market_scope,
+                ExternalKnowledgeEntry.status == "proposed",
+            )
+        ).scalars()
+    )
+    for entry in external_entries:
+        payload = dict(entry.structured_payload)
+        for family_key in [str(item) for item in list(entry.family_keys)]:
+            key = ("external", family_key, "preferred_market_conditions_adjustment")
+            record = existing.get(key)
+            suggested_value = {
+                "family_key": family_key,
+                "summary_zh": str(payload.get("summary_zh", entry.summary_zh)),
+                "preferred_market_conditions": list(payload.get("preferred_market_conditions", []) or []),
+                "discouraged_market_conditions": list(payload.get("discouraged_market_conditions", []) or []),
+                "source_refs": list(payload.get("source_refs", [entry.source_id]) or [entry.source_id]),
+            }
+            rationale = f"外部白名单来源 {entry.source_id} 为 {family_key} 家族补充了稳定方法论摘要。"
+            if record is None:
+                db.add(
+                    KnowledgeSuggestion(
+                        suggestion_id=f"knowledge-suggestion-{stable_hash([market_scope, family_key, entry.entry_id, 'external'])}",
+                        family_key=family_key,
+                        market_scope=market_scope,
+                        origin="external",
+                        suggestion_type="preferred_market_conditions_adjustment",
+                        current_value={},
+                        suggested_value=suggested_value,
+                        rationale_zh=rationale,
+                        confidence=0.68,
+                        evidence_counts={"external_entries": 1},
+                        linked_source_ids=[entry.source_id],
+                        status="proposed",
+                        created_at=current_time,
+                        updated_at=current_time,
+                    )
+                )
+                _record_system_audit(
+                    db,
+                    event_type='knowledge_suggestion_generated',
+                    entity_type='knowledge_suggestion',
+                    entity_id=f"knowledge-suggestion-{stable_hash([market_scope, family_key, entry.entry_id, 'external'])}",
+                    payload={
+                        'origin': 'external',
+                        'family_key': family_key,
+                        'suggestion_type': 'preferred_market_conditions_adjustment',
+                        'linked_source_ids': [entry.source_id],
+                    },
+                    created_at=current_time,
+                )
+            else:
+                record.suggested_value = suggested_value
+                record.rationale_zh = rationale
+                record.confidence = max(record.confidence, 0.68)
+                record.linked_source_ids = sorted(set(list(record.linked_source_ids) + [entry.source_id]))
+                record.updated_at = current_time
+    db.flush()
 
 def _record_system_audit(
     db: Session,
@@ -283,6 +696,21 @@ def get_pipeline_runtime_status(db: Session) -> dict[str, object]:
         'last_trigger': status.get('last_trigger'),
         'degraded': bool(status.get('degraded', False)),
         'stalled': stalled,
+        'research_batch_size': int(status.get('research_batch_size', 0) or 0),
+        'research_symbols': [str(item) for item in list(status.get('research_symbols', []) or [])],
+        'research_symbol_states': [
+            dict(item)
+            for item in list(status.get('research_symbol_states', []) or [])
+            if isinstance(item, dict)
+        ],
+        'current_symbol': str(status.get('current_symbol')) if status.get('current_symbol') is not None else None,
+        'current_symbol_stage': str(status.get('current_symbol_stage')) if status.get('current_symbol_stage') is not None else None,
+        'batch_progress': {
+            str(key): int(value)
+            for key, value in dict(status.get('batch_progress', {}) or {}).items()
+        },
+        'current_batch_id': str(status.get('current_batch_id')) if status.get('current_batch_id') is not None else None,
+        'paper_slot_count': int(status.get('paper_slot_count', 1) or 1),
     }
 
 
@@ -299,6 +727,7 @@ def _set_pipeline_runtime_status(
     last_trigger: str | None = None,
     degraded: bool | None = None,
     current_stage: str | None = None,
+    extra_payload: dict[str, object] | None = None,
 ) -> None:
     previous = _get_runtime_setting_json(db, _PIPELINE_STATUS_KEY) or {}
     interval_minutes = max(5, get_settings().events.expected_sync_interval_minutes)
@@ -348,6 +777,21 @@ def _set_pipeline_runtime_status(
         'last_trigger': last_trigger if last_trigger is not None else previous.get('last_trigger'),
         'degraded': degraded if degraded is not None else bool(previous.get('degraded', False)),
     }
+    if isinstance(extra_payload, dict):
+        payload.update(extra_payload)
+    else:
+        for key in (
+            'research_batch_size',
+            'research_symbols',
+            'research_symbol_states',
+            'current_symbol',
+            'current_symbol_stage',
+            'batch_progress',
+            'current_batch_id',
+            'paper_slot_count',
+        ):
+            if key in previous:
+                payload[key] = previous[key]
     _set_runtime_setting_json(db, _PIPELINE_STATUS_KEY, payload, current_time)
 
 
@@ -358,6 +802,7 @@ def _set_pipeline_runtime_stage(
     current_time: datetime,
     status_message: str,
     trigger: str,
+    extra_payload: dict[str, object] | None = None,
 ) -> None:
     _set_pipeline_runtime_status(
         db,
@@ -367,6 +812,7 @@ def _set_pipeline_runtime_stage(
         last_trigger=trigger,
         degraded=False,
         current_stage=stage,
+        extra_payload=extra_payload,
     )
     db.commit()
 
@@ -1294,6 +1740,22 @@ def _record_paper_execution_audit(
             created_at=current_time,
         )
     )
+    _record_knowledge_observation(
+        db,
+        proposal=proposal,
+        source_kind='paper',
+        payload={
+            'event_type': event_type,
+            'knowledge_fit_assessment': str(
+                dict(dict(proposal.evidence_pack or {}).get('knowledge_context', {}) or {}).get('knowledge_fit_assessment', 'unknown')
+            ),
+            'novelty_assessment': str(
+                dict(dict(proposal.evidence_pack or {}).get('knowledge_context', {}) or {}).get('novelty_assessment', 'unknown')
+            ),
+            'paper_payload': payload,
+        },
+        current_time=current_time,
+    )
     db.flush()
 
 
@@ -1757,7 +2219,9 @@ def _static_universe_selection() -> dict[str, object]:
 def get_universe_selection(db: Session, *, refresh: bool = False, current_time: datetime | None = None) -> dict[str, object]:
     settings = get_settings()
     if settings.universe.mode != "dynamic_hk":
-        return _static_universe_selection()
+        selection = _static_universe_selection()
+        selection["research_symbols"] = [str(selection.get("selected_symbol"))]
+        return selection
 
     current_time = current_time or now_tz()
     existing = _get_runtime_setting_json(db, _UNIVERSE_SELECTION_KEY)
@@ -1780,6 +2244,14 @@ def get_universe_selection(db: Session, *, refresh: bool = False, current_time: 
         existing.setdefault("max_lot_cost_ratio", float(settings.universe.max_lot_cost_ratio))
         existing.setdefault("benchmark_symbol", benchmark_symbol)
         existing.setdefault("benchmark_candidate", benchmark_candidate)
+        existing.setdefault(
+            "research_symbols",
+            [
+                str(item.get("symbol"))
+                for item in candidates[: max(1, int(settings.universe.research_batch_size))]
+                if str(item.get("symbol", "")).strip()
+            ],
+        )
         if existing.get("benchmark_gap") is None and benchmark_candidate is not None:
             selected_score = selected_candidate.get("score")
             benchmark_score = benchmark_candidate.get("score")
@@ -1840,6 +2312,11 @@ def get_universe_selection(db: Session, *, refresh: bool = False, current_time: 
         ),
         "benchmark_candidate": benchmark_candidate,
         "candidates": candidates,
+        "research_symbols": [
+            str(item.get("symbol"))
+            for item in candidates[: max(1, int(settings.universe.research_batch_size))]
+            if str(item.get("symbol", "")).strip()
+        ],
     }
     _set_runtime_setting_json(db, _UNIVERSE_SELECTION_KEY, payload, current_time)
     top_candidates = [
@@ -2455,6 +2932,33 @@ def build_market_snapshot(db: Session) -> dict[str, object]:
     return _merge_market_snapshot(base_snapshot, analyst_state)
 
 
+def _snapshot_for_symbol(
+    base_snapshot: dict[str, object],
+    *,
+    symbol: str,
+    candidate: dict[str, object] | None = None,
+) -> dict[str, object]:
+    snapshot = dict(base_snapshot)
+    snapshot_payload = {
+        "base_hash": str(base_snapshot.get("market_snapshot_hash", "")),
+        "symbol": symbol,
+    }
+    snapshot["symbol"] = symbol
+    snapshot["market_snapshot_hash"] = stable_hash(snapshot_payload)
+    snapshot["summary"] = (
+        f"{symbol} 复用当前市场摘要进行研究。"
+        f" {str(base_snapshot.get('summary', '')).strip()}"
+    ).strip()
+    if isinstance(snapshot.get("universe_selection"), dict):
+        selection = dict(snapshot["universe_selection"])
+        selection["selected_symbol"] = symbol
+        if candidate is not None:
+            selection["selection_reason"] = str(candidate.get("selection_reason") or selection.get("selection_reason") or "")
+            selection["top_factors"] = [str(item) for item in list(candidate.get("reason_tags", []) or [])[:4]]
+        snapshot["universe_selection"] = selection
+    return snapshot
+
+
 def _fallback_proposal_blueprints(symbol: str, provider_status) -> list[dict[str, object]]:
     return [
         {
@@ -2654,6 +3158,7 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
     digest: DailyEventDigest = snapshot['event_digest']
     market_profile = dict(snapshot['market_profile'])
     strategy_knowledge = _current_strategy_knowledge(str(digest.market_scope))
+    external_candidate_knowledge = _external_knowledge_payload_for_market(db, str(digest.market_scope))
     knowledge_preferences, knowledge_discouraged = _knowledge_preferences_for_market_profile(market_profile)
     baseline_family_map = _baseline_family_map_for_market(str(digest.market_scope))
     baseline_strategies = [
@@ -2685,6 +3190,7 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
         market_profile=market_profile,
         baseline_strategies=baseline_strategies,
         strategy_knowledge=strategy_knowledge,
+        external_candidate_knowledge=external_candidate_knowledge,
         knowledge_preferences=knowledge_preferences,
         knowledge_discouraged=knowledge_discouraged,
         baseline_family_map=baseline_family_map,
@@ -2969,7 +3475,7 @@ def _strategy_dsl(blueprint: dict[str, object], snapshot: dict[str, object], dig
         'position_sizing': {'mode': 'fixed_fraction', 'value': 0.25},
         'holding_constraints': {'min_holding_days': 5, 'cooldown_days': market_governance['cooldown_days']},
         'features_used': blueprint['features_used'],
-        'params': {'base_strategy': base_strategy, 'symbol': digest.symbol_scope, **(params if isinstance(params, dict) else {})},
+        'params': {'base_strategy': base_strategy, 'symbol': str(snapshot['symbol']), **(params if isinstance(params, dict) else {})},
     }
 
 
@@ -3108,6 +3614,7 @@ def _fallback_debate_report(blueprint: dict[str, object], digest: DailyEventDige
 def run_research_debate(db: Session, blueprint: dict[str, object], snapshot: dict[str, object], current_time: datetime) -> dict[str, object]:
     digest: DailyEventDigest = snapshot['event_digest']
     knowledge_assessment = _knowledge_assessment(blueprint, snapshot)
+    external_knowledge = _external_knowledge_payload_for_market(db, str(digest.market_scope))
     if blueprint.get('source_kind') == 'mock':
         report = _fallback_debate_report(blueprint, digest)
         report['prompt_version'] = blueprint.get('prompt_versions', {}).get('research_debate', RESEARCH_DEBATE_PROMPT_VERSION)
@@ -3138,6 +3645,7 @@ def run_research_debate(db: Session, blueprint: dict[str, object], snapshot: dic
             'failure_mode_hits': knowledge_assessment['knowledge_failure_mode_hits'],
             'baseline_delta_summary': knowledge_assessment['baseline_delta_summary'],
             'novelty_claim': knowledge_assessment['novelty_claim'],
+            'external_candidate_knowledge': external_knowledge,
         },
     )
     result = get_llm_gateway().invoke_json(
@@ -4337,11 +4845,12 @@ def materialize_proposals_and_decisions(
     blueprints: list[dict[str, object]],
     previous_active: StrategyProposal | None,
     current_time: datetime,
-) -> None:
+) -> list[StrategyProposal]:
     active_context = _proposal_context(previous_active)
     macro_status = dict(snapshot.get('macro_status', {}))
     settings_governance = get_settings().governance
     replacement_promoted = False
+    created_proposals: list[StrategyProposal] = []
     for index, blueprint in enumerate(blueprints):
         deterministic_score = _deterministic_score(index, snapshot, digest, list(blueprint['features_used']))
         provisional_bottom_line = deterministic_score <= 100.0
@@ -4405,7 +4914,7 @@ def materialize_proposals_and_decisions(
             final_score=final_score,
         )
         proposal = StrategyProposal(
-            run_id=f"run-{stable_hash([blueprint['title'], digest.digest_hash, current_time.isoformat(), blueprint.get('source_kind', 'mock')])}",
+            run_id=f"run-{stable_hash([blueprint['title'], str(snapshot['symbol']), digest.digest_hash, current_time.isoformat(), blueprint.get('source_kind', 'mock')])}",
             title=str(blueprint['title']),
             symbol=str(snapshot['symbol']),
             market_scope=str(digest.market_scope),
@@ -4519,6 +5028,31 @@ def materialize_proposals_and_decisions(
                 created_at=current_time,
             )
         )
+        _record_knowledge_observation(
+            db,
+            proposal=proposal,
+            source_kind='proposal',
+            payload={
+                'knowledge_fit_assessment': str(dict(evidence_pack.get('knowledge_context', {})).get('knowledge_fit_assessment', 'unknown')),
+                'knowledge_failure_mode_hits': list(dict(evidence_pack.get('knowledge_context', {})).get('knowledge_failure_mode_hits', []) or []),
+                'novelty_assessment': str(dict(evidence_pack.get('knowledge_context', {})).get('novelty_assessment', 'unknown')),
+                'backtest_gate': dict(evidence_pack.get('backtest_gate', {}) or {}),
+                'final_score': proposal.final_score,
+            },
+            current_time=current_time,
+        )
+        _record_knowledge_observation(
+            db,
+            proposal=proposal,
+            source_kind='backtest',
+            payload={
+                'knowledge_fit_assessment': str(dict(evidence_pack.get('knowledge_context', {})).get('knowledge_fit_assessment', 'unknown')),
+                'novelty_assessment': str(dict(evidence_pack.get('knowledge_context', {})).get('novelty_assessment', 'unknown')),
+                'backtest_gate': dict(evidence_pack.get('backtest_gate', {}) or {}),
+                'metrics': dict(dict(evidence_pack.get('backtest_gate', {}) or {}).get('metrics', {}) or {}),
+            },
+            current_time=current_time,
+        )
         if proposal.status == ProposalStatus.ACTIVE:
             _initialize_paper_snapshot_for_proposal(
                 db,
@@ -4536,11 +5070,13 @@ def materialize_proposals_and_decisions(
             )
             replacement_promoted = True
             active_context = _proposal_context(proposal)
+        created_proposals.append(proposal)
     if replacement_promoted and previous_active is not None:
         previous_active.status = ProposalStatus.ARCHIVED
         previous_active.archived_at = current_time
         previous_active.updated_at = current_time
     db.flush()
+    return created_proposals
 
 def _audit_payload(proposal: StrategyProposal, decision: RiskDecision) -> dict[str, object]:
     return {
@@ -4704,6 +5240,8 @@ def prune_strategy_proposals(
 def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str = 'manual') -> None:
     with _PIPELINE_SYNC_LOCK:
         started_at = now_tz()
+        settings = get_settings()
+        research_batch_size = max(1, int(settings.universe.research_batch_size))
         _set_pipeline_runtime_status(
             db,
             current_state='running',
@@ -4712,9 +5250,20 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
             last_trigger=trigger,
             degraded=False,
             current_stage='sync_event_stream',
+            extra_payload={
+                'research_batch_size': research_batch_size,
+                'research_symbols': [],
+                'research_symbol_states': [],
+                'current_symbol': None,
+                'current_symbol_stage': None,
+                'batch_progress': {'completed': 0, 'total': research_batch_size},
+                'current_batch_id': None,
+                'paper_slot_count': int(settings.governance.paper_slot_count),
+            },
         )
         db.commit()
         try:
+            _seed_external_knowledge(db, current_time=started_at)
             _set_pipeline_runtime_stage(
                 db,
                 stage='select_universe',
@@ -4759,11 +5308,49 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
             analyst_state = run_market_analyst(db, base_snapshot, current_time)
             snapshot = _merge_market_snapshot(base_snapshot, analyst_state)
             digest: DailyEventDigest = snapshot["event_digest"]  # type: ignore[assignment]
-            symbol = str(snapshot["symbol"])
             market_scope = str(digest.market_scope)
+            universe_candidates = list(dict(universe_selection).get("candidates", []) or [])
+            research_symbols = [
+                str(item.get("symbol"))
+                for item in universe_candidates[:research_batch_size]
+                if str(item.get("symbol", "")).strip()
+            ]
+            if not research_symbols:
+                research_symbols = [str(snapshot["symbol"])]
+            batch_id = f"research-batch-{stable_hash([market_scope, research_symbols, current_time.isoformat(), trigger])}"
+            batch = ResearchBatch(
+                batch_id=batch_id,
+                market_scope=market_scope,
+                status='running',
+                research_symbols=research_symbols,
+                selected_challenger_symbol=None,
+                summary_payload={
+                    'research_symbols': research_symbols,
+                    'symbol_states': [],
+                    'batch_progress': {'completed': 0, 'total': len(research_symbols)},
+                },
+                created_at=current_time,
+                updated_at=current_time,
+            )
+            db.add(batch)
+            db.flush()
+            _record_system_audit(
+                db,
+                event_type='research_batch_started',
+                entity_type='research_batch',
+                entity_id=batch.batch_id,
+                payload={
+                    'batch_id': batch.batch_id,
+                    'market_scope': market_scope,
+                    'research_symbols': research_symbols,
+                    'paper_slot_count': int(settings.governance.paper_slot_count),
+                },
+                created_at=current_time,
+            )
+            db.commit()
             archive_out_of_scope_strategy_proposals(
                 db,
-                active_symbol=symbol,
+                active_symbol=research_symbols[0],
                 active_market_scope=market_scope,
                 archived_at=current_time,
             )
@@ -4788,36 +5375,168 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                     current_time=now_tz(),
                     status_message='Checking active strategy health.',
                     trigger=trigger,
+                    extra_payload={
+                        'research_batch_size': len(research_symbols),
+                        'research_symbols': research_symbols,
+                        'research_symbol_states': [],
+                        'current_symbol': None,
+                        'current_symbol_stage': 'active_health_check',
+                        'batch_progress': {'completed': 0, 'total': len(research_symbols)},
+                        'current_batch_id': batch.batch_id,
+                        'paper_slot_count': int(settings.governance.paper_slot_count),
+                    },
                 )
                 evaluate_active_strategy_health(db, snapshot, current_time)
                 previous_active = get_active_strategy(db)
 
-            _set_pipeline_runtime_stage(
+            symbol_states: list[dict[str, object]] = []
+            created_proposals: list[StrategyProposal] = []
+            current_active_symbol = previous_active.symbol if previous_active is not None else research_symbols[0]
+            candidate_map = {
+                str(item.get('symbol')): dict(item)
+                for item in universe_candidates
+                if str(item.get('symbol', '')).strip()
+            }
+            for index, symbol in enumerate(research_symbols, start=1):
+                symbol_time = now_tz()
+                symbol_snapshot = _snapshot_for_symbol(
+                    snapshot,
+                    symbol=symbol,
+                    candidate=candidate_map.get(symbol),
+                )
+                _record_system_audit(
+                    db,
+                    event_type='research_symbol_started',
+                    entity_type='research_batch',
+                    entity_id=batch.batch_id,
+                    payload={
+                        'batch_id': batch.batch_id,
+                        'symbol': symbol,
+                        'batch_rank': index,
+                    },
+                    created_at=symbol_time,
+                )
+                _set_pipeline_runtime_stage(
+                    db,
+                    stage='strategy_agent',
+                    current_time=symbol_time,
+                    status_message=f'Generating strategy candidates for {symbol}.',
+                    trigger=trigger,
+                    extra_payload={
+                        'research_batch_size': len(research_symbols),
+                        'research_symbols': research_symbols,
+                        'research_symbol_states': symbol_states,
+                        'current_symbol': symbol,
+                        'current_symbol_stage': 'strategy_agent',
+                        'batch_progress': {'completed': index - 1, 'total': len(research_symbols)},
+                        'current_batch_id': batch.batch_id,
+                        'paper_slot_count': int(settings.governance.paper_slot_count),
+                    },
+                )
+                blueprints, _ = run_strategy_agent(db=db, symbol=symbol, snapshot=symbol_snapshot, current_time=symbol_time)
+                _set_pipeline_runtime_stage(
+                    db,
+                    stage='materialize_decisions',
+                    current_time=now_tz(),
+                    status_message=f'Scoring candidates and materializing decisions for {symbol}.',
+                    trigger=trigger,
+                    extra_payload={
+                        'research_batch_size': len(research_symbols),
+                        'research_symbols': research_symbols,
+                        'research_symbol_states': symbol_states,
+                        'current_symbol': symbol,
+                        'current_symbol_stage': 'materialize_decisions',
+                        'batch_progress': {'completed': index - 1, 'total': len(research_symbols)},
+                        'current_batch_id': batch.batch_id,
+                        'paper_slot_count': int(settings.governance.paper_slot_count),
+                    },
+                )
+                current_created = materialize_proposals_and_decisions(
+                    db,
+                    snapshot=symbol_snapshot,
+                    digest=digest,
+                    blueprints=blueprints,
+                    previous_active=previous_active,
+                    current_time=symbol_time,
+                )
+                created_proposals.extend(current_created)
+                previous_active = get_active_strategy(db)
+                symbol_proposals = [item for item in current_created if item.symbol == symbol]
+                best_proposal = max(symbol_proposals, key=lambda item: item.final_score, default=None)
+                symbol_state = {
+                    'symbol': symbol,
+                    'status': 'completed',
+                    'proposal_count': len(symbol_proposals),
+                    'admissible_count': sum(1 for item in symbol_proposals if item.status in {ProposalStatus.CANDIDATE, ProposalStatus.ACTIVE}),
+                    'best_final_score': round(best_proposal.final_score, 1) if best_proposal is not None else None,
+                    'selected_for_paper_comparison': bool(previous_active is not None and previous_active.symbol == symbol),
+                    'rejected_reason_summary': (
+                        list(
+                            dict(
+                                dict(best_proposal.evidence_pack).get('governance_report', {})
+                            ).get('promotion_gate', {}).get('blocked_reasons', [])
+                        )
+                        if best_proposal is not None and isinstance(best_proposal.evidence_pack, dict)
+                        else []
+                    ),
+                }
+                symbol_states.append(symbol_state)
+                _record_system_audit(
+                    db,
+                    event_type='research_symbol_completed',
+                    entity_type='research_batch',
+                    entity_id=batch.batch_id,
+                    payload={
+                        'batch_id': batch.batch_id,
+                        **symbol_state,
+                    },
+                    created_at=now_tz(),
+                )
+                batch.summary_payload = {
+                    'research_symbols': research_symbols,
+                    'symbol_states': symbol_states,
+                    'batch_progress': {'completed': index, 'total': len(research_symbols)},
+                }
+                batch.updated_at = now_tz()
+                db.commit()
+
+            best_challenger = max(created_proposals, key=lambda item: item.final_score, default=None)
+            batch.selected_challenger_symbol = best_challenger.symbol if best_challenger is not None else None
+            batch.status = 'completed'
+            batch.summary_payload = {
+                **dict(batch.summary_payload or {}),
+                'selected_challenger_symbol': batch.selected_challenger_symbol,
+            }
+            batch.updated_at = now_tz()
+            _record_system_audit(
                 db,
-                stage='strategy_agent',
-                current_time=now_tz(),
-                status_message='Generating strategy candidates.',
-                trigger=trigger,
+                event_type='cross_symbol_challenger_selected',
+                entity_type='research_batch',
+                entity_id=batch.batch_id,
+                payload={
+                    'batch_id': batch.batch_id,
+                    'selected_challenger_symbol': batch.selected_challenger_symbol,
+                    'selected_proposal_id': best_challenger.id if best_challenger is not None else None,
+                    'selected_final_score': best_challenger.final_score if best_challenger is not None else None,
+                },
+                created_at=now_tz(),
             )
-            blueprints, _ = run_strategy_agent(db=db, symbol=symbol, snapshot=snapshot, current_time=current_time)
-            _set_pipeline_runtime_stage(
+            _record_system_audit(
                 db,
-                stage='materialize_decisions',
-                current_time=now_tz(),
-                status_message='Scoring candidates and materializing decisions.',
-                trigger=trigger,
-            )
-            materialize_proposals_and_decisions(
-                db,
-                snapshot=snapshot,
-                digest=digest,
-                blueprints=blueprints,
-                previous_active=previous_active,
-                current_time=current_time,
+                event_type='research_batch_completed',
+                entity_type='research_batch',
+                entity_id=batch.batch_id,
+                payload={
+                    'batch_id': batch.batch_id,
+                    'research_symbols': research_symbols,
+                    'symbol_states': symbol_states,
+                    'selected_challenger_symbol': batch.selected_challenger_symbol,
+                },
+                created_at=now_tz(),
             )
             prune_strategy_proposals(
                 db,
-                active_symbol=symbol,
+                active_symbol=current_active_symbol if previous_active is None else previous_active.symbol,
                 active_market_scope=market_scope,
                 current_time=current_time,
             )
@@ -4835,6 +5554,16 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 current_time=now_tz(),
                 status_message='Executing active paper strategy.',
                 trigger=trigger,
+                extra_payload={
+                    'research_batch_size': len(research_symbols),
+                    'research_symbols': research_symbols,
+                    'research_symbol_states': symbol_states,
+                    'current_symbol': batch.selected_challenger_symbol,
+                    'current_symbol_stage': 'paper_execution',
+                    'batch_progress': {'completed': len(research_symbols), 'total': len(research_symbols)},
+                    'current_batch_id': batch.batch_id,
+                    'paper_slot_count': int(settings.governance.paper_slot_count),
+                },
             )
             current_active = get_active_strategy(db)
             if current_active is not None:
@@ -4850,8 +5579,19 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 current_time=now_tz(),
                 status_message='Finalizing active strategy health.',
                 trigger=trigger,
+                extra_payload={
+                    'research_batch_size': len(research_symbols),
+                    'research_symbols': research_symbols,
+                    'research_symbol_states': symbol_states,
+                    'current_symbol': batch.selected_challenger_symbol,
+                    'current_symbol_stage': 'active_health_check',
+                    'batch_progress': {'completed': len(research_symbols), 'total': len(research_symbols)},
+                    'current_batch_id': batch.batch_id,
+                    'paper_slot_count': int(settings.governance.paper_slot_count),
+                },
             )
             evaluate_active_strategy_health(db, snapshot, current_time)
+            _refresh_knowledge_suggestions(db, market_scope=market_scope, current_time=now_tz())
             macro_status = dict(snapshot.get('macro_status', {}))
             _set_pipeline_runtime_status(
                 db,
@@ -4863,6 +5603,16 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 last_duration_ms=max(0, int((current_time - started_at).total_seconds() * 1000)),
                 last_trigger=trigger,
                 degraded=bool(macro_status.get('degraded')),
+                extra_payload={
+                    'research_batch_size': len(research_symbols),
+                    'research_symbols': research_symbols,
+                    'research_symbol_states': symbol_states,
+                    'current_symbol': None,
+                    'current_symbol_stage': None,
+                    'batch_progress': {'completed': len(research_symbols), 'total': len(research_symbols)},
+                    'current_batch_id': batch.batch_id,
+                    'paper_slot_count': int(settings.governance.paper_slot_count),
+                },
             )
             completed_runtime_status = get_pipeline_runtime_status(db)
             _record_system_audit(
@@ -5150,6 +5900,20 @@ def list_strategy_proposals(db: Session) -> list[StrategyProposal]:
     return _attach_pool_ranking(_attach_quality_track_record(db, hydrated))
 
 
+def list_research_batches(db: Session, limit: int = 20) -> list[ResearchBatch]:
+    return list(
+        db.execute(
+            select(ResearchBatch).order_by(ResearchBatch.created_at.desc()).limit(limit)
+        ).scalars()
+    )
+
+
+def get_research_batch(db: Session, batch_id: str) -> ResearchBatch | None:
+    return db.execute(
+        select(ResearchBatch).where(ResearchBatch.batch_id == batch_id)
+    ).scalars().first()
+
+
 def get_strategy_proposal(db: Session, proposal_id: str) -> StrategyProposal | None:
     record = db.execute(
         select(StrategyProposal)
@@ -5188,6 +5952,34 @@ def list_candidate_strategies(db: Session) -> list[StrategyProposal]:
     )
     hydrated = [_hydrate_proposal_quality_report(record) for record in records]
     return _attach_pool_ranking(_attach_quality_track_record(db, hydrated))
+
+
+def list_knowledge_sources(db: Session) -> list[KnowledgeSource]:
+    _seed_external_knowledge(db)
+    db.commit()
+    return list(
+        db.execute(select(KnowledgeSource).order_by(KnowledgeSource.source_name.asc())).scalars()
+    )
+
+
+def list_knowledge_suggestions(db: Session, limit: int = 100) -> list[KnowledgeSuggestion]:
+    _refresh_knowledge_suggestions(db, market_scope='HK', current_time=now_tz())
+    db.commit()
+    return list(
+        db.execute(
+            select(KnowledgeSuggestion)
+            .order_by(KnowledgeSuggestion.updated_at.desc(), KnowledgeSuggestion.created_at.desc())
+            .limit(limit)
+        ).scalars()
+    )
+
+
+def get_knowledge_suggestion(db: Session, suggestion_id: str) -> KnowledgeSuggestion | None:
+    _refresh_knowledge_suggestions(db, market_scope='HK', current_time=now_tz())
+    db.commit()
+    return db.execute(
+        select(KnowledgeSuggestion).where(KnowledgeSuggestion.suggestion_id == suggestion_id)
+    ).scalars().first()
 
 
 def list_risk_decisions(db: Session, limit: int = 50) -> list[RiskDecision]:

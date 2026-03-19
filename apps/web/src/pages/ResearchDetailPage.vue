@@ -29,6 +29,16 @@ const strategiesQuery = useQuery({
   queryFn: api.getStrategies,
   refetchInterval: 60_000,
 })
+const knowledgeSuggestionsQuery = useQuery({
+  queryKey: ['knowledge-suggestions'],
+  queryFn: api.getKnowledgeSuggestions,
+  refetchInterval: 60_000,
+})
+const knowledgeSourcesQuery = useQuery({
+  queryKey: ['knowledge-sources'],
+  queryFn: api.getKnowledgeSources,
+  refetchInterval: 300_000,
+})
 
 const proposal = computed(() => proposalQuery.data.value ?? null)
 const command = computed(() => commandQuery.data.value)
@@ -45,6 +55,20 @@ const baselineStrategy = computed(() => String(strategyParams.value.base_strateg
 const baselineMeta = computed(() => {
   if (!baselineStrategy.value) return null
   return strategyCatalog.value.find((item) => item.strategy_name === baselineStrategy.value) ?? null
+})
+const knowledgeSuggestions = computed(() => {
+  const items = knowledgeSuggestionsQuery.data.value ?? []
+  const families = (proposal.value?.evidence_pack?.quality_report?.knowledge_families_used ?? []).map((item) => String(item))
+  return items.filter((item) => families.includes(item.family_key)).slice(0, 4)
+})
+const externalKnowledgeSources = computed(() => {
+  const allSources = knowledgeSourcesQuery.data.value ?? []
+  const sourceIds = new Set<string>()
+  for (const item of knowledgeSuggestions.value) {
+    if (item.origin !== 'external') continue
+    for (const sourceId of item.linked_source_ids) sourceIds.add(String(sourceId))
+  }
+  return allSources.filter((item) => sourceIds.has(item.source_id))
 })
 
 function proposalStatusLabel(status?: string): string {
@@ -292,6 +316,36 @@ function strategyTitle(value?: string | null): string {
               · {{ t('researchDetail.noveltyAssessment') }}:
               {{ displayLabel(t, 'noveltyAssessment', String(proposal.evidence_pack?.quality_report?.verdict?.novelty_assessment ?? 'unknown')) }}
             </p>
+          </div>
+          <div v-if="knowledgeSuggestions.length" class="rounded-lg border border-slate-200/80 bg-slate-50/80 p-4">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('researchDetail.knowledgeSuggestions') }}</p>
+            <div class="mt-3 space-y-3 text-sm">
+              <div
+                v-for="item in knowledgeSuggestions"
+                :key="item.suggestion_id"
+                class="rounded-lg border border-slate-200/80 bg-white/80 px-3 py-3"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <p class="font-semibold text-slate-900">{{ knowledgeFamilyLabel(item.family_key) }}</p>
+                  <Badge :variant="item.origin === 'external' ? 'info' : 'neutral'">{{ item.origin }}</Badge>
+                </div>
+                <p class="mt-2 text-slate-700">{{ item.rationale_zh }}</p>
+                <p class="mt-2 text-xs text-slate-500">confidence: {{ item.confidence }}</p>
+              </div>
+            </div>
+          </div>
+          <div v-if="externalKnowledgeSources.length" class="rounded-lg border border-slate-200/80 bg-slate-50/80 p-4">
+            <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('researchDetail.externalKnowledgeSources') }}</p>
+            <div class="mt-3 space-y-2 text-sm">
+              <div
+                v-for="item in externalKnowledgeSources"
+                :key="item.source_id"
+                class="rounded-lg border border-slate-200/80 bg-white/80 px-3 py-3"
+              >
+                <p class="font-semibold text-slate-900">{{ item.source_name }}</p>
+                <p class="mt-1 text-slate-600">{{ item.publisher }}</p>
+              </div>
+            </div>
           </div>
         </Card>
       </div>
