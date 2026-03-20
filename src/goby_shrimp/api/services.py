@@ -51,6 +51,7 @@ from ..strategy import (
     knowledge_payload_for_market,
     knowledge_preferences_from_market_profile,
 )
+from ..strategy.mean_reversion import MeanReversionStrategy
 from ..strategy.signals import Signal
 from .db import SessionLocal
 from .models import (
@@ -196,6 +197,75 @@ _EXTERNAL_KNOWLEDGE_ENTRIES: tuple[dict[str, object], ...] = (
             "risk_flags": ["false_breakout_risk"],
             "novelty_expectation": "合理创新应体现确认逻辑变化，而不是只改窗口。",
             "source_refs": ["backtrader_docs"],
+        },
+    },
+    {
+        "entry_id": "ext_momentum_filter_v1",
+        "source_id": "quantconnect_lean",
+        "title": "动量过滤方法论补充",
+        "summary_zh": "外部方法论强调动量过滤应服务主策略，而不是把短期加速误判成独立 alpha。",
+        "family_keys": ["momentum_filter"],
+        "market_scope": "HK",
+        "content_type": "methodology",
+        "source_excerpt_ref": "lean-momentum-filter-methodology",
+        "structured_payload": {
+            "family_key": "momentum_filter",
+            "summary_zh": "动量过滤的职责是减少逆势和弱势入场，而不是追逐每一次短期加速。",
+            "core_logic_zh": "先确认方向和趋势质量，再决定是否放行主策略信号。",
+            "preferred_market_conditions": ["persistent_trend", "leadership_concentration"],
+            "discouraged_market_conditions": ["sharp_reversal", "range_bound"],
+            "common_indicators": ["MACD", "ROC", "RSI"],
+            "common_failure_modes": ["late_confirmation", "momentum_exhaustion"],
+            "parameter_priors": {"fast_period": {"min": 8, "max": 18}, "slow_period": {"min": 20, "max": 45}},
+            "risk_flags": ["late_entry", "exhaustion_chase"],
+            "novelty_expectation": "合理创新应说明它如何辅助主策略减少错单，而不是把过滤器包装成完整新策略。",
+            "source_refs": ["quantconnect_lean"],
+        },
+    },
+    {
+        "entry_id": "ext_volatility_filter_v1",
+        "source_id": "backtrader_docs",
+        "title": "波动率过滤方法论补充",
+        "summary_zh": "外部方法论强调波动率过滤更适合做入场质量控制，不适合在事件冲击后盲目放大交易频率。",
+        "family_keys": ["volatility_filter"],
+        "market_scope": "HK",
+        "content_type": "methodology",
+        "source_excerpt_ref": "backtrader-volatility-filter-methodology",
+        "structured_payload": {
+            "family_key": "volatility_filter",
+            "summary_zh": "波动率过滤应优先识别噪音区与可交易区，而不是在高噪音时硬做确认。",
+            "core_logic_zh": "只在波动扩张有秩序、或压缩后即将释放时放行主策略，更有助于降低假信号。",
+            "preferred_market_conditions": ["volatility_compression", "orderly_expansion"],
+            "discouraged_market_conditions": ["chaotic_volatility", "event_shock"],
+            "common_indicators": ["ATR", "volatility", "drawdown"],
+            "common_failure_modes": ["volatility_spike", "filter_too_strict", "filter_too_loose"],
+            "parameter_priors": {"atr_window": {"min": 8, "max": 24}, "atr_k": {"min": 1.0, "max": 3.0}},
+            "risk_flags": ["filter_overfit", "missed_moves"],
+            "novelty_expectation": "合理创新应说明过滤器如何改善主策略质量；只改 ATR 数字通常不够。",
+            "source_refs": ["backtrader_docs"],
+        },
+    },
+    {
+        "entry_id": "ext_hk_execution_v1",
+        "source_id": "quantstart_qstrader",
+        "title": "港股执行约束补充",
+        "summary_zh": "港股更适合低换手、确认后再入场的日频策略，不适合把研究系统做成高频切换器。",
+        "family_keys": ["trend_following", "mean_reversion", "volatility_filter"],
+        "market_scope": "HK",
+        "content_type": "market_note",
+        "source_excerpt_ref": "qstrader-hk-execution-note",
+        "structured_payload": {
+            "family_key": "trend_following",
+            "summary_zh": "港股日频研究更应偏向低换手、信号确认后再执行的风格。",
+            "core_logic_zh": "执行质量会显著影响边际优势，因此策略应减少无谓切换与贴线交易。",
+            "preferred_market_conditions": ["orderly_expansion", "low_conviction", "range_bound"],
+            "discouraged_market_conditions": ["chaotic_volatility"],
+            "common_indicators": ["volatility", "drawdown", "SMA"],
+            "common_failure_modes": ["overtrading", "micro_signal_noise"],
+            "parameter_priors": {"long_window": {"min": 25, "max": 80}},
+            "risk_flags": ["turnover_drag"],
+            "novelty_expectation": "合理变体应体现低换手和执行约束适配，而不是多堆叠几个信号。",
+            "source_refs": ["quantstart_qstrader"],
         },
     },
 )
@@ -2447,6 +2517,68 @@ def _knowledge_preferences_for_market_profile(market_profile: dict[str, object])
     )
 
 
+def _effective_knowledge_preferences(
+    market_profile: dict[str, object],
+    current_market_conditions: list[str],
+) -> tuple[list[str], list[str]]:
+    preferred, discouraged = _knowledge_preferences_for_market_profile(market_profile)
+    preferred_set = set(preferred)
+    discouraged_set = set(discouraged)
+    conditions = set(str(item) for item in current_market_conditions if str(item).strip())
+
+    if {"range_bound", "low_conviction", "choppy_reversal"} & conditions:
+        preferred_set.update({"mean_reversion", "volatility_filter"})
+        discouraged_set.discard("mean_reversion")
+        preferred_set.discard("breakout")
+        preferred_set.discard("trend_following")
+        preferred_set.discard("momentum_filter")
+        discouraged_set.update({"breakout"})
+        if "choppy_reversal" in conditions:
+            discouraged_set.update({"trend_following"})
+            discouraged_set.update({"momentum_filter"})
+
+    if "volatility_compression" in conditions:
+        preferred_set.add("volatility_filter")
+
+    if {"persistent_trend", "trend_resumption", "trending_up"} & conditions:
+        preferred_set.update({"trend_following", "momentum_filter"})
+        discouraged_set.discard("trend_following")
+        discouraged_set.discard("momentum_filter")
+
+    preferred_set -= discouraged_set
+    return sorted(preferred_set), sorted(discouraged_set)
+
+
+def _current_market_conditions(snapshot: dict[str, object]) -> list[str]:
+    regime = str(snapshot.get("regime", "")).upper()
+    price_context = dict(snapshot.get("price_context", {}) or {})
+    conditions: list[str] = []
+    if regime in {"RANGING", "SIDEWAYS"}:
+        conditions.extend(["range_bound", "low_conviction"])
+    elif regime in {"BULLISH", "TRENDING_UP"}:
+        conditions.extend(["bullish", "trending_up", "persistent_trend"])
+    elif regime in {"BEARISH", "TRENDING_DOWN"}:
+        conditions.extend(["strong_trend", "trend_breakdown"])
+
+    volatility = price_context.get("volatility")
+    if isinstance(volatility, (int, float)):
+        if volatility <= 0.025:
+            conditions.append("volatility_compression")
+        elif volatility <= 0.045:
+            conditions.append("orderly_expansion")
+        else:
+            conditions.append("chaotic_volatility")
+
+    trend_strength = price_context.get("trend_strength")
+    if isinstance(trend_strength, (int, float)):
+        if trend_strength >= 0.12:
+            conditions.append("trend_resumption")
+        elif trend_strength <= 0.05:
+            conditions.append("choppy_reversal")
+
+    return list(dict.fromkeys(conditions))
+
+
 def _baseline_family_map_for_market(market_scope: str) -> dict[str, list[str]]:
     market = market_scope.upper()
     mapping: dict[str, list[str]] = {}
@@ -2995,6 +3127,248 @@ def _snapshot_for_symbol(
     return snapshot
 
 
+def _candidate_evidence_adjustment(
+    proposal: StrategyProposal,
+    *,
+    preferred_families: set[str],
+) -> float:
+    if not isinstance(proposal.evidence_pack, dict):
+        return 0.0
+    quality_report = dict(proposal.evidence_pack.get("quality_report", {}) or {})
+    backtest_gate = dict(quality_report.get("backtest_gate", {}) or {})
+    metrics = dict(backtest_gate.get("metrics", {}) or {})
+    review = dict(backtest_gate.get("review", {}) or {})
+    families = {
+        str(item)
+        for item in list(quality_report.get("knowledge_families_used", []) or [])
+        if str(item).strip()
+    }
+    if preferred_families and not (families & preferred_families):
+        return -1.5
+
+    utility = metrics.get("utility_score")
+    utility_value = float(utility) if isinstance(utility, (int, float)) else None
+    hard_fails = [str(item) for item in list(review.get("hard_gates_failed", []) or [])]
+    fit = str(quality_report.get("knowledge_fit_assessment", "unknown") or "unknown")
+
+    adjustment = 0.0
+    if utility_value is not None:
+        adjustment += max(-12.0, min(6.0, utility_value * 2.5))
+        if utility_value <= -4.0:
+            adjustment -= 4.0
+        elif utility_value <= -2.0:
+            adjustment -= 2.0
+        elif utility_value >= 2.0:
+            adjustment += 1.5
+    if hard_fails:
+        adjustment -= 4.0
+    if fit == "mismatch":
+        adjustment -= 3.0
+    elif fit == "fragile":
+        adjustment -= 1.5
+    return adjustment
+
+
+def _light_mean_reversion_prescreen(
+    *,
+    symbol: str,
+    current_time: datetime,
+    initial_capital: float,
+) -> dict[str, object]:
+    lookback_years = 4
+    start_date = (current_time - timedelta(days=365 * lookback_years)).date().isoformat()
+    end_date = current_time.date().isoformat()
+    engine = BacktestEngine()
+    trial_params = (
+        {"z_window": 24, "entry_threshold": 1.5, "exit_threshold": 0.3, "use_short": False},
+        {"z_window": 24, "entry_threshold": 1.7, "exit_threshold": 0.4, "use_short": False},
+        {"z_window": 28, "entry_threshold": 1.6, "exit_threshold": 0.4, "use_short": False},
+        {"z_window": 36, "entry_threshold": 1.7, "exit_threshold": 0.3, "use_short": False},
+    )
+    best: dict[str, object] | None = None
+    best_score = float("-inf")
+    for params in trial_params:
+        strategy = MeanReversionStrategy(**params)
+        result = engine.run(
+            ticker=symbol,
+            strategy=strategy,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            is_first_live=False,
+        )
+        review = risk_gate_review(result)
+        utility = float(review.utility_score or 0.0)
+        score = utility
+        if review.hard_gates_failed:
+            score -= 6.0
+        if review.verdict == Verdict.REVISE:
+            score -= 1.0
+        if review.requires_human_approve:
+            score -= 0.5
+        if score > best_score:
+            best_score = score
+            best = {
+                "utility_score": utility,
+                "score": round(score, 2),
+                "verdict": review.verdict.value,
+                "requires_human_approve": review.requires_human_approve,
+                "hard_gates_failed": list(review.hard_gates_failed),
+                "params": params,
+                "metrics": {
+                    "cagr": round(float(result.cagr), 4),
+                    "sharpe": round(float(result.sharpe), 4),
+                    "max_drawdown": round(float(result.max_drawdown), 4),
+                    "annual_turnover": round(float(result.annual_turnover), 4),
+                    "data_years": round(float(result.data_years), 2),
+                },
+            }
+    return best or {
+        "utility_score": -999.0,
+        "score": -999.0,
+        "verdict": "NO_GO",
+        "requires_human_approve": False,
+        "hard_gates_failed": ["prescreen_no_result"],
+        "params": {},
+        "metrics": {},
+    }
+
+
+def _apply_light_prescreen_to_candidates(
+    candidates: list[dict[str, object]],
+    *,
+    snapshot: dict[str, object],
+    current_time: datetime,
+) -> list[dict[str, object]]:
+    if not candidates:
+        return candidates
+    market_profile = dict(snapshot.get("market_profile", {}) or {})
+    current_market_conditions = _current_market_conditions(snapshot)
+    preferred_families, _ = _effective_knowledge_preferences(market_profile, current_market_conditions)
+    if not _is_strong_ranging_context(current_market_conditions) or "mean_reversion" not in set(preferred_families):
+        return candidates
+
+    settings = get_settings()
+    prescreen_count = min(max(int(settings.universe.research_batch_size) * 2, 4), len(candidates))
+    rescored: list[dict[str, object]] = []
+    for index, candidate in enumerate(candidates):
+        enriched = dict(candidate)
+        if index < prescreen_count and bool(candidate.get("history_available", True)):
+            symbol = str(candidate.get("symbol", "")).strip()
+            if symbol:
+                try:
+                    prescreen = _light_mean_reversion_prescreen(
+                        symbol=symbol,
+                        current_time=current_time,
+                        initial_capital=float(settings.portfolio.default_capital),
+                    )
+                    prescreen_score = float(prescreen.get("score", 0.0) or 0.0)
+                    enriched["prescreen"] = prescreen
+                    enriched["prescreen_adjustment"] = round(max(-10.0, min(6.0, prescreen_score * 1.5)), 2)
+                except Exception as exc:
+                    enriched["prescreen"] = {"error": str(exc)}
+                    enriched["prescreen_adjustment"] = -1.0
+        rescored.append(enriched)
+    return rescored
+
+
+def _prescreen_guided_mean_reversion_params(
+    *,
+    symbol: str,
+    current_time: datetime,
+) -> dict[str, object] | None:
+    try:
+        prescreen = _light_mean_reversion_prescreen(
+            symbol=symbol,
+            current_time=current_time,
+            initial_capital=float(get_settings().portfolio.default_capital),
+        )
+    except Exception:
+        return None
+    params = dict(prescreen.get("params", {}) or {})
+    if not params:
+        return None
+    if float(prescreen.get("utility_score", -999.0) or -999.0) < 0.0:
+        return None
+    return params
+
+
+def _reprioritize_research_candidates(
+    db: Session,
+    *,
+    candidates: list[dict[str, object]],
+    snapshot: dict[str, object],
+    current_time: datetime,
+) -> list[dict[str, object]]:
+    if not candidates:
+        return candidates
+
+    market_profile = dict(snapshot.get("market_profile", {}) or {})
+    current_market_conditions = _current_market_conditions(snapshot)
+    preferred_families, _ = _effective_knowledge_preferences(market_profile, current_market_conditions)
+    preferred_set = set(preferred_families)
+    symbols = [str(item.get("symbol")) for item in candidates if str(item.get("symbol", "")).strip()]
+    if not symbols:
+        return candidates
+
+    cutoff = current_time - timedelta(days=7)
+    recent = list(
+        db.execute(
+            select(StrategyProposal)
+            .where(
+                StrategyProposal.symbol.in_(symbols),
+                StrategyProposal.source_kind == "minimax",
+                StrategyProposal.created_at >= cutoff,
+            )
+            .order_by(StrategyProposal.created_at.desc())
+        ).scalars()
+    )
+    proposal_map: dict[str, list[StrategyProposal]] = {}
+    for proposal in recent:
+        proposal_map.setdefault(proposal.symbol, []).append(proposal)
+
+    rescored = _apply_light_prescreen_to_candidates(
+        candidates,
+        snapshot=snapshot,
+        current_time=current_time,
+    )
+    enriched_candidates: list[dict[str, object]] = []
+    for candidate in rescored:
+        enriched = dict(candidate)
+        symbol = str(candidate.get("symbol", "")).strip()
+        evidence_adjustment = 0.0
+        if symbol:
+            proposals = proposal_map.get(symbol, [])
+            if proposals:
+                adjustments = [
+                    _candidate_evidence_adjustment(item, preferred_families=preferred_set)
+                    for item in proposals[:6]
+                ]
+                if adjustments:
+                    evidence_adjustment = round(sum(adjustments) / len(adjustments), 2)
+                    if len(adjustments) >= 2 and max(adjustments) < 0:
+                        evidence_adjustment -= 2.0
+        enriched["evidence_adjustment"] = round(evidence_adjustment, 2)
+        prescreen_adjustment = float(enriched.get("prescreen_adjustment", 0.0) or 0.0)
+        enriched["research_priority_score"] = round(
+            float(candidate.get("score", 0.0) or 0.0) + evidence_adjustment + prescreen_adjustment,
+            2,
+        )
+        enriched_candidates.append(enriched)
+
+    enriched_candidates.sort(
+        key=lambda item: (
+            float(item.get("research_priority_score", item.get("score", 0.0)) or 0.0),
+            float(item.get("score", 0.0) or 0.0),
+            float(item.get("turnover_millions", 0.0) or 0.0),
+        ),
+        reverse=True,
+    )
+    for index, candidate in enumerate(enriched_candidates, start=1):
+        candidate["research_rank"] = index
+    return enriched_candidates
+
+
 def _fallback_proposal_blueprints(symbol: str, provider_status) -> list[dict[str, object]]:
     return [
         {
@@ -3202,7 +3576,11 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
     market_profile = dict(snapshot['market_profile'])
     strategy_knowledge = _current_strategy_knowledge(str(digest.market_scope))
     external_candidate_knowledge = _external_knowledge_payload_for_market(db, str(digest.market_scope))
-    knowledge_preferences, knowledge_discouraged = _knowledge_preferences_for_market_profile(market_profile)
+    current_market_conditions = _current_market_conditions(snapshot)
+    knowledge_preferences, knowledge_discouraged = _effective_knowledge_preferences(
+        market_profile,
+        current_market_conditions,
+    )
     baseline_family_map = _baseline_family_map_for_market(str(digest.market_scope))
     baseline_strategies = [
         {
@@ -3220,6 +3598,20 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
         for item in db.execute(select(StrategySnapshot).order_by(StrategySnapshot.strategy_name.asc())).scalars()
         if (definition := get_strategy_registry().get(item.strategy_name)).supported_markets and str(digest.market_scope) in definition.supported_markets
     ]
+    baseline_strategies = _filter_baselines_for_market_context(
+        baseline_strategies,
+        preferred_families=knowledge_preferences,
+        discouraged_families=knowledge_discouraged,
+        current_market_conditions=current_market_conditions,
+    )
+    baseline_strategies = sorted(
+        baseline_strategies,
+        key=lambda item: _baseline_strategy_priority(
+            item,
+            preferred_families=knowledge_preferences,
+            discouraged_families=knowledge_discouraged,
+        ),
+    )
     payload = build_strategy_agent_payload(
         symbol=symbol,
         market_scope=str(digest.market_scope),
@@ -3237,6 +3629,7 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
         external_candidate_knowledge=external_candidate_knowledge,
         knowledge_preferences=knowledge_preferences,
         knowledge_discouraged=knowledge_discouraged,
+        current_market_conditions=current_market_conditions,
         baseline_family_map=baseline_family_map,
         hard_limits=['long_only', 'no_leverage', *list(market_profile.get('execution_constraints', []))],
     )
@@ -3258,6 +3651,18 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
         payload_extra={'source_kind': result.source_kind},
     )
     blueprints = _normalize_strategy_agent_blueprints(result.payload, provider_status=result.status, source_kind=result.source_kind)
+    blueprints = _stabilize_blueprints_for_market_context(
+        blueprints,
+        current_market_conditions=current_market_conditions,
+        symbol=str(snapshot['symbol']),
+        current_time=current_time,
+    )
+    blueprints = _prioritize_blueprints_for_market(
+        blueprints,
+        snapshot,
+        preferred_families=knowledge_preferences,
+        discouraged_families=knowledge_discouraged,
+    )
     if blueprints:
         return blueprints, result
     return _fallback_proposal_blueprints(symbol, result.status), result
@@ -3569,7 +3974,7 @@ def _numeric_param_outlier(param_priors: dict[str, dict[str, object]], params: d
 
 def _knowledge_assessment(blueprint: dict[str, object], snapshot: dict[str, object]) -> dict[str, object]:
     market_profile = dict(snapshot.get("market_profile", {}))
-    regime = str(snapshot.get("regime", "")).lower()
+    current_market_conditions = _current_market_conditions(snapshot)
     base_strategy = str(blueprint.get("base_strategy", ""))
     params = blueprint.get("params", {})
     params = params if isinstance(params, dict) else {}
@@ -3580,7 +3985,7 @@ def _knowledge_assessment(blueprint: dict[str, object], snapshot: dict[str, obje
         except ValueError:
             families = []
 
-    preferred, discouraged = _knowledge_preferences_for_market_profile(market_profile)
+    preferred, discouraged = _effective_knowledge_preferences(market_profile, current_market_conditions)
     family_entries = _knowledge_entries(families)
     failure_hits: list[str] = []
     risk_flags: list[str] = []
@@ -3591,10 +3996,12 @@ def _knowledge_assessment(blueprint: dict[str, object], snapshot: dict[str, obje
         param_outliers.extend(_numeric_param_outlier(dict(entry.get("parameter_priors", {}) or {}), params))
         discouraged_conditions = [str(item).lower() for item in list(entry.get("discouraged_market_conditions", []) or [])]
         preferred_conditions = [str(item).lower() for item in list(entry.get("preferred_market_conditions", []) or [])]
-        if regime in discouraged_conditions:
-            failure_hits.extend([f"{entry['family_key']}:{regime}"])
-        if regime in preferred_conditions:
-            fit_notes.append(f"{entry['label_zh']}适配当前 {regime} 环境")
+        matched_discouraged = [item for item in current_market_conditions if item in discouraged_conditions]
+        matched_preferred = [item for item in current_market_conditions if item in preferred_conditions]
+        for item in matched_discouraged:
+            failure_hits.append(f"{entry['family_key']}:{item}")
+        if matched_preferred:
+            fit_notes.append(f"{entry['label_zh']}适配当前 {', '.join(matched_preferred)} 环境")
 
     novelty_assessment = "distinct"
     baseline_delta_summary = str(blueprint.get("baseline_delta_summary", "")).strip()
@@ -3651,6 +4058,7 @@ def _knowledge_assessment(blueprint: dict[str, object], snapshot: dict[str, obje
         "param_outliers": sorted(set(param_outliers)),
         "preferred_families": preferred,
         "discouraged_families": discouraged,
+        "current_market_conditions": current_market_conditions,
     }
 
 
@@ -3666,6 +4074,120 @@ def _knowledge_penalty_score(assessment: dict[str, object]) -> float:
     if "knowledge_low_novelty" in blocked:
         penalty += 2.0
     return penalty
+
+
+def _blueprint_market_fit_rank(
+    blueprint: dict[str, object],
+    snapshot: dict[str, object],
+    preferred_families: list[str],
+    discouraged_families: list[str],
+) -> tuple[int, int, int, int]:
+    assessment = _knowledge_assessment(blueprint, snapshot)
+    fit_order = {
+        "aligned": 0,
+        "fragile": 1,
+        "mismatch": 2,
+    }
+    families = [str(item) for item in list(assessment.get("knowledge_families_used", []) or []) if str(item).strip()]
+    preferred_hits = sum(1 for item in families if item in preferred_families)
+    discouraged_hits = sum(1 for item in families if item in discouraged_families)
+    blocked_count = len(list(assessment.get("blocked_reasons", []) or []))
+    return (
+        fit_order.get(str(assessment.get("knowledge_fit_assessment", "mismatch")), 3),
+        discouraged_hits,
+        blocked_count,
+        -preferred_hits,
+    )
+
+
+def _prioritize_blueprints_for_market(
+    blueprints: list[dict[str, object]],
+    snapshot: dict[str, object],
+    preferred_families: list[str],
+    discouraged_families: list[str],
+) -> list[dict[str, object]]:
+    if len(blueprints) <= 1:
+        return blueprints
+    return sorted(
+        blueprints,
+        key=lambda item: _blueprint_market_fit_rank(
+            item,
+            snapshot,
+            preferred_families=preferred_families,
+            discouraged_families=discouraged_families,
+        ),
+    )
+
+
+def _baseline_strategy_priority(
+    baseline: dict[str, object],
+    preferred_families: list[str],
+    discouraged_families: list[str],
+) -> tuple[int, int]:
+    families = [str(item) for item in list(baseline.get("knowledge_families", []) or []) if str(item).strip()]
+    preferred_hits = sum(1 for item in families if item in preferred_families)
+    discouraged_hits = sum(1 for item in families if item in discouraged_families)
+    return (discouraged_hits, -preferred_hits)
+
+
+def _is_strong_ranging_context(current_market_conditions: list[str]) -> bool:
+    conditions = set(str(item) for item in current_market_conditions if str(item).strip())
+    return {"range_bound", "low_conviction"} <= conditions and "choppy_reversal" in conditions
+
+
+def _filter_baselines_for_market_context(
+    baseline_strategies: list[dict[str, object]],
+    *,
+    preferred_families: list[str],
+    discouraged_families: list[str],
+    current_market_conditions: list[str],
+) -> list[dict[str, object]]:
+    if not _is_strong_ranging_context(current_market_conditions):
+        return baseline_strategies
+
+    preferred_set = set(preferred_families)
+    discouraged_set = set(discouraged_families)
+    filtered: list[dict[str, object]] = []
+    for item in baseline_strategies:
+        families = {str(family) for family in list(item.get("knowledge_families", []) or []) if str(family).strip()}
+        if not families:
+            continue
+        preferred_hits = len(families & preferred_set)
+        discouraged_hits = len(families & discouraged_set)
+        if preferred_hits > 0 and discouraged_hits == 0:
+            filtered.append(item)
+    return filtered or baseline_strategies
+
+
+def _stabilize_blueprints_for_market_context(
+    blueprints: list[dict[str, object]],
+    *,
+    current_market_conditions: list[str],
+    symbol: str,
+    current_time: datetime,
+) -> list[dict[str, object]]:
+    if not _is_strong_ranging_context(current_market_conditions):
+        return blueprints
+
+    guided_params = _prescreen_guided_mean_reversion_params(symbol=symbol, current_time=current_time)
+    stabilized: list[dict[str, object]] = []
+    for item in blueprints:
+        updated = dict(item)
+        params = dict(updated.get("params", {}) or {})
+        if str(updated.get("base_strategy")) == "mean_reversion":
+            default_z_window = int(guided_params.get("z_window", 24) if isinstance(guided_params, dict) else 24)
+            default_entry = float(guided_params.get("entry_threshold", 1.7) if isinstance(guided_params, dict) else 1.7)
+            default_exit = float(guided_params.get("exit_threshold", 0.4) if isinstance(guided_params, dict) else 0.4)
+            z_window = int(params.get("z_window", default_z_window) or default_z_window)
+            entry_threshold = float(params.get("entry_threshold", default_entry) or default_entry)
+            exit_threshold = float(params.get("exit_threshold", default_exit) or default_exit)
+            params["z_window"] = max(24, min(28, z_window if guided_params is None else default_z_window))
+            params["entry_threshold"] = round(max(1.6, min(1.8, entry_threshold if guided_params is None else default_entry)), 2)
+            params["exit_threshold"] = round(max(0.2, min(0.6, exit_threshold if guided_params is None else default_exit)), 2)
+            params["use_short"] = False
+            updated["params"] = params
+        stabilized.append(updated)
+    return stabilized
 
 
 def _fallback_debate_report(blueprint: dict[str, object], digest: DailyEventDigest) -> dict[str, object]:
@@ -3708,6 +4230,7 @@ def run_research_debate(db: Session, blueprint: dict[str, object], snapshot: dic
             'price_context': snapshot['price_context'],
         },
         market_profile=dict(snapshot['market_profile']),
+        current_market_conditions=knowledge_assessment['current_market_conditions'],
         event_digest={
             'macro_summary': digest.macro_summary,
             'event_scores': digest.event_scores,
@@ -3716,6 +4239,7 @@ def run_research_debate(db: Session, blueprint: dict[str, object], snapshot: dic
             'families_used': knowledge_assessment['knowledge_families_used'],
             'fit_assessment': knowledge_assessment['knowledge_fit_assessment'],
             'failure_mode_hits': knowledge_assessment['knowledge_failure_mode_hits'],
+            'fit_notes': knowledge_assessment['fit_notes'],
             'baseline_delta_summary': knowledge_assessment['baseline_delta_summary'],
             'novelty_claim': knowledge_assessment['novelty_claim'],
             'external_candidate_knowledge': external_knowledge,
@@ -5201,6 +5725,7 @@ def archive_out_of_scope_strategy_proposals(
         db.execute(
             select(StrategyProposal).where(
                 StrategyProposal.status != ProposalStatus.ARCHIVED,
+                StrategyProposal.status != ProposalStatus.ACTIVE,
                 (StrategyProposal.symbol != active_symbol) | (StrategyProposal.market_scope != active_market_scope),
             )
         ).scalars()
@@ -5383,6 +5908,12 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
             digest: DailyEventDigest = snapshot["event_digest"]  # type: ignore[assignment]
             market_scope = str(digest.market_scope)
             universe_candidates = list(dict(universe_selection).get("candidates", []) or [])
+            universe_candidates = _reprioritize_research_candidates(
+                db,
+                candidates=universe_candidates,
+                snapshot=snapshot,
+                current_time=current_time,
+            )
             research_symbols = [
                 str(item.get("symbol"))
                 for item in universe_candidates[:research_batch_size]
@@ -5421,13 +5952,13 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 created_at=current_time,
             )
             db.commit()
+            previous_active = get_active_strategy(db)
             archive_out_of_scope_strategy_proposals(
                 db,
-                active_symbol=research_symbols[0],
+                active_symbol=previous_active.symbol if previous_active is not None else research_symbols[0],
                 active_market_scope=market_scope,
                 archived_at=current_time,
             )
-            previous_active = get_active_strategy(db)
             existing_open_count = db.execute(
                 select(func.count())
                 .select_from(StrategyProposal)
@@ -5440,7 +5971,11 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 else:
                     archive_strategy_proposals(db, archived_at=current_time)
             elif existing_open_count > 0 and previous_active is None:
-                archive_strategy_proposals(db, archived_at=current_time)
+                recovered_active = recover_active_strategy(db, current_time=current_time)
+                if recovered_active is not None:
+                    previous_active = recovered_active
+                else:
+                    archive_strategy_proposals(db, archived_at=current_time)
             elif existing_open_count > 0 and previous_active is not None:
                 _set_pipeline_runtime_stage(
                     db,
@@ -6012,6 +6547,27 @@ def get_active_strategy(db: Session) -> StrategyProposal | None:
     if hydrated is None:
         return None
     return _attach_quality_track_record(db, [hydrated])[0]
+
+
+def recover_active_strategy(db: Session, *, current_time: datetime) -> StrategyProposal | None:
+    candidate = (
+        db.execute(
+            select(StrategyProposal)
+            .options(selectinload(StrategyProposal.decisions))
+            .where(
+                StrategyProposal.source_kind != 'mock',
+                StrategyProposal.promoted_at.is_not(None),
+            )
+            .order_by(StrategyProposal.promoted_at.desc(), StrategyProposal.created_at.desc())
+        ).scalars().first()
+    )
+    if candidate is None:
+        return None
+    candidate.status = ProposalStatus.ACTIVE
+    candidate.archived_at = None
+    candidate.updated_at = current_time
+    db.flush()
+    return get_active_strategy(db)
 
 
 def list_candidate_strategies(db: Session) -> list[StrategyProposal]:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import math
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from ..config import get_settings
 from .symbols import normalize_symbol
 
 
@@ -28,6 +31,62 @@ def _to_float(value: Any) -> float | None:
 
 def _bounded(value: float, *, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
+
+
+_HISTORY_FAILURE_TTL_HOURS = 12
+_HISTORY_FAILURE_CACHE_LIMIT = 512
+_MAX_HISTORY_ENRICH_CANDIDATES = 12
+
+
+def _history_failure_cache_path() -> Path:
+    cache_path = Path(get_settings().storage.market_cache_path)
+    return cache_path.parent / "hk_history_failures.json"
+
+
+def _load_history_failure_memory() -> dict[str, str]:
+    path = _history_failure_cache_path()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {str(key): str(value) for key, value in payload.items() if str(key).strip() and str(value).strip()}
+
+
+def _save_history_failure_memory(payload: dict[str, str]) -> None:
+    path = _history_failure_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    trimmed = dict(sorted(payload.items(), key=lambda item: item[1], reverse=True)[:_HISTORY_FAILURE_CACHE_LIMIT])
+    path.write_text(json.dumps(trimmed, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _prune_history_failure_memory(payload: dict[str, str]) -> dict[str, str]:
+    if not payload:
+        return {}
+    cutoff = datetime.now() - timedelta(hours=_HISTORY_FAILURE_TTL_HOURS)
+    kept: dict[str, str] = {}
+    for symbol, failed_at in payload.items():
+        try:
+            failed_dt = datetime.fromisoformat(str(failed_at))
+        except ValueError:
+            continue
+        if failed_dt >= cutoff:
+            kept[symbol] = failed_dt.isoformat()
+    return kept
+
+
+def _has_recent_history_failure(memory: dict[str, str], symbol: str) -> bool:
+    failed_at = memory.get(symbol)
+    if not failed_at:
+        return False
+    try:
+        failed_dt = datetime.fromisoformat(str(failed_at))
+    except ValueError:
+        return False
+    return failed_dt >= datetime.now() - timedelta(hours=_HISTORY_FAILURE_TTL_HOURS)
 
 
 def _reason_tags(*, turnover_millions: float, change_pct: float, amplitude_pct: float | None, latest_price: float) -> list[str]:
@@ -151,6 +210,7 @@ def _fetch_akshare_market_frame() -> pd.DataFrame:
 def _apply_history_signals(candidate: dict[str, object], history: pd.DataFrame) -> None:
     factor_scores = dict(candidate.get("factor_scores", {}) or {})
     reason_tags = list(candidate.get("reason_tags", []) or [])
+    candidate["history_available"] = False
 
     if history is None or history.empty or "close" not in history.columns:
         factor_scores["history_quality"] = -10.0
@@ -168,6 +228,7 @@ def _apply_history_signals(candidate: dict[str, object], history: pd.DataFrame) 
         candidate["score"] = round(float(candidate.get("score", 0.0) or 0.0) - 8.0, 2)
         return
 
+    candidate["history_available"] = True
     latest_close = float(closes.iloc[-1])
     return_20d = ((latest_close / float(closes.iloc[-21])) - 1.0) * 100 if len(closes) >= 21 else None
     return_60d = ((latest_close / float(closes.iloc[-61])) - 1.0) * 100 if len(closes) >= 61 else None
@@ -211,12 +272,14 @@ def _apply_history_signals(candidate: dict[str, object], history: pd.DataFrame) 
 
     drawdown_score = 0.0
     drawdown_reference = max_drawdown_250d if max_drawdown_250d is not None else max_drawdown_120d
+    candidate["drawdown_flagged"] = False
     if drawdown_reference is not None:
         if drawdown_reference <= 12.0:
             reason_tags.append("resilient_drawdown_profile")
             drawdown_score += 8.0
         elif drawdown_reference >= 22.0:
             reason_tags.append("historical_drawdown_risk")
+            candidate["drawdown_flagged"] = True
             drawdown_score -= _bounded((drawdown_reference - 22.0) * 0.9, lower=14.0, upper=24.0)
         elif drawdown_reference >= 16.0:
             reason_tags.append("elevated_drawdown_profile")
@@ -384,23 +447,71 @@ def fetch_hk_universe_candidates(
 
     candidates.sort(key=lambda item: (float(item["score"]), float(item["turnover_millions"])), reverse=True)
 
-    enrich_limit = min(max(top_n * 2, 8), len(candidates))
+    research_batch_size = max(1, int(get_settings().universe.research_batch_size))
+    enrich_limit = min(
+        max(research_batch_size * 3, 8),
+        min(_MAX_HISTORY_ENRICH_CANDIDATES, len(candidates)),
+    )
     if enrich_limit > 0:
         from .source_manager import get_source_manager
 
         source_manager = get_source_manager()
         history_start = (datetime.now() - timedelta(days=420)).date().isoformat()
         history_end = datetime.now().date().isoformat()
+        history_failure_memory = _prune_history_failure_memory(_load_history_failure_memory())
+        history_failure_dirty = False
         for candidate in candidates[:enrich_limit]:
+            symbol = str(candidate["symbol"])
+            if _has_recent_history_failure(history_failure_memory, symbol):
+                factor_scores = dict(candidate.get("factor_scores", {}) or {})
+                factor_scores["history_fetch_penalty"] = -12.0
+                candidate["factor_scores"] = factor_scores
+                reason_tags = list(candidate.get("reason_tags", []) or [])
+                reason_tags.extend(["history_gap_penalty", "recent_history_source_failure"])
+                candidate["reason_tags"] = list(dict.fromkeys(reason_tags))
+                candidate["score"] = round(float(candidate.get("score", 0.0) or 0.0) - 12.0, 2)
+                candidate["selection_reason"] = _selection_reason(list(candidate.get("reason_tags", [])))
+                continue
             try:
-                history = source_manager.fetch_ohlcv(str(candidate["symbol"]), history_start, history_end)
+                history = source_manager.fetch_ohlcv(symbol, history_start, history_end)
             except Exception:
                 history = None
+            if history is None or history.empty:
+                history_failure_memory[symbol] = datetime.now().isoformat()
+                history_failure_dirty = True
+            elif symbol in history_failure_memory:
+                history_failure_memory.pop(symbol, None)
+                history_failure_dirty = True
             _apply_history_signals(candidate, history if history is not None else pd.DataFrame())
             candidate["selection_reason"] = _selection_reason(list(candidate.get("reason_tags", [])))
+        if history_failure_dirty:
+            _save_history_failure_memory(_prune_history_failure_memory(history_failure_memory))
 
-    candidates.sort(key=lambda item: (float(item["score"]), float(item["turnover_millions"])), reverse=True)
-    ranked = candidates[: max(1, top_n)]
+    candidates.sort(
+        key=lambda item: (
+            bool(item.get("history_available", False)),
+            not bool(item.get("drawdown_flagged", False)),
+            float(item["score"]),
+            float(item["turnover_millions"]),
+        ),
+        reverse=True,
+    )
+    history_confirmed = [
+        item
+        for item in candidates
+        if bool(item.get("history_available", False)) and not bool(item.get("drawdown_flagged", False))
+    ]
+    history_flagged = [
+        item
+        for item in candidates
+        if bool(item.get("history_available", False)) and bool(item.get("drawdown_flagged", False))
+    ]
+    fallback_pool = [item for item in candidates if not bool(item.get("history_available", False))]
+    ranked = (
+        history_confirmed[: max(1, top_n)]
+        + history_flagged[: max(0, top_n - len(history_confirmed[: max(1, top_n)]))]
+        + fallback_pool[: max(0, top_n - len(history_confirmed[: max(1, top_n)]) - len(history_flagged[: max(0, top_n - len(history_confirmed[: max(1, top_n)]))]))]
+    )[: max(1, top_n)]
     for index, candidate in enumerate(ranked, start=1):
         candidate["rank"] = index
     return ranked

@@ -453,21 +453,40 @@ def _governance_block(report: dict[str, object] | None, key: str) -> dict[str, o
     return dict(value) if isinstance(value, dict) else {}
 
 
-def _paper_summary(paper_raw: dict[str, object], latest_execution: dict[str, object] | None) -> PaperSummaryDTO:
+def _paper_summary(
+    paper_raw: dict[str, object],
+    latest_execution: dict[str, object] | None,
+    *,
+    active_symbol: str | None,
+) -> PaperSummaryDTO:
     nav_rows = list(paper_raw.get("nav", []) or [])
     positions = list(paper_raw.get("positions", []) or [])
     latest_equity = None
     latest_nav_change = None
+    latest_execution_status = str(latest_execution.get("status")) if latest_execution else None
+    latest_execution_explanation = str(latest_execution.get("explanation")) if latest_execution else None
     if nav_rows:
         latest_equity = float(nav_rows[0].get("total_equity", 0.0) or 0.0)
         if len(nav_rows) >= 2:
             previous_equity = float(nav_rows[1].get("total_equity", 0.0) or 0.0)
             latest_nav_change = round(latest_equity - previous_equity, 2)
+    held_symbols = {
+        str(item.get("symbol"))
+        for item in positions
+        if str(item.get("symbol", "")).strip() and int(item.get("quantity", 0) or 0) > 0
+    }
+    if active_symbol and held_symbols and active_symbol not in held_symbols:
+        latest_execution_status = "pending_rebalance"
+        held = ", ".join(sorted(held_symbols))
+        latest_execution_explanation = (
+            f"Active strategy has switched to {active_symbol}, but paper holdings still contain {held}. "
+            "The portfolio is waiting for the next trading session to rebalance."
+        )
     return PaperSummaryDTO(
         total_equity=latest_equity,
         position_count=len(positions),
-        latest_execution_status=str(latest_execution.get("status")) if latest_execution else None,
-        latest_execution_explanation=str(latest_execution.get("explanation")) if latest_execution else None,
+        latest_execution_status=latest_execution_status,
+        latest_execution_explanation=latest_execution_explanation,
         latest_nav_change=latest_nav_change,
     )
 
@@ -613,7 +632,7 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
     live_readiness_history = build_live_readiness_history(db, limit=8)
     live_readiness_change = build_live_readiness_change(db, live_readiness_history)
     slot_focus = _resolve_slot_focus(db, active=active, runtime_status=runtime_status, live_readiness=live_readiness)
-    paper_summary = _paper_summary(paper_raw, latest_execution_payload)
+    paper_summary = _paper_summary(paper_raw, latest_execution_payload, active_symbol=active.symbol if active else None)
     return CommandCenterDTO(
         generated_at=now_tz(),
         timezone="Asia/Shanghai",

@@ -32,6 +32,7 @@ def build_research_debate_payload(
     market_snapshot: dict[str, Any],
     event_digest: dict[str, Any],
     market_profile: dict[str, Any],
+    current_market_conditions: list[str],
     knowledge_context: dict[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -42,6 +43,7 @@ def build_research_debate_payload(
         'market_snapshot': market_snapshot,
         'market_profile': market_profile,
         'event_digest': event_digest,
+        'current_market_conditions': current_market_conditions,
         'knowledge_context': knowledge_context,
         'output_schema': {
             'stance_for': ['string'],

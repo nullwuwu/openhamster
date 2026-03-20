@@ -20,6 +20,9 @@ def strategy_agent_system_prompt() -> str:
         'Baseline strategies are priors, not hard limits. If none fit directly, use novel_composite as the anchor strategy label. '
         'Only emit params that are explicitly listed in allowed_params for the chosen base_strategy. '
         'Do not invent unsupported knobs, hidden risk controls, or extra indicators that the executor cannot run. '
+        'Start from current_market_conditions, knowledge_preferences, and discouraged families before drafting any proposal. '
+        'If preferred families are supplied, at least one proposal should come directly from a preferred family unless no executable baseline exists. '
+        'Do not emit a discouraged family unless the market snapshot shows a clear exception and the thesis explains that exception in Chinese. '
         'Prefer simple, defensive variants with lower turnover, longer holding periods, and drawdown control over complex feature stacking. '
         'If market_snapshot.regime is RANGING, low-conviction, or sideways, do not default to breakout ideas. '
         'In those environments prefer mean_reversion, or defensive ma_cross/macd variants with longer windows and lower turnover. '
@@ -27,7 +30,10 @@ def strategy_agent_system_prompt() -> str:
         'For ma_cross in fragile or ranging markets, prefer short_window around 8-15 and long_window around 30-60. '
         'For macd in fragile or ranging markets, prefer slower settings over aggressive fast-turnover settings. '
         'For mean_reversion, prefer moderate thresholds and stable holding behavior instead of rapid oscillation. '
+        'For mean_reversion in strong ranging markets, prefer z_window around 24-40, entry_threshold around 1.4-1.9, exit_threshold around 0.2-0.6, and keep use_short false. '
         'Avoid proposals that are likely to produce negative CAGR, negative Sharpe, or drawdown near the hard gate. '
+        'When current_market_conditions include range_bound, low_conviction, or choppy_reversal, trend_following and breakout require extra caution; prefer defensive trend filters or mean reversion first. '
+        'If a proposal uses trend_following in a fragile market, make it slower and explicitly state the defensive adaptation in baseline_delta_summary. '
         'If a proposal is only a mild parameter change from a baseline, say so explicitly in baseline_delta_summary and novelty_claim.'
     )
 
@@ -44,6 +50,7 @@ def build_strategy_agent_payload(
     external_candidate_knowledge: list[dict[str, Any]],
     knowledge_preferences: list[str],
     knowledge_discouraged: list[str],
+    current_market_conditions: list[str],
     baseline_family_map: dict[str, list[str]],
     hard_limits: list[str],
 ) -> dict[str, Any]:
@@ -63,6 +70,12 @@ def build_strategy_agent_payload(
         'external_candidate_knowledge': external_candidate_knowledge,
         'knowledge_preferences': knowledge_preferences,
         'knowledge_discouraged': knowledge_discouraged,
+        'current_market_conditions': current_market_conditions,
+        'family_priority': {
+            'preferred': knowledge_preferences,
+            'discouraged': knowledge_discouraged,
+            'market_conditions': current_market_conditions,
+        },
         'baseline_family_map': baseline_family_map,
         'output_schema': {
             'proposals': [

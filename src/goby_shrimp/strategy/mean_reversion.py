@@ -111,6 +111,59 @@ class MeanReversionStrategy:
         
         return int(crossover_count)
 
+    def calculate_param_sensitivity(
+        self,
+        data: pd.DataFrame,
+        perturb_pct: float = 0.10,
+    ) -> float:
+        """
+        通过小幅扰动参数后比较信号差异，估计参数敏感性。
+        0 表示较稳，1 表示对参数非常敏感。
+        """
+        base_signals = self.generate_signals(data).fillna(0)
+        if base_signals.empty:
+            return 0.0
+
+        trial_params = [
+            {
+                "z_window": max(5, int(round(self.z_window * (1.0 - perturb_pct)))),
+                "entry_threshold": max(0.5, self.entry_threshold * (1.0 - perturb_pct)),
+                "exit_threshold": max(0.05, self.exit_threshold * (1.0 - perturb_pct)),
+                "use_short": self.use_short,
+            },
+            {
+                "z_window": max(5, int(round(self.z_window * (1.0 + perturb_pct)))),
+                "entry_threshold": max(0.5, self.entry_threshold * (1.0 + perturb_pct)),
+                "exit_threshold": max(0.05, self.exit_threshold * (1.0 + perturb_pct)),
+                "use_short": self.use_short,
+            },
+            {
+                "z_window": self.z_window,
+                "entry_threshold": max(0.5, self.entry_threshold * (1.0 + perturb_pct)),
+                "exit_threshold": max(0.05, self.exit_threshold * (1.0 - perturb_pct)),
+                "use_short": self.use_short,
+            },
+        ]
+
+        diffs: list[float] = []
+        for params in trial_params:
+            if params["exit_threshold"] >= params["entry_threshold"]:
+                continue
+            trial = MeanReversionStrategy(**params)
+            try:
+                trial_signals = trial.generate_signals(data).fillna(0)
+            except Exception:
+                continue
+            aligned = base_signals.align(trial_signals, join="inner")[0]
+            compared = trial_signals.reindex(aligned.index).fillna(0)
+            if aligned.empty:
+                continue
+            diffs.append(float((aligned != compared).mean()))
+
+        if not diffs:
+            return 0.0
+        return float(np.clip(np.mean(diffs), 0.0, 1.0))
+
 
 def create_mean_reversion_strategy(
     z_window: int = 20,
