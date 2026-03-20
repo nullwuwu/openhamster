@@ -531,6 +531,8 @@ def _resolve_slot_focus(
     active: StrategyProposal | None,
     runtime_status: dict[str, object],
     live_readiness: dict[str, object],
+    latest_execution: dict[str, object] | None = None,
+    paper_raw: dict[str, object] | None = None,
 ) -> SlotFocusDTO:
     focus_proposal = active
     mode = "active" if active is not None else "empty"
@@ -590,7 +592,21 @@ def _resolve_slot_focus(
     elif live_readiness.get("blockers"):
         primary_blocker = str(list(live_readiness.get("blockers", []) or [])[0])
     next_step = None
-    if lifecycle.get("next_step") is not None:
+    held_symbols = {
+        str(item.get("symbol"))
+        for item in list((paper_raw or {}).get("positions", []) or [])
+        if str(item.get("symbol", "")).strip() and int(item.get("quantity", 0) or 0) > 0
+    }
+    if (
+        mode == "active"
+        and focus_proposal is not None
+        and held_symbols
+        and focus_proposal.symbol not in held_symbols
+    ):
+        next_step = "wait_for_market_rebalance"
+    elif latest_execution is not None and str(latest_execution.get("status") or "") == "skipped":
+        next_step = "wait_for_trading_session"
+    elif lifecycle.get("next_step") is not None:
         next_step = str(lifecycle.get("next_step"))
     elif live_readiness.get("next_actions"):
         next_step = str(list(live_readiness.get("next_actions", []) or [])[0])
@@ -631,7 +647,14 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
     live_readiness = build_live_readiness(db)
     live_readiness_history = build_live_readiness_history(db, limit=8)
     live_readiness_change = build_live_readiness_change(db, live_readiness_history)
-    slot_focus = _resolve_slot_focus(db, active=active, runtime_status=runtime_status, live_readiness=live_readiness)
+    slot_focus = _resolve_slot_focus(
+        db,
+        active=active,
+        runtime_status=runtime_status,
+        live_readiness=live_readiness,
+        latest_execution=latest_execution_payload,
+        paper_raw=paper_raw,
+    )
     paper_summary = _paper_summary(paper_raw, latest_execution_payload, active_symbol=active.symbol if active else None)
     return CommandCenterDTO(
         generated_at=now_tz(),

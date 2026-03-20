@@ -463,6 +463,7 @@ def fetch_hk_universe_candidates(
         for candidate in candidates[:enrich_limit]:
             symbol = str(candidate["symbol"])
             if _has_recent_history_failure(history_failure_memory, symbol):
+                candidate["recent_history_failure"] = True
                 factor_scores = dict(candidate.get("factor_scores", {}) or {})
                 factor_scores["history_fetch_penalty"] = -12.0
                 candidate["factor_scores"] = factor_scores
@@ -477,11 +478,15 @@ def fetch_hk_universe_candidates(
             except Exception:
                 history = None
             if history is None or history.empty:
+                candidate["recent_history_failure"] = True
                 history_failure_memory[symbol] = datetime.now().isoformat()
                 history_failure_dirty = True
             elif symbol in history_failure_memory:
+                candidate["recent_history_failure"] = False
                 history_failure_memory.pop(symbol, None)
                 history_failure_dirty = True
+            else:
+                candidate["recent_history_failure"] = False
             _apply_history_signals(candidate, history if history is not None else pd.DataFrame())
             candidate["selection_reason"] = _selection_reason(list(candidate.get("reason_tags", [])))
         if history_failure_dirty:
@@ -506,11 +511,21 @@ def fetch_hk_universe_candidates(
         for item in candidates
         if bool(item.get("history_available", False)) and bool(item.get("drawdown_flagged", False))
     ]
-    fallback_pool = [item for item in candidates if not bool(item.get("history_available", False))]
+    fallback_pool = [
+        item
+        for item in candidates
+        if not bool(item.get("history_available", False)) and not bool(item.get("recent_history_failure", False))
+    ]
+    recent_failure_pool = [
+        item
+        for item in candidates
+        if not bool(item.get("history_available", False)) and bool(item.get("recent_history_failure", False))
+    ]
     ranked = (
         history_confirmed[: max(1, top_n)]
         + history_flagged[: max(0, top_n - len(history_confirmed[: max(1, top_n)]))]
         + fallback_pool[: max(0, top_n - len(history_confirmed[: max(1, top_n)]) - len(history_flagged[: max(0, top_n - len(history_confirmed[: max(1, top_n)]))]))]
+        + recent_failure_pool[: max(0, top_n)]
     )[: max(1, top_n)]
     for index, candidate in enumerate(ranked, start=1):
         candidate["rank"] = index

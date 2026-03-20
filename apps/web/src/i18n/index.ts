@@ -243,6 +243,8 @@ const messages = {
       governanceNextStep: {
         promote_now: '立即晋级模拟盘',
         wait_for_cooldown: '等待冷却期结束',
+        wait_for_market_rebalance: '等待下个交易时段完成换仓',
+        wait_for_trading_session: '等待市场进入交易时段',
         monitor_candidate: '继续观察候选表现',
         improve_quality: '提升质量后再挑战',
         resume_after_revalidation: '重新验证后再恢复',
@@ -1003,6 +1005,8 @@ const messages = {
       governanceNextStep: {
         promote_now: 'Promote Now',
         wait_for_cooldown: 'Wait for Cooldown',
+        wait_for_market_rebalance: 'Wait for Market Rebalance',
+        wait_for_trading_session: 'Wait for Trading Session',
         monitor_candidate: 'Monitor Candidate',
         improve_quality: 'Improve Quality First',
         resume_after_revalidation: 'Resume After Revalidation',

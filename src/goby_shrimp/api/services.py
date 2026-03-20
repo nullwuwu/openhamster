@@ -6566,6 +6566,19 @@ def recover_active_strategy(db: Session, *, current_time: datetime) -> StrategyP
     candidate.status = ProposalStatus.ACTIVE
     candidate.archived_at = None
     candidate.updated_at = current_time
+    _record_system_audit(
+        db,
+        event_type='active_strategy_recovered',
+        entity_type='strategy_proposal',
+        entity_id=candidate.id,
+        payload={
+            'symbol': candidate.symbol,
+            'title': candidate.title,
+            'promoted_at': candidate.promoted_at.isoformat() if candidate.promoted_at is not None else None,
+            'recovered_at': current_time.isoformat(),
+        },
+        created_at=current_time,
+    )
     db.flush()
     return get_active_strategy(db)
 
