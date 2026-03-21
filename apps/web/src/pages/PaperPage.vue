@@ -24,7 +24,15 @@ const activeStrategyQuery = useQuery({
   refetchInterval: 10_000,
 })
 
+const paperSlotsQuery = useQuery({
+  queryKey: ['paper-slots'],
+  queryFn: api.getPaperSlots,
+  refetchInterval: 10_000,
+})
+
 const active = computed(() => activeStrategyQuery.data.value)
+const paperSlots = computed(() => paperSlotsQuery.data.value ?? [])
+const challengerSlots = computed(() => paperSlots.value.filter((item) => item.slot_id !== 'primary'))
 const navRows = computed(() => active.value?.paper_trading.nav ?? [])
 const orders = computed(() => active.value?.paper_trading.orders ?? [])
 const positions = computed(() => active.value?.paper_trading.positions ?? [])
@@ -329,6 +337,36 @@ function actionVariant(action?: string): 'neutral' | 'success' | 'warning' | 'da
     <Card class="border border-slate-200/80 bg-slate-50/70">
       <p class="text-sm font-semibold text-slate-900">{{ t('paper.tradingCalendarTitle') }}</p>
       <p class="mt-1 text-sm text-slate-600">{{ t('paper.tradingCalendarBody') }}</p>
+    </Card>
+
+    <Card class="border border-sky-200/80 bg-sky-50/70">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="text-xs uppercase tracking-[0.18em] text-sky-700">Paper Pool</p>
+          <p class="mt-2 text-sm text-slate-700">主席位继续单独展示，下面这组 challenger 席位用于并行积累模拟盘证据。</p>
+        </div>
+        <Badge variant="neutral">{{ challengerSlots.length }} Challenger</Badge>
+      </div>
+      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div
+          v-for="slot in challengerSlots"
+          :key="slot.slot_id"
+          class="rounded-xl border border-sky-200/80 bg-white px-4 py-4"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs uppercase tracking-widest text-sky-700">{{ slot.slot_id }}</p>
+            <Badge :variant="slot.proposal ? 'warning' : 'neutral'">{{ slot.status }}</Badge>
+          </div>
+          <p class="mt-2 text-sm font-semibold text-slate-900">{{ slot.proposal?.title ?? '空席位' }}</p>
+          <p class="mt-1 text-sm text-slate-600">{{ slot.proposal?.symbol ?? '等待候选策略入池' }}</p>
+          <p class="mt-3 text-sm text-slate-700">
+            权益 {{ formatCurrency(slot.paper_summary.total_equity) }} · 回撤 {{ formatPercent(slot.paper_pool_evidence.drawdown) }}
+          </p>
+          <p class="mt-1 text-sm text-slate-700">
+            Fill rate {{ formatPercent(slot.paper_pool_evidence.fill_rate) }} · 执行 {{ slot.paper_summary.latest_execution_status ?? '--' }}
+          </p>
+        </div>
+      </div>
     </Card>
 
     <div class="grid gap-4 xl:grid-cols-[1.5fr,1fr]">

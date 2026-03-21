@@ -245,6 +245,9 @@ def test_command_center_includes_llm_status() -> None:
         assert data['latest_event_digest']['market_scope'] == data['market_snapshot']['event_digest']['market_scope']
         assert data['latest_event_digest']['symbol_scope'] == data['market_snapshot']['event_digest']['symbol_scope']
         assert 'operational_acceptance' in data['active_strategy']
+        assert 'paper_pool_summary' in data
+        assert 'paper_pool' in data
+        assert 'slots' in data['paper_pool']
         if data['active_strategy']['proposal'] is not None:
             assert 'latest_execution' in data['active_strategy']['paper_trading']
             latest_execution = data['active_strategy']['paper_trading']['latest_execution']
@@ -296,6 +299,10 @@ def test_research_proposals_include_pool_ranking() -> None:
         assert 'trend' in track_record
         assert 'stable_streak' in track_record
         assert 'baseline_delta_summary' in ranked['evidence_pack']['quality_report']
+        assert 'rule_stack_complexity' in ranked['evidence_pack']['quality_report']
+        assert 'capacity_assumption_clarity' in ranked['evidence_pack']['quality_report']
+        assert 'regime_dependency_strength' in ranked['evidence_pack']['quality_report']
+        assert 'knowledge_blocked_reasons' in ranked['evidence_pack']['quality_report']
         assert 'novelty_assessment' in ranked['evidence_pack']['quality_report']['verdict']
 
 
@@ -342,7 +349,23 @@ def test_strategy_payloads_include_knowledge_fields() -> None:
         quality_report = proposals[0]['evidence_pack']['quality_report']
         assert 'knowledge_families_used' in quality_report
         assert 'baseline_delta_summary' in quality_report
+        assert 'rule_stack_complexity' in quality_report
+        assert 'capacity_assumption_clarity' in quality_report
+        assert 'regime_dependency_strength' in quality_report
+        assert 'knowledge_blocked_reasons' in quality_report
         assert 'novelty_assessment' in quality_report['verdict']
+
+
+def test_paper_slots_endpoint() -> None:
+    with TestClient(app) as client:
+        response = client.get('/api/v1/paper/slots')
+        assert response.status_code == 200
+        data = response.json()
+        assert data
+        assert any(item['slot_id'] == 'primary' for item in data)
+        primary = next(item for item in data if item['slot_id'] == 'primary')
+        assert 'paper_pool_evidence' in primary
+        assert 'paper_trading' in primary
 
 
 def test_runtime_llm_switch_queues_background_sync(monkeypatch) -> None:

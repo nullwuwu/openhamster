@@ -47,6 +47,9 @@ from .schemas import (
     PaperExecutionDTO,
     PaperNavPointDTO,
     PaperOrderDTO,
+    PaperPoolDTO,
+    PaperPoolSummaryDTO,
+    PaperSlotDTO,
     PaperPositionDTO,
     PaperTradingDTO,
     PipelineRuntimeStatusDTO,
@@ -74,6 +77,7 @@ from .services import (
     build_provider_migration_history,
     build_provider_migration_summary,
     build_runtime_sync_history,
+    build_paper_pool,
     build_market_snapshot,
     execute_backtest_run,
     execute_experiment_run,
@@ -96,6 +100,7 @@ from .services import (
     list_experiment_runs_with_metrics,
     list_knowledge_sources,
     list_knowledge_suggestions,
+    list_paper_slots,
     list_risk_decisions,
     list_research_batches,
     list_strategy_proposals,
@@ -381,6 +386,8 @@ def _to_research_batch_dto(record) -> ResearchBatchDTO:
         status=record.status,
         research_symbols=list(record.research_symbols),
         selected_challenger_symbol=record.selected_challenger_symbol,
+        selected_challenger_symbols=list(record.selected_challenger_symbols or []),
+        selected_proposal_ids=list(record.selected_proposal_ids or []),
         summary_payload=dict(record.summary_payload),
         created_at=record.created_at,
         updated_at=record.updated_at,
@@ -488,6 +495,31 @@ def _paper_summary(
         latest_execution_status=latest_execution_status,
         latest_execution_explanation=latest_execution_explanation,
         latest_nav_change=latest_nav_change,
+    )
+
+
+def _to_paper_slot_dto(slot_payload: dict[str, object]) -> PaperSlotDTO:
+    proposal = slot_payload.get('proposal')
+    latest_decision = proposal.decisions[-1] if proposal and proposal.decisions else None
+    paper_trading = dict(slot_payload.get('paper_trading', {}) or {})
+    latest_execution = slot_payload.get('latest_execution')
+    return PaperSlotDTO(
+        slot_id=str(slot_payload.get('slot_id')),
+        slot_kind=str(slot_payload.get('slot_kind')),
+        rank=int(slot_payload.get('rank')) if slot_payload.get('rank') is not None else None,
+        status=str(slot_payload.get('status')),
+        proposal_id=str(slot_payload.get('proposal_id')) if slot_payload.get('proposal_id') is not None else None,
+        proposal=_to_proposal_dto(proposal) if proposal is not None else None,
+        latest_decision=_to_risk_decision_dto(latest_decision) if latest_decision is not None else None,
+        paper_summary=PaperSummaryDTO(**dict(slot_payload.get('paper_summary', {}) or {})),
+        paper_trading=PaperTradingDTO(
+            nav=[PaperNavPointDTO(**item) for item in list(paper_trading.get('nav', []) or [])],
+            orders=[PaperOrderDTO(**item) for item in list(paper_trading.get('orders', []) or [])],
+            positions=[PaperPositionDTO(**item) for item in list(paper_trading.get('positions', []) or [])],
+            latest_execution=PaperExecutionDTO(**latest_execution) if isinstance(latest_execution, dict) else None,
+        ),
+        latest_execution=PaperExecutionDTO(**latest_execution) if isinstance(latest_execution, dict) else None,
+        paper_pool_evidence=dict(slot_payload.get('paper_pool_evidence', {}) or {}),
     )
 
 
@@ -634,6 +666,7 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
     runtime_status = get_pipeline_runtime_status(db)
     paper_raw = fetch_paper_data(limit=30)
     latest_execution_payload = get_latest_paper_execution(db, active)
+    paper_pool = build_paper_pool(db)
     paper_dto = PaperTradingDTO(
         nav=[PaperNavPointDTO(**item) for item in paper_raw["nav"]],
         orders=[PaperOrderDTO(**item) for item in paper_raw["orders"]],
@@ -709,6 +742,11 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
         ),
         slot_focus=slot_focus,
         paper_summary=paper_summary,
+        paper_pool_summary=PaperPoolSummaryDTO(**dict(paper_pool.get('summary', {}) or {})),
+        paper_pool=PaperPoolDTO(
+            slots=[_to_paper_slot_dto(item) for item in list(paper_pool.get('slots', []) or [])],
+            summary=PaperPoolSummaryDTO(**dict(paper_pool.get('summary', {}) or {})),
+        ),
         active_strategy=ActiveStrategyDTO(
             proposal=_to_proposal_dto(active) if active else None,
             latest_decision=_to_risk_decision_dto(active.decisions[-1]) if active and active.decisions else None,
@@ -848,6 +886,21 @@ def get_paper_active_strategy(db: Session = Depends(get_db)) -> ActiveStrategyDT
             current_time=now_tz(),
         ) if active else {},
     )
+
+
+@router.get("/paper/slots", response_model=list[PaperSlotDTO])
+def get_paper_slots(db: Session = Depends(get_db)) -> list[PaperSlotDTO]:
+    paper_pool = build_paper_pool(db)
+    return [_to_paper_slot_dto(item) for item in list(paper_pool.get('slots', []) or [])]
+
+
+@router.get("/paper/slots/{slot_id}", response_model=PaperSlotDTO)
+def get_paper_slot(slot_id: str, db: Session = Depends(get_db)) -> PaperSlotDTO:
+    paper_pool = build_paper_pool(db)
+    for item in list(paper_pool.get('slots', []) or []):
+        if str(item.get('slot_id')) == slot_id:
+            return _to_paper_slot_dto(item)
+    raise HTTPException(status_code=404, detail="Paper slot not found")
 
 
 @router.get("/risk/decisions", response_model=list[RiskDecisionDTO])

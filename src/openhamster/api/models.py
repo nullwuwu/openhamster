@@ -266,9 +266,33 @@ class ResearchBatch(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="running", index=True)
     research_symbols: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     selected_challenger_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    selected_challenger_symbols: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    selected_proposal_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     summary_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PaperSlotAssignment(Base):
+    __tablename__ = "paper_slot_assignments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    slot_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
+    slot_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="candidate", index=True)
+    proposal_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("strategy_proposals.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="idle", index=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    entry_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    proposal: Mapped[StrategyProposal | None] = relationship("StrategyProposal")
 
 
 class KnowledgeSource(Base):

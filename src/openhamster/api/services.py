@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import inspect
 import json
@@ -66,6 +67,7 @@ from .models import (
     KnowledgeObservation,
     KnowledgeSource,
     KnowledgeSuggestion,
+    PaperSlotAssignment,
     ProposalStatus,
     ResearchBatch,
     RiskDecision,
@@ -80,6 +82,7 @@ _MACRO_STATUS_KEY = "events.macro.status"
 _PIPELINE_STATUS_KEY = "pipeline.runtime.status"
 _UNIVERSE_SELECTION_KEY = "universe.selection"
 _PIPELINE_SYNC_LOCK = Lock()
+PRIMARY_PAPER_SLOT_ID = 'primary'
 
 _EXTERNAL_KNOWLEDGE_SOURCES: tuple[dict[str, object], ...] = (
     {
@@ -1231,7 +1234,19 @@ def _open_sqlite(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
-def fetch_paper_data(limit: int = 100) -> dict[str, list[dict[str, object]]]:
+def _paper_slot_count() -> int:
+    return max(1, int(get_settings().governance.paper_slot_count))
+
+
+def _candidate_paper_slot_ids() -> list[str]:
+    return [f'candidate-{index}' for index in range(1, _paper_slot_count())]
+
+
+def _paper_slot_ids() -> list[str]:
+    return [PRIMARY_PAPER_SLOT_ID, *_candidate_paper_slot_ids()]
+
+
+def fetch_paper_data(limit: int = 100, *, slot_id: str = PRIMARY_PAPER_SLOT_ID) -> dict[str, list[dict[str, object]]]:
     settings = get_settings()
     db_paths = [settings.storage.runtime_db_path, settings.storage.paper_db_path]
     nav_rows: list[sqlite3.Row] = []
@@ -1242,20 +1257,38 @@ def fetch_paper_data(limit: int = 100) -> dict[str, list[dict[str, object]]]:
         if not nav_rows:
             nav_rows = _read_sqlite_rows(
                 db_path,
-                "SELECT trade_date, cash, position_value, total_equity FROM daily_nav ORDER BY trade_date DESC, rowid DESC LIMIT ?",
-                (limit,),
+                """
+                SELECT trade_date, cash, position_value, total_equity, slot_id, proposal_id
+                FROM daily_nav
+                WHERE COALESCE(slot_id, ?) = ?
+                ORDER BY trade_date DESC, rowid DESC
+                LIMIT ?
+                """,
+                (PRIMARY_PAPER_SLOT_ID, slot_id, limit),
             )
         if not order_rows:
             order_rows = _read_sqlite_rows(
                 db_path,
-                "SELECT id, symbol, side, quantity, price, amount, status, created_at FROM orders ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                """
+                SELECT id, symbol, side, quantity, price, amount, status, created_at, slot_id, proposal_id
+                FROM orders
+                WHERE COALESCE(slot_id, ?) = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (PRIMARY_PAPER_SLOT_ID, slot_id, limit),
             )
         if not position_rows:
             position_rows = _read_sqlite_rows(
                 db_path,
-                "SELECT id, symbol, quantity, avg_cost, market_value, updated_at FROM positions ORDER BY updated_at DESC LIMIT ?",
-                (limit,),
+                """
+                SELECT id, symbol, quantity, avg_cost, market_value, updated_at, slot_id, proposal_id
+                FROM positions
+                WHERE COALESCE(slot_id, ?) = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (PRIMARY_PAPER_SLOT_ID, slot_id, limit),
             )
 
     return {
@@ -1265,6 +1298,8 @@ def fetch_paper_data(limit: int = 100) -> dict[str, list[dict[str, object]]]:
                 "cash": float(row["cash"]),
                 "position_value": float(row["position_value"]),
                 "total_equity": float(row["total_equity"]),
+                "slot_id": row["slot_id"],
+                "proposal_id": row["proposal_id"],
             }
             for row in nav_rows
         ],
@@ -1278,6 +1313,8 @@ def fetch_paper_data(limit: int = 100) -> dict[str, list[dict[str, object]]]:
                 "amount": float(row["amount"]),
                 "status": row["status"],
                 "created_at": row["created_at"],
+                "slot_id": row["slot_id"],
+                "proposal_id": row["proposal_id"],
             }
             for row in order_rows
         ],
@@ -1289,16 +1326,24 @@ def fetch_paper_data(limit: int = 100) -> dict[str, list[dict[str, object]]]:
                 "avg_cost": float(row["avg_cost"]),
                 "market_value": float(row["market_value"]),
                 "updated_at": row["updated_at"],
+                "slot_id": row["slot_id"],
+                "proposal_id": row["proposal_id"],
             }
             for row in position_rows
         ],
     }
 
 
-def get_latest_paper_execution(db: Session, proposal: StrategyProposal | None) -> dict[str, object] | None:
+def get_latest_paper_execution(
+    db: Session,
+    proposal: StrategyProposal | None,
+    *,
+    slot_id: str = PRIMARY_PAPER_SLOT_ID,
+) -> dict[str, object] | None:
     if proposal is None:
         return None
-    record = db.execute(
+    records = list(
+        db.execute(
         select(AuditRecord)
         .where(
             AuditRecord.entity_type == 'paper_runtime',
@@ -1306,7 +1351,15 @@ def get_latest_paper_execution(db: Session, proposal: StrategyProposal | None) -
             AuditRecord.event_type.in_(['paper_execution_cycle', 'paper_execution_skipped']),
         )
         .order_by(AuditRecord.created_at.desc(), AuditRecord.id.desc())
-    ).scalars().first()
+        ).scalars()
+    )
+    record = next(
+        (
+            item for item in records
+            if str(dict(item.payload or {}).get('slot_id') or PRIMARY_PAPER_SLOT_ID) == slot_id
+        ),
+        None,
+    )
     if record is None:
         return None
     payload = dict(record.payload or {})
@@ -1357,6 +1410,7 @@ def get_latest_paper_execution(db: Session, proposal: StrategyProposal | None) -
         'price_changed': bool(payload.get('price_changed', False)),
         'equity_changed': bool(payload.get('equity_changed', False)),
         'rebalance_triggered': bool(payload.get('rebalance_triggered', False)),
+        'slot_id': str(payload.get('slot_id') or slot_id),
         'explanation_key': explanation_key,
         'explanation': explanation,
         'message': payload.get('message'),
@@ -1429,6 +1483,8 @@ def _ensure_paper_snapshot_tables(db_path: str) -> None:
             """
             CREATE TABLE IF NOT EXISTS daily_nav (
                 trade_date TEXT NOT NULL,
+                slot_id TEXT NOT NULL DEFAULT 'primary',
+                proposal_id TEXT,
                 cash REAL NOT NULL,
                 position_value REAL NOT NULL,
                 total_equity REAL NOT NULL
@@ -1439,6 +1495,8 @@ def _ensure_paper_snapshot_tables(db_path: str) -> None:
             """
             CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                slot_id TEXT NOT NULL DEFAULT 'primary',
+                proposal_id TEXT,
                 symbol TEXT NOT NULL,
                 side TEXT NOT NULL,
                 quantity INTEGER NOT NULL,
@@ -1453,6 +1511,8 @@ def _ensure_paper_snapshot_tables(db_path: str) -> None:
             """
             CREATE TABLE IF NOT EXISTS positions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                slot_id TEXT NOT NULL DEFAULT 'primary',
+                proposal_id TEXT,
                 symbol TEXT NOT NULL,
                 quantity INTEGER NOT NULL,
                 avg_cost REAL NOT NULL,
@@ -1461,24 +1521,45 @@ def _ensure_paper_snapshot_tables(db_path: str) -> None:
             )
             """
         )
+        nav_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(daily_nav)").fetchall()}
+        if "slot_id" not in nav_columns:
+            conn.execute("ALTER TABLE daily_nav ADD COLUMN slot_id TEXT NOT NULL DEFAULT 'primary'")
+        if "proposal_id" not in nav_columns:
+            conn.execute("ALTER TABLE daily_nav ADD COLUMN proposal_id TEXT")
+        order_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        if "slot_id" not in order_columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN slot_id TEXT NOT NULL DEFAULT 'primary'")
+        if "proposal_id" not in order_columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN proposal_id TEXT")
+        position_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(positions)").fetchall()}
+        if "slot_id" not in position_columns:
+            conn.execute("ALTER TABLE positions ADD COLUMN slot_id TEXT NOT NULL DEFAULT 'primary'")
+        if "proposal_id" not in position_columns:
+            conn.execute("ALTER TABLE positions ADD COLUMN proposal_id TEXT")
+        conn.execute("UPDATE daily_nav SET slot_id = 'primary' WHERE COALESCE(slot_id, '') = ''")
+        conn.execute("UPDATE orders SET slot_id = 'primary' WHERE COALESCE(slot_id, '') = ''")
+        conn.execute("UPDATE positions SET slot_id = 'primary' WHERE COALESCE(slot_id, '') = ''")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_daily_nav_slot_trade_date ON daily_nav (slot_id, trade_date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_orders_slot_created_at ON orders (slot_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_positions_slot_updated_at ON positions (slot_id, updated_at)")
         conn.commit()
     finally:
         conn.close()
 
 
-def _proposal_has_paper_snapshot(proposal_id: str, db: Session) -> bool:
-    return (
+def _proposal_has_paper_snapshot(proposal_id: str, db: Session, *, slot_id: str) -> bool:
+    records = list(
         db.execute(
-            select(func.count())
-            .select_from(AuditRecord)
+            select(AuditRecord)
             .where(
                 AuditRecord.event_type == 'paper_snapshot_initialized',
                 AuditRecord.entity_type == 'paper_runtime',
                 AuditRecord.entity_id == proposal_id,
             )
-        ).scalar_one()
-        > 0
+            .order_by(AuditRecord.created_at.desc(), AuditRecord.id.desc())
+        ).scalars()
     )
+    return any(str(dict(item.payload or {}).get('slot_id') or PRIMARY_PAPER_SLOT_ID) == slot_id for item in records)
 
 
 def _initialize_paper_snapshot_for_proposal(
@@ -1488,8 +1569,9 @@ def _initialize_paper_snapshot_for_proposal(
     current_time: datetime,
     decision_id: str | None,
     reason: str,
+    slot_id: str = PRIMARY_PAPER_SLOT_ID,
 ) -> bool:
-    if _proposal_has_paper_snapshot(proposal.id, db):
+    if _proposal_has_paper_snapshot(proposal.id, db, slot_id=slot_id):
         return False
 
     initial_equity = float(get_settings().portfolio.default_capital)
@@ -1501,10 +1583,10 @@ def _initialize_paper_snapshot_for_proposal(
         try:
             conn.execute(
                 """
-                INSERT INTO daily_nav (trade_date, cash, position_value, total_equity)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO daily_nav (trade_date, slot_id, proposal_id, cash, position_value, total_equity)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (trade_date, initial_equity, 0.0, initial_equity),
+                (trade_date, slot_id, proposal.id, initial_equity, 0.0, initial_equity),
             )
             conn.commit()
             written_paths.append(db_path)
@@ -1528,6 +1610,8 @@ def _initialize_paper_snapshot_for_proposal(
                 'cash': initial_equity,
                 'position_value': 0.0,
                 'total_equity': initial_equity,
+                'slot_id': slot_id,
+                'proposal_id': proposal.id,
                 'db_paths': written_paths,
                 'reason': reason,
             },
@@ -1572,6 +1656,8 @@ def _append_daily_nav_if_needed(
     conn: sqlite3.Connection,
     *,
     trade_date: str,
+    slot_id: str,
+    proposal_id: str | None,
     cash: float,
     position_value: float,
     total_equity: float,
@@ -1580,9 +1666,12 @@ def _append_daily_nav_if_needed(
         """
         SELECT trade_date, cash, position_value, total_equity
         FROM daily_nav
+        WHERE COALESCE(slot_id, ?) = ?
         ORDER BY trade_date DESC, rowid DESC
         LIMIT 1
         """
+        ,
+        (PRIMARY_PAPER_SLOT_ID, slot_id),
     ).fetchone()
     if latest_row is not None:
         same_trade_date = str(latest_row[0]) == trade_date
@@ -1593,31 +1682,31 @@ def _append_daily_nav_if_needed(
             return False
     conn.execute(
         """
-        INSERT INTO daily_nav (trade_date, cash, position_value, total_equity)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO daily_nav (trade_date, slot_id, proposal_id, cash, position_value, total_equity)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (trade_date, cash, position_value, total_equity),
+        (trade_date, slot_id, proposal_id, cash, position_value, total_equity),
     )
     return True
 
 
-def _paper_trade_already_bootstrapped(proposal_id: str, db: Session) -> bool:
-    return (
+def _paper_trade_already_bootstrapped(proposal_id: str, db: Session, *, slot_id: str) -> bool:
+    records = list(
         db.execute(
-            select(func.count())
-            .select_from(AuditRecord)
+            select(AuditRecord)
             .where(
                 AuditRecord.event_type == 'paper_trade_bootstrapped',
                 AuditRecord.entity_type == 'paper_runtime',
                 AuditRecord.entity_id == proposal_id,
             )
-        ).scalar_one()
-        > 0
+            .order_by(AuditRecord.created_at.desc(), AuditRecord.id.desc())
+        ).scalars()
     )
+    return any(str(dict(item.payload or {}).get('slot_id') or PRIMARY_PAPER_SLOT_ID) == slot_id for item in records)
 
 
-def _latest_paper_nav_state() -> dict[str, float]:
-    paper = fetch_paper_data(limit=1)
+def _latest_paper_nav_state(*, slot_id: str = PRIMARY_PAPER_SLOT_ID) -> dict[str, float]:
+    paper = fetch_paper_data(limit=1, slot_id=slot_id)
     latest_nav = paper['nav'][0] if paper['nav'] else None
     initial_equity = float(get_settings().portfolio.default_capital)
     if latest_nav is None:
@@ -1635,8 +1724,8 @@ def _latest_paper_nav_state() -> dict[str, float]:
     }
 
 
-def _latest_paper_position(symbol: str) -> dict[str, object] | None:
-    paper = fetch_paper_data(limit=50)
+def _latest_paper_position(symbol: str, *, slot_id: str = PRIMARY_PAPER_SLOT_ID) -> dict[str, object] | None:
+    paper = fetch_paper_data(limit=50, slot_id=slot_id)
     normalized_symbol = normalize_symbol(symbol, market=detect_market(symbol))
     for position in paper['positions']:
         if normalize_symbol(str(position.get('symbol', '')), market=detect_market(str(position.get('symbol', '')))) == normalized_symbol:
@@ -1814,13 +1903,14 @@ def _current_target_quantity(
     latest_price: float,
     current_equity: float,
     signal: Signal,
+    slot_id: str = PRIMARY_PAPER_SLOT_ID,
 ) -> int:
     if latest_price <= 0:
         return 0
     if signal == Signal.SELL:
         return 0
     if signal != Signal.BUY:
-        current_position = _latest_paper_position(proposal.symbol)
+        current_position = _latest_paper_position(proposal.symbol, slot_id=slot_id)
         return int(current_position.get('quantity', 0) or 0) if current_position else 0
 
     sizing = proposal.strategy_dsl.get('position_sizing', {}) if isinstance(proposal.strategy_dsl, dict) else {}
@@ -1841,6 +1931,11 @@ def _record_paper_execution_audit(
     event_type: str,
     payload: dict[str, object],
 ) -> None:
+    payload = {
+        'slot_id': str(payload.get('slot_id') or PRIMARY_PAPER_SLOT_ID),
+        'proposal_id': proposal.id,
+        **payload,
+    }
     db.add(
         AuditRecord(
             run_id=proposal.run_id,
@@ -1874,12 +1969,14 @@ def _record_paper_execution_audit(
     db.flush()
 
 
-def execute_active_paper_cycle(
+def execute_paper_cycle_for_slot(
     db: Session,
     *,
     proposal: StrategyProposal,
     current_time: datetime,
     reason: str,
+    slot_id: str,
+    slot_kind: str,
 ) -> dict[str, object]:
     _initialize_paper_snapshot_for_proposal(
         db,
@@ -1887,6 +1984,7 @@ def execute_active_paper_cycle(
         current_time=current_time,
         decision_id=None,
         reason=reason,
+        slot_id=slot_id,
     )
     history = _load_execution_history(proposal.symbol, current_time)
     if history is None or history.empty:
@@ -1899,9 +1997,11 @@ def execute_active_paper_cycle(
                 'reason': reason,
                 'message': 'history_unavailable',
                 'symbol': proposal.symbol,
+                'slot_id': slot_id,
+                'slot_kind': slot_kind,
             },
         )
-        return {'executed': False, 'reason': 'history_unavailable'}
+        return {'executed': False, 'reason': 'history_unavailable', 'slot_id': slot_id}
 
     latest_bar = history.iloc[-1]
     latest_bar_index = history.index[-1]
@@ -1913,11 +2013,11 @@ def execute_active_paper_cycle(
         symbol=proposal.symbol,
         market_scope=proposal.market_scope,
     )
-    nav_state = _latest_paper_nav_state()
-    current_position = _latest_paper_position(proposal.symbol)
+    nav_state = _latest_paper_nav_state(slot_id=slot_id)
+    current_position = _latest_paper_position(proposal.symbol, slot_id=slot_id)
     current_qty = int(current_position.get('quantity', 0) or 0) if current_position else 0
     current_avg_cost = float(current_position.get('avg_cost', latest_price) or latest_price) if current_position else latest_price
-    previous_execution = get_latest_paper_execution(db, proposal)
+    previous_execution = get_latest_paper_execution(db, proposal, slot_id=slot_id)
     strategy = _proposal_strategy_adapter(proposal)
     signal = strategy.generate_signal(history)
     target_qty = _current_target_quantity(
@@ -1925,12 +2025,13 @@ def execute_active_paper_cycle(
         latest_price=latest_price,
         current_equity=float(nav_state['total_equity']),
         signal=signal,
+        slot_id=slot_id,
     )
     holding_constraints = proposal.strategy_dsl.get('holding_constraints', {}) if isinstance(proposal.strategy_dsl, dict) else {}
     min_holding_days = int(holding_constraints.get('min_holding_days', 0) or 0) if isinstance(holding_constraints, dict) else 0
     latest_buy_order = next(
         (
-            order for order in fetch_paper_data(limit=200)['orders']
+            order for order in fetch_paper_data(limit=200, slot_id=slot_id)['orders']
             if normalize_symbol(str(order.get('symbol', '')), market=detect_market(str(order.get('symbol', '')))) == normalize_symbol(proposal.symbol, market=detect_market(proposal.symbol))
             and str(order.get('side', '')).lower() == 'buy'
         ),
@@ -1962,6 +2063,8 @@ def execute_active_paper_cycle(
                     nav_written = _append_daily_nav_if_needed(
                         conn,
                         trade_date=trade_date,
+                        slot_id=slot_id,
+                        proposal_id=proposal.id,
                         cash=new_cash,
                         position_value=new_position_value,
                         total_equity=new_total_equity,
@@ -1992,6 +2095,8 @@ def execute_active_paper_cycle(
                 'position_value': new_position_value,
                 'total_equity': new_total_equity,
                 'nav_written': nav_written,
+                'slot_id': slot_id,
+                'slot_kind': slot_kind,
             },
         )
         return {
@@ -2008,6 +2113,7 @@ def execute_active_paper_cycle(
             'cash': new_cash,
             'position_value': new_position_value,
             'total_equity': new_total_equity,
+            'slot_id': slot_id,
         }
 
     order_qty = target_qty - current_qty
@@ -2051,23 +2157,25 @@ def execute_active_paper_cycle(
             if order_side and trade_qty > 0:
                 conn.execute(
                     """
-                    INSERT INTO orders (symbol, side, quantity, price, amount, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO orders (slot_id, proposal_id, symbol, side, quantity, price, amount, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (proposal.symbol, order_side, trade_qty, latest_price, amount, 'filled', created_at),
+                    (slot_id, proposal.id, proposal.symbol, order_side, trade_qty, latest_price, amount, 'filled', created_at),
                 )
-            conn.execute("DELETE FROM positions WHERE symbol = ?", (proposal.symbol,))
+            conn.execute("DELETE FROM positions WHERE COALESCE(slot_id, ?) = ? AND symbol = ?", (PRIMARY_PAPER_SLOT_ID, slot_id, proposal.symbol))
             if target_qty > 0:
                 conn.execute(
                     """
-                    INSERT INTO positions (symbol, quantity, avg_cost, market_value, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO positions (slot_id, proposal_id, symbol, quantity, avg_cost, market_value, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (proposal.symbol, target_qty, new_avg_cost, new_position_value, created_at),
+                    (slot_id, proposal.id, proposal.symbol, target_qty, new_avg_cost, new_position_value, created_at),
                 )
             _append_daily_nav_if_needed(
                 conn,
                 trade_date=trade_date,
+                slot_id=slot_id,
+                proposal_id=proposal.id,
                 cash=new_cash,
                 position_value=new_position_value,
                 total_equity=new_total_equity,
@@ -2100,6 +2208,8 @@ def execute_active_paper_cycle(
             'cash': new_cash,
             'position_value': new_position_value,
             'total_equity': new_total_equity,
+            'slot_id': slot_id,
+            'slot_kind': slot_kind,
         },
     )
     return {
@@ -2119,7 +2229,25 @@ def execute_active_paper_cycle(
         'cash': new_cash,
         'position_value': new_position_value,
         'total_equity': new_total_equity,
+        'slot_id': slot_id,
     }
+
+
+def execute_active_paper_cycle(
+    db: Session,
+    *,
+    proposal: StrategyProposal,
+    current_time: datetime,
+    reason: str,
+) -> dict[str, object]:
+    return execute_paper_cycle_for_slot(
+        db,
+        proposal=proposal,
+        current_time=current_time,
+        reason=reason,
+        slot_id=PRIMARY_PAPER_SLOT_ID,
+        slot_kind='primary',
+    )
 
 
 def _bootstrap_paper_trade_for_proposal(
@@ -2129,8 +2257,9 @@ def _bootstrap_paper_trade_for_proposal(
     current_time: datetime,
     decision_id: str | None,
     reason: str,
+    slot_id: str = PRIMARY_PAPER_SLOT_ID,
 ) -> bool:
-    if _paper_trade_already_bootstrapped(proposal.id, db):
+    if _paper_trade_already_bootstrapped(proposal.id, db, slot_id=slot_id):
         return False
 
     market_open, market_message = _paper_market_is_open(
@@ -2153,6 +2282,7 @@ def _bootstrap_paper_trade_for_proposal(
                     'symbol': proposal.symbol,
                     'reason': reason,
                     'message': market_message,
+                    'slot_id': slot_id,
                 },
                 created_at=current_time,
             )
@@ -2184,6 +2314,7 @@ def _bootstrap_paper_trade_for_proposal(
                     'reason': reason,
                     'message': 'latest_price_unavailable',
                     'latest_price_as_of': latest_price_as_of,
+                    'slot_id': slot_id,
                 },
                 created_at=current_time,
             )
@@ -2211,22 +2342,24 @@ def _bootstrap_paper_trade_for_proposal(
             created_at = current_time.isoformat()
             conn.execute(
                 """
-                INSERT INTO orders (symbol, side, quantity, price, amount, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO orders (slot_id, proposal_id, symbol, side, quantity, price, amount, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (proposal.symbol, 'buy', quantity, latest_price, amount, 'filled', created_at),
+                (slot_id, proposal.id, proposal.symbol, 'buy', quantity, latest_price, amount, 'filled', created_at),
             )
-            conn.execute("DELETE FROM positions WHERE symbol = ?", (proposal.symbol,))
+            conn.execute("DELETE FROM positions WHERE COALESCE(slot_id, ?) = ? AND symbol = ?", (PRIMARY_PAPER_SLOT_ID, slot_id, proposal.symbol))
             conn.execute(
                 """
-                INSERT INTO positions (symbol, quantity, avg_cost, market_value, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO positions (slot_id, proposal_id, symbol, quantity, avg_cost, market_value, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (proposal.symbol, quantity, latest_price, amount, created_at),
+                (slot_id, proposal.id, proposal.symbol, quantity, latest_price, amount, created_at),
             )
             _append_daily_nav_if_needed(
                 conn,
                 trade_date=trade_date,
+                slot_id=slot_id,
+                proposal_id=proposal.id,
                 cash=remaining_cash,
                 position_value=amount,
                 total_equity=round(remaining_cash + amount, 2),
@@ -2255,6 +2388,8 @@ def _bootstrap_paper_trade_for_proposal(
                 'remaining_cash': remaining_cash,
                 'trade_date': trade_date,
                 'reason': reason,
+                'slot_id': slot_id,
+                'proposal_id': proposal.id,
                 'db_paths': written_paths,
             },
             created_at=current_time,
@@ -3743,6 +3878,23 @@ def run_strategy_agent(db: Session, symbol: str, snapshot: dict[str, object], cu
     return _fallback_proposal_blueprints(symbol, result.status), result
 
 
+def _parallel_strategy_agent_output(
+    *,
+    symbol: str,
+    snapshot: dict[str, object],
+    current_time: datetime,
+) -> dict[str, object]:
+    with SessionLocal() as worker_db:
+        blueprints, _ = run_strategy_agent(worker_db, symbol=symbol, snapshot=snapshot, current_time=current_time)
+        worker_db.commit()
+    return {
+        'symbol': symbol,
+        'snapshot': snapshot,
+        'current_time': current_time,
+        'blueprints': blueprints,
+    }
+
+
 def _deterministic_score(index: int, snapshot: dict[str, object], digest: DailyEventDigest, features_used: list[str]) -> float:
     aggregate_sentiment = float(digest.event_scores.get('aggregate_sentiment', 0.0))
     score = 78.0 - index * 6 + aggregate_sentiment * 8 + min(len(features_used), 4) * 0.8
@@ -4548,6 +4700,10 @@ def _build_quality_report(
         'knowledge_failure_mode_hits': [str(item) for item in list(knowledge_context.get('knowledge_failure_mode_hits', []) or [])],
         'knowledge_families_used': [str(item) for item in list(knowledge_context.get('knowledge_families_used', []) or [])],
         'baseline_delta_summary': str(knowledge_context.get('baseline_delta_summary', evidence_pack.get('baseline_delta_summary', ''))),
+        'rule_stack_complexity': str(knowledge_context.get('rule_stack_complexity', 'unknown')),
+        'capacity_assumption_clarity': str(knowledge_context.get('capacity_assumption_clarity', 'unknown')),
+        'regime_dependency_strength': str(knowledge_context.get('regime_dependency_strength', 'unknown')),
+        'knowledge_blocked_reasons': [str(item) for item in list(knowledge_context.get('blocked_reasons', []) or [])],
         'verdict': {
             'quality_band': quality_band,
             'comparable': comparable,
@@ -4720,6 +4876,10 @@ def _ensure_quality_report_payload(evidence_pack: dict[str, object], final_score
         quality_report.setdefault('knowledge_failure_mode_hits', [])
         quality_report.setdefault('knowledge_families_used', list(evidence_pack.get('knowledge_families_used', []) or []))
         quality_report.setdefault('baseline_delta_summary', str(evidence_pack.get('baseline_delta_summary', '')))
+        quality_report.setdefault('rule_stack_complexity', str(dict(evidence_pack.get('knowledge_context', {}) or {}).get('rule_stack_complexity', 'unknown')))
+        quality_report.setdefault('capacity_assumption_clarity', str(dict(evidence_pack.get('knowledge_context', {}) or {}).get('capacity_assumption_clarity', 'unknown')))
+        quality_report.setdefault('regime_dependency_strength', str(dict(evidence_pack.get('knowledge_context', {}) or {}).get('regime_dependency_strength', 'unknown')))
+        quality_report.setdefault('knowledge_blocked_reasons', list(dict(evidence_pack.get('knowledge_context', {}) or {}).get('blocked_reasons', []) or []))
         verdict = dict(quality_report.get('verdict', {}) or {})
         verdict.setdefault('novelty_assessment', 'unknown')
         quality_report['verdict'] = verdict
@@ -6076,6 +6236,8 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 status='running',
                 research_symbols=research_symbols,
                 selected_challenger_symbol=None,
+                selected_challenger_symbols=[],
+                selected_proposal_ids=[],
                 summary_payload={
                     'research_symbols': research_symbols,
                     'symbol_states': [],
@@ -6153,13 +6315,14 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 for item in universe_candidates
                 if str(item.get('symbol', '')).strip()
             }
+            agent_inputs: list[dict[str, object]] = []
             for index, symbol in enumerate(research_symbols, start=1):
-                symbol_time = now_tz()
                 symbol_snapshot = _snapshot_for_symbol(
                     snapshot,
                     symbol=symbol,
                     candidate=candidate_map.get(symbol),
                 )
+                symbol_time = now_tz()
                 _record_system_audit(
                     db,
                     event_type='research_symbol_started',
@@ -6172,24 +6335,32 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                     },
                     created_at=symbol_time,
                 )
-                _set_pipeline_runtime_stage(
-                    db,
-                    stage='strategy_agent',
-                    current_time=symbol_time,
-                    status_message=f'Generating strategy candidates for {symbol}.',
-                    trigger=trigger,
-                    extra_payload={
-                        'research_batch_size': len(research_symbols),
-                        'research_symbols': research_symbols,
-                        'research_symbol_states': symbol_states,
-                        'current_symbol': symbol,
-                        'current_symbol_stage': 'strategy_agent',
-                        'batch_progress': {'completed': index - 1, 'total': len(research_symbols)},
-                        'current_batch_id': batch.batch_id,
-                        'paper_slot_count': int(settings.governance.paper_slot_count),
-                    },
-                )
-                blueprints, _ = run_strategy_agent(db=db, symbol=symbol, snapshot=symbol_snapshot, current_time=symbol_time)
+                agent_inputs.append({'symbol': symbol, 'snapshot': symbol_snapshot, 'current_time': symbol_time})
+            _set_pipeline_runtime_stage(
+                db,
+                stage='strategy_agent',
+                current_time=now_tz(),
+                status_message=f'Generating strategy candidates for {len(research_symbols)} symbols in parallel.',
+                trigger=trigger,
+                extra_payload={
+                    'research_batch_size': len(research_symbols),
+                    'research_symbols': research_symbols,
+                    'research_symbol_states': symbol_states,
+                    'current_symbol': None,
+                    'current_symbol_stage': 'strategy_agent',
+                    'batch_progress': {'completed': 0, 'total': len(research_symbols)},
+                    'current_batch_id': batch.batch_id,
+                    'paper_slot_count': int(settings.governance.paper_slot_count),
+                },
+            )
+            with ThreadPoolExecutor(max_workers=min(len(agent_inputs), 5)) as executor:
+                agent_outputs = list(executor.map(lambda item: _parallel_strategy_agent_output(**item), agent_inputs))
+
+            for index, output in enumerate(agent_outputs, start=1):
+                symbol = str(output['symbol'])
+                symbol_time = output['current_time']
+                symbol_snapshot = dict(output['snapshot'])
+                blueprints = list(output['blueprints'])
                 _set_pipeline_runtime_stage(
                     db,
                     stage='materialize_decisions',
@@ -6225,6 +6396,10 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                     'proposal_count': len(symbol_proposals),
                     'admissible_count': sum(1 for item in symbol_proposals if item.status in {ProposalStatus.CANDIDATE, ProposalStatus.ACTIVE}),
                     'best_final_score': round(best_proposal.final_score, 1) if best_proposal is not None else None,
+                    'best_proposal_id': best_proposal.id if best_proposal is not None else None,
+                    'paper_ready': _paper_candidate_eligible(best_proposal, active_id=previous_active.id if previous_active is not None else None)
+                    if best_proposal is not None else False,
+                    'slot_priority_score': round(best_proposal.final_score, 1) if best_proposal is not None else None,
                     'selected_for_paper_comparison': bool(previous_active is not None and previous_active.symbol == symbol),
                     'rejected_reason_summary': (
                         list(
@@ -6258,10 +6433,19 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
 
             best_challenger = max(created_proposals, key=lambda item: item.final_score, default=None)
             batch.selected_challenger_symbol = best_challenger.symbol if best_challenger is not None else None
+            ranked_challengers = sorted(
+                [item for item in created_proposals if _paper_candidate_eligible(item, active_id=previous_active.id if previous_active is not None else None)],
+                key=_paper_slot_sort_key,
+                reverse=True,
+            )[: max(0, _paper_slot_count() - 1)]
+            batch.selected_challenger_symbols = [item.symbol for item in ranked_challengers]
+            batch.selected_proposal_ids = [item.id for item in ranked_challengers]
             batch.status = 'completed'
             batch.summary_payload = {
                 **dict(batch.summary_payload or {}),
                 'selected_challenger_symbol': batch.selected_challenger_symbol,
+                'selected_challenger_symbols': list(batch.selected_challenger_symbols),
+                'selected_proposal_ids': list(batch.selected_proposal_ids),
             }
             batch.updated_at = now_tz()
             _record_system_audit(
@@ -6272,7 +6456,8 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 payload={
                     'batch_id': batch.batch_id,
                     'selected_challenger_symbol': batch.selected_challenger_symbol,
-                    'selected_proposal_id': best_challenger.id if best_challenger is not None else None,
+                    'selected_challenger_symbols': list(batch.selected_challenger_symbols),
+                    'selected_proposal_ids': list(batch.selected_proposal_ids),
                     'selected_final_score': best_challenger.final_score if best_challenger is not None else None,
                 },
                 created_at=now_tz(),
@@ -6287,6 +6472,7 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                     'research_symbols': research_symbols,
                     'symbol_states': symbol_states,
                     'selected_challenger_symbol': batch.selected_challenger_symbol,
+                    'selected_challenger_symbols': list(batch.selected_challenger_symbols),
                 },
                 created_at=now_tz(),
             )
@@ -6304,11 +6490,16 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                 )
                 if promoted_existing is not None:
                     previous_active = promoted_existing
+            paper_slots = _assign_paper_pool_slots(
+                db,
+                current_time=now_tz(),
+                active=get_active_strategy(db),
+            )
             _set_pipeline_runtime_stage(
                 db,
                 stage='paper_execution',
                 current_time=now_tz(),
-                status_message='Executing active paper strategy.',
+                status_message='Executing paper pool.',
                 trigger=trigger,
                 extra_payload={
                     'research_batch_size': len(research_symbols),
@@ -6321,14 +6512,20 @@ def sync_agent_state(db: Session, force_refresh: bool = False, *, trigger: str =
                     'paper_slot_count': int(settings.governance.paper_slot_count),
                 },
             )
-            current_active = get_active_strategy(db)
-            if current_active is not None:
-                execute_active_paper_cycle(
+            for assignment in paper_slots:
+                if assignment.proposal is None:
+                    continue
+                execute_paper_cycle_for_slot(
                     db,
-                    proposal=current_active,
+                    proposal=assignment.proposal,
                     current_time=now_tz(),
                     reason='scheduled_execution',
+                    slot_id=assignment.slot_id,
+                    slot_kind=assignment.slot_kind,
                 )
+                assignment.last_executed_at = now_tz()
+                assignment.status = 'running'
+                assignment.updated_at = now_tz()
             _set_pipeline_runtime_stage(
                 db,
                 stage='active_health_check',
@@ -6656,18 +6853,62 @@ def list_strategy_proposals(db: Session) -> list[StrategyProposal]:
     return _attach_pool_ranking(_attach_quality_track_record(db, hydrated))
 
 
-def list_research_batches(db: Session, limit: int = 20) -> list[ResearchBatch]:
-    return list(
-        db.execute(
-            select(ResearchBatch).order_by(ResearchBatch.created_at.desc()).limit(limit)
-        ).scalars()
+def _paper_slot_sort_key(proposal: StrategyProposal) -> tuple[float, float, float, datetime]:
+    quality_report = dict((proposal.evidence_pack or {}).get('quality_report', {}) or {})
+    verdict = dict(quality_report.get('verdict', {}) or {})
+    backtest_gate = dict(quality_report.get('backtest_gate', {}) or {})
+    return (
+        1.0 if bool(backtest_gate.get('eligible_for_paper', False)) else 0.0,
+        1.0 if bool(verdict.get('replaceable', False)) else 0.0,
+        float(proposal.final_score),
+        proposal.created_at,
     )
 
 
+def _paper_candidate_eligible(proposal: StrategyProposal, *, active_id: str | None = None) -> bool:
+    if proposal.source_kind == 'mock':
+        return False
+    if active_id is not None and proposal.id == active_id:
+        return False
+    quality_report = dict((proposal.evidence_pack or {}).get('quality_report', {}) or {})
+    backtest_gate = dict(quality_report.get('backtest_gate', {}) or {})
+    governance_report = dict((proposal.evidence_pack or {}).get('governance_report', {}) or {})
+    promotion_gate = dict(governance_report.get('promotion_gate', {}) or {})
+    blocked_reasons = [str(item) for item in list(quality_report.get('knowledge_blocked_reasons', []) or [])]
+    if blocked_reasons:
+        return False
+    return bool(backtest_gate.get('eligible_for_paper', False)) and not list(promotion_gate.get('blocked_reasons', []) or [])
+
+
+def _hydrate_research_batch_record(record: ResearchBatch) -> ResearchBatch:
+    record.selected_challenger_symbols = [str(item) for item in list(record.selected_challenger_symbols or []) if str(item).strip()]
+    record.selected_proposal_ids = [str(item) for item in list(record.selected_proposal_ids or []) if str(item).strip()]
+    if not record.selected_challenger_symbols and record.selected_challenger_symbol:
+        record.selected_challenger_symbols = [record.selected_challenger_symbol]
+    if isinstance(record.summary_payload, dict):
+        payload = dict(record.summary_payload)
+        payload.setdefault('selected_challenger_symbols', list(record.selected_challenger_symbols))
+        payload.setdefault('selected_proposal_ids', list(record.selected_proposal_ids))
+        record.summary_payload = payload
+    return record
+
+
+def list_research_batches(db: Session, limit: int = 20) -> list[ResearchBatch]:
+    return [
+        _hydrate_research_batch_record(item)
+        for item in list(
+        db.execute(
+            select(ResearchBatch).order_by(ResearchBatch.created_at.desc()).limit(limit)
+        ).scalars()
+        )
+    ]
+
+
 def get_research_batch(db: Session, batch_id: str) -> ResearchBatch | None:
-    return db.execute(
+    record = db.execute(
         select(ResearchBatch).where(ResearchBatch.batch_id == batch_id)
     ).scalars().first()
+    return _hydrate_research_batch_record(record) if record is not None else None
 
 
 def get_strategy_proposal(db: Session, proposal_id: str) -> StrategyProposal | None:
@@ -6695,6 +6936,178 @@ def get_active_strategy(db: Session) -> StrategyProposal | None:
     if hydrated is None:
         return None
     return _attach_quality_track_record(db, [hydrated])[0]
+
+
+def _load_paper_slot_assignments(db: Session) -> list[PaperSlotAssignment]:
+    records = list(
+        db.execute(
+            select(PaperSlotAssignment)
+            .options(selectinload(PaperSlotAssignment.proposal).selectinload(StrategyProposal.decisions))
+            .order_by(
+                case((PaperSlotAssignment.slot_kind == 'primary', 0), else_=1),
+                PaperSlotAssignment.rank.asc(),
+                PaperSlotAssignment.slot_id.asc(),
+            )
+        ).scalars()
+    )
+    for record in records:
+        if record.proposal is not None:
+            _hydrate_proposal_quality_report(record.proposal)
+    return records
+
+
+def list_paper_slots(db: Session) -> list[PaperSlotAssignment]:
+    current_time = now_tz()
+    active = get_active_strategy(db)
+    assignments_by_id = {item.slot_id: item for item in _load_paper_slot_assignments(db)}
+    desired_slots = _paper_slot_ids()
+    changed = False
+    for slot_id in desired_slots:
+        if slot_id in assignments_by_id:
+            continue
+        slot_kind = 'primary' if slot_id == PRIMARY_PAPER_SLOT_ID else 'candidate'
+        record = PaperSlotAssignment(
+            slot_id=slot_id,
+            slot_kind=slot_kind,
+            proposal_id=active.id if slot_id == PRIMARY_PAPER_SLOT_ID and active is not None else None,
+            status='assigned' if slot_id == PRIMARY_PAPER_SLOT_ID and active is not None else 'idle',
+            rank=1 if slot_id == PRIMARY_PAPER_SLOT_ID else None,
+            assigned_at=current_time if slot_id == PRIMARY_PAPER_SLOT_ID and active is not None else None,
+            updated_at=current_time,
+            last_executed_at=None,
+            entry_reason='paper_pool_seed',
+        )
+        db.add(record)
+        assignments_by_id[slot_id] = record
+        changed = True
+    if changed:
+        db.flush()
+    return [assignments_by_id[slot_id] for slot_id in desired_slots if slot_id in assignments_by_id]
+
+
+def _assign_paper_pool_slots(
+    db: Session,
+    *,
+    current_time: datetime,
+    active: StrategyProposal | None,
+) -> list[PaperSlotAssignment]:
+    assignments = {item.slot_id: item for item in list_paper_slots(db)}
+    primary = assignments[PRIMARY_PAPER_SLOT_ID]
+    primary.slot_kind = 'primary'
+    primary.rank = 1
+    primary.proposal_id = active.id if active is not None else None
+    primary.status = 'assigned' if active is not None else 'idle'
+    if active is not None and primary.assigned_at is None:
+        primary.assigned_at = current_time
+    primary.updated_at = current_time
+    primary.entry_reason = 'primary_active_sync'
+
+    open_candidates = [
+        item for item in list_candidate_strategies(db)
+        if _paper_candidate_eligible(item, active_id=active.id if active is not None else None)
+    ]
+    ranked_candidates = sorted(open_candidates, key=_paper_slot_sort_key, reverse=True)[: max(0, _paper_slot_count() - 1)]
+    ranked_by_slot = dict(zip(_candidate_paper_slot_ids(), ranked_candidates, strict=False))
+    for rank, slot_id in enumerate(_candidate_paper_slot_ids(), start=1):
+        assignment = assignments[slot_id]
+        proposal = ranked_by_slot.get(slot_id)
+        assignment.slot_kind = 'candidate'
+        assignment.rank = rank
+        assignment.updated_at = current_time
+        if proposal is None:
+            assignment.proposal_id = None
+            assignment.status = 'idle'
+            assignment.entry_reason = 'candidate_slot_idle'
+            continue
+        assignment.proposal_id = proposal.id
+        assignment.status = 'assigned'
+        assignment.assigned_at = assignment.assigned_at or current_time
+        assignment.entry_reason = 'candidate_slot_priority_selection'
+    db.flush()
+    return list_paper_slots(db)
+
+
+def _paper_slot_metrics(db: Session, assignment: PaperSlotAssignment) -> dict[str, object]:
+    slot_id = assignment.slot_id
+    paper = fetch_paper_data(limit=120, slot_id=slot_id)
+    nav_rows = list(paper['nav'])
+    orders = list(paper['orders'])
+    latest_execution = get_latest_paper_execution(db, assignment.proposal, slot_id=slot_id)
+    latest_nav = nav_rows[0] if nav_rows else None
+    first_nav = nav_rows[-1] if nav_rows else None
+    drawdown = _paper_nav_drawdown(nav_rows) if nav_rows else None
+    latest_nav_change = None
+    if len(nav_rows) >= 2:
+        latest_nav_change = round(
+            float(nav_rows[0].get('total_equity', 0.0) or 0.0) - float(nav_rows[1].get('total_equity', 0.0) or 0.0),
+            2,
+        )
+    fill_rate = None
+    if orders:
+        fill_rate = round(
+            sum(1 for item in orders if str(item.get('status', '')).lower() == 'filled') / len(orders),
+            3,
+        )
+    return {
+        'slot_id': slot_id,
+        'slot_kind': assignment.slot_kind,
+        'rank': assignment.rank,
+        'status': assignment.status,
+        'proposal_id': assignment.proposal_id,
+        'proposal': assignment.proposal,
+        'latest_execution': latest_execution,
+        'paper_trading': paper,
+        'paper_summary': {
+            'total_equity': float(latest_nav.get('total_equity')) if latest_nav else None,
+            'position_count': len([item for item in paper['positions'] if int(item.get('quantity', 0) or 0) > 0]),
+            'latest_execution_status': latest_execution.get('status') if latest_execution else None,
+            'latest_execution_explanation': latest_execution.get('explanation') if latest_execution else None,
+            'latest_nav_change': latest_nav_change,
+        },
+        'paper_pool_evidence': {
+            'slot_id': slot_id,
+            'slot_rank': assignment.rank,
+            'live_days': len(nav_rows),
+            'latest_execution_status': latest_execution.get('status') if latest_execution else None,
+            'fill_rate': fill_rate,
+            'drawdown': drawdown,
+            'incident_count_30d': 0,
+            'total_equity': float(latest_nav.get('total_equity')) if latest_nav else None,
+            'equity_change_from_start': (
+                round(float(latest_nav.get('total_equity', 0.0)) - float(first_nav.get('total_equity', 0.0)), 2)
+                if latest_nav and first_nav else None
+            ),
+        },
+    }
+
+
+def build_paper_pool(db: Session) -> dict[str, object]:
+    assignments = list_paper_slots(db)
+    slots = [_paper_slot_metrics(db, item) for item in assignments]
+    primary = next((item for item in slots if item['slot_id'] == PRIMARY_PAPER_SLOT_ID), None)
+    challengers = [item for item in slots if item['slot_id'] != PRIMARY_PAPER_SLOT_ID]
+    strongest = next((item for item in challengers if item.get('proposal_id')), None)
+    occupied = sum(1 for item in slots if item.get('proposal_id'))
+    primary_proposal = primary.get('proposal') if isinstance(primary, dict) else None
+    strongest_proposal = strongest.get('proposal') if isinstance(strongest, dict) else None
+    return {
+        'slots': slots,
+        'summary': {
+            'slot_count': len(slots),
+            'occupied_slot_count': occupied,
+            'challenger_count': sum(1 for item in challengers if item.get('proposal_id')),
+            'primary_slot_id': PRIMARY_PAPER_SLOT_ID,
+            'strongest_challenger_slot_id': strongest.get('slot_id') if strongest else None,
+            'strongest_challenger_proposal_id': strongest.get('proposal_id') if strongest else None,
+            'primary_vs_strongest_score_delta': (
+                round(
+                    float(getattr(strongest_proposal, 'final_score', 0.0) or 0.0) - float(getattr(primary_proposal, 'final_score', 0.0) or 0.0),
+                    1,
+                )
+                if strongest and primary else None
+            ),
+        },
+    }
 
 
 def recover_active_strategy(db: Session, *, current_time: datetime) -> StrategyProposal | None:

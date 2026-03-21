@@ -258,6 +258,10 @@ export interface QualityReport {
   knowledge_failure_mode_hits?: string[]
   knowledge_families_used?: string[]
   baseline_delta_summary?: string
+  rule_stack_complexity?: string
+  capacity_assumption_clarity?: string
+  regime_dependency_strength?: string
+  knowledge_blocked_reasons?: string[]
   verdict?: {
     quality_band?: string
     comparable?: boolean
@@ -363,6 +367,8 @@ export interface PaperNavPoint {
   cash: number
   position_value: number
   total_equity: number
+  slot_id?: string | null
+  proposal_id?: string | null
 }
 
 export interface PaperOrder {
@@ -374,6 +380,8 @@ export interface PaperOrder {
   amount: number
   status: string
   created_at: string
+  slot_id?: string | null
+  proposal_id?: string | null
 }
 
 export interface PaperPosition {
@@ -383,6 +391,8 @@ export interface PaperPosition {
   avg_cost: number
   market_value: number
   updated_at: string
+  slot_id?: string | null
+  proposal_id?: string | null
 }
 
 export interface PaperExecution {
@@ -406,6 +416,7 @@ export interface PaperExecution {
   position_value?: number | null
   total_equity?: number | null
   message?: string | null
+  slot_id?: string | null
 }
 
 export interface PaperTrading {
@@ -558,6 +569,8 @@ export interface ResearchBatch {
   status: string
   research_symbols: string[]
   selected_challenger_symbol?: string | null
+  selected_challenger_symbols?: string[]
+  selected_proposal_ids?: string[]
   summary_payload: Record<string, unknown>
   created_at: string
   updated_at: string
@@ -619,6 +632,47 @@ export interface PaperSummary {
   latest_nav_change?: number | null
 }
 
+export interface PaperPoolEvidence {
+  slot_id: string
+  slot_rank?: number | null
+  live_days: number
+  latest_execution_status?: string | null
+  fill_rate?: number | null
+  drawdown?: number | null
+  incident_count_30d: number
+  total_equity?: number | null
+  equity_change_from_start?: number | null
+}
+
+export interface PaperSlot {
+  slot_id: string
+  slot_kind: string
+  rank?: number | null
+  status: string
+  proposal_id?: string | null
+  proposal?: StrategyProposal | null
+  latest_decision?: RiskDecision | null
+  paper_summary: PaperSummary
+  paper_trading: ActiveStrategy['paper_trading']
+  latest_execution?: PaperExecution | null
+  paper_pool_evidence: PaperPoolEvidence
+}
+
+export interface PaperPoolSummary {
+  slot_count: number
+  occupied_slot_count: number
+  challenger_count: number
+  primary_slot_id?: string | null
+  strongest_challenger_slot_id?: string | null
+  strongest_challenger_proposal_id?: string | null
+  primary_vs_strongest_score_delta?: number | null
+}
+
+export interface PaperPool {
+  slots: PaperSlot[]
+  summary: PaperPoolSummary
+}
+
 export interface CommandCenter {
   generated_at: string
   timezone: string
@@ -633,6 +687,8 @@ export interface CommandCenter {
   market_snapshot: MarketSnapshot
   slot_focus: SlotFocus
   paper_summary: PaperSummary
+  paper_pool_summary: PaperPoolSummary
+  paper_pool: PaperPool
   active_strategy: ActiveStrategy
   candidate_count: number
   latest_risk_decision: RiskDecision | null

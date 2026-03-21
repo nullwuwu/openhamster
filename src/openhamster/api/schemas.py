@@ -93,6 +93,8 @@ class PaperNavPointDTO(BaseModel):
     cash: float
     position_value: float
     total_equity: float
+    slot_id: str | None = None
+    proposal_id: str | None = None
 
 
 class PaperOrderDTO(BaseModel):
@@ -104,6 +106,8 @@ class PaperOrderDTO(BaseModel):
     amount: float
     status: str
     created_at: str
+    slot_id: str | None = None
+    proposal_id: str | None = None
 
 
 class PaperPositionDTO(BaseModel):
@@ -113,6 +117,8 @@ class PaperPositionDTO(BaseModel):
     avg_cost: float
     market_value: float
     updated_at: str
+    slot_id: str | None = None
+    proposal_id: str | None = None
 
 
 class PaperExecutionDTO(BaseModel):
@@ -136,6 +142,7 @@ class PaperExecutionDTO(BaseModel):
     position_value: float | None = None
     total_equity: float | None = None
     message: str | None = None
+    slot_id: str | None = None
 
 
 class PaperTradingDTO(BaseModel):
@@ -471,6 +478,8 @@ class ResearchBatchDTO(BaseModel):
     status: str
     research_symbols: list[str] = Field(default_factory=list)
     selected_challenger_symbol: str | None = None
+    selected_challenger_symbols: list[str] = Field(default_factory=list)
+    selected_proposal_ids: list[str] = Field(default_factory=list)
     summary_payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
@@ -532,6 +541,47 @@ class PaperSummaryDTO(BaseModel):
     latest_nav_change: float | None = None
 
 
+class PaperPoolEvidenceDTO(BaseModel):
+    slot_id: str
+    slot_rank: int | None = None
+    live_days: int = 0
+    latest_execution_status: str | None = None
+    fill_rate: float | None = None
+    drawdown: float | None = None
+    incident_count_30d: int = 0
+    total_equity: float | None = None
+    equity_change_from_start: float | None = None
+
+
+class PaperSlotDTO(BaseModel):
+    slot_id: str
+    slot_kind: str
+    rank: int | None = None
+    status: str
+    proposal_id: str | None = None
+    proposal: StrategyProposalDTO | None = None
+    latest_decision: RiskDecisionDTO | None = None
+    paper_summary: PaperSummaryDTO
+    paper_trading: PaperTradingDTO
+    latest_execution: PaperExecutionDTO | None = None
+    paper_pool_evidence: PaperPoolEvidenceDTO
+
+
+class PaperPoolSummaryDTO(BaseModel):
+    slot_count: int = 0
+    occupied_slot_count: int = 0
+    challenger_count: int = 0
+    primary_slot_id: str | None = None
+    strongest_challenger_slot_id: str | None = None
+    strongest_challenger_proposal_id: str | None = None
+    primary_vs_strongest_score_delta: float | None = None
+
+
+class PaperPoolDTO(BaseModel):
+    slots: list[PaperSlotDTO] = Field(default_factory=list)
+    summary: PaperPoolSummaryDTO
+
+
 class CommandCenterDTO(BaseModel):
     generated_at: datetime
     timezone: str
@@ -546,6 +596,8 @@ class CommandCenterDTO(BaseModel):
     market_snapshot: MarketSnapshotDTO
     slot_focus: SlotFocusDTO
     paper_summary: PaperSummaryDTO
+    paper_pool_summary: PaperPoolSummaryDTO
+    paper_pool: PaperPoolDTO
     active_strategy: ActiveStrategyDTO
     candidate_count: int
     latest_risk_decision: RiskDecisionDTO | None = None

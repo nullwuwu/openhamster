@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
 from pathlib import Path
 
@@ -87,6 +88,41 @@ def _repair_sqlite_schema() -> None:
                         updated_at DATETIME NOT NULL
                     )
                     """
+                    )
+
+            if "research_batches" in existing_tables:
+                columns = {column["name"] for column in inspector.get_columns("research_batches")}
+                if "selected_challenger_symbols" not in columns:
+                    conn.exec_driver_sql(
+                        "ALTER TABLE research_batches ADD COLUMN selected_challenger_symbols JSON NOT NULL DEFAULT '[]'"
+                    )
+                if "selected_proposal_ids" not in columns:
+                    conn.exec_driver_sql(
+                        "ALTER TABLE research_batches ADD COLUMN selected_proposal_ids JSON NOT NULL DEFAULT '[]'"
+                    )
+                conn.exec_driver_sql(
+                    "UPDATE research_batches SET selected_challenger_symbols = json_array(selected_challenger_symbol) "
+                    "WHERE COALESCE(selected_challenger_symbol, '') != '' "
+                    "AND (selected_challenger_symbols IS NULL OR selected_challenger_symbols = '[]')"
+                )
+
+            if "paper_slot_assignments" not in existing_tables:
+                conn.exec_driver_sql(
+                    """
+                    CREATE TABLE paper_slot_assignments (
+                        id VARCHAR(36) PRIMARY KEY NOT NULL,
+                        slot_id VARCHAR(32) NOT NULL UNIQUE,
+                        slot_kind VARCHAR(16) NOT NULL DEFAULT 'candidate',
+                        proposal_id VARCHAR(36),
+                        status VARCHAR(16) NOT NULL DEFAULT 'idle',
+                        rank INTEGER,
+                        assigned_at DATETIME,
+                        updated_at DATETIME NOT NULL,
+                        last_executed_at DATETIME,
+                        entry_reason TEXT NOT NULL DEFAULT '',
+                        FOREIGN KEY(proposal_id) REFERENCES strategy_proposals (id) ON DELETE SET NULL
+                    )
+                    """
                 )
 
             if "event_records" in existing_tables:
@@ -170,6 +206,23 @@ def _repair_sqlite_schema() -> None:
                     "CREATE INDEX IF NOT EXISTS ix_audit_records_decision_created_at "
                     "ON audit_records (decision_id, created_at)"
                 )
+
+            if "paper_slot_assignments" in existing_tables or "paper_slot_assignments" in inspect(engine).get_table_names():
+                active_row = conn.exec_driver_sql(
+                    "SELECT id FROM strategy_proposals WHERE status = 'ACTIVE' ORDER BY promoted_at DESC, created_at DESC LIMIT 1"
+                ).fetchone()
+                active_id = str(active_row[0]) if active_row else None
+                now_value = "CURRENT_TIMESTAMP"
+                primary_exists = conn.exec_driver_sql(
+                    "SELECT 1 FROM paper_slot_assignments WHERE slot_id = 'primary' LIMIT 1"
+                ).fetchone()
+                if primary_exists is None:
+                    conn.exec_driver_sql(
+                        f"""
+                        INSERT INTO paper_slot_assignments (id, slot_id, slot_kind, proposal_id, status, rank, assigned_at, updated_at, entry_reason)
+                        VALUES ('paper-slot-primary', 'primary', 'primary', {json.dumps(active_id) if active_id else 'NULL'}, 'assigned', 1, {now_value}, {now_value}, 'primary_slot_seed')
+                        """
+                    )
     except OperationalError as exc:
         if "database is locked" not in str(exc).lower():
             raise

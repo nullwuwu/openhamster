@@ -20,6 +20,8 @@ const commandQuery = useQuery({
 const command = computed(() => commandQuery.data.value)
 const slotFocus = computed(() => command.value?.slot_focus ?? null)
 const paperSummary = computed(() => command.value?.paper_summary ?? null)
+const paperPoolSummary = computed(() => command.value?.paper_pool_summary ?? null)
+const paperPoolSlots = computed(() => command.value?.paper_pool?.slots ?? [])
 const liveReadiness = computed(() => command.value?.live_readiness ?? null)
 const runtimeStatus = computed(() => command.value?.runtime_status ?? null)
 const llmStatus = computed(() => command.value?.llm_status ?? null)
@@ -95,6 +97,10 @@ const paperStatusLabel = computed(() => {
   if (status === 'skipped') return '已跳过'
   return status
 })
+
+const strongestChallenger = computed(() =>
+  paperPoolSlots.value.find((item) => item.slot_id === paperPoolSummary.value?.strongest_challenger_slot_id) ?? null,
+)
 
 const money = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -244,6 +250,32 @@ function formatDelta(value?: number | null): string {
           </div>
           <div class="mt-4 rounded-lg border border-emerald-200/80 bg-white px-3 py-3 text-sm text-slate-700">
             {{ paperSummary?.latest_execution_explanation ?? '当前暂无新的模拟盘执行说明。' }}
+          </div>
+        </Card>
+
+        <Card class="border border-sky-200/80 bg-sky-50/70">
+          <p class="text-xs uppercase tracking-[0.18em] text-sky-700">Paper Pool</p>
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <div class="rounded-lg border border-sky-200/80 bg-white px-3 py-3">
+              <p class="text-xs uppercase tracking-widest text-sky-700">已占用席位</p>
+              <p class="mt-2 text-lg font-semibold text-slate-900">
+                {{ paperPoolSummary?.occupied_slot_count ?? 0 }} / {{ paperPoolSummary?.slot_count ?? 0 }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-sky-200/80 bg-white px-3 py-3">
+              <p class="text-xs uppercase tracking-widest text-sky-700">Challenger 数</p>
+              <p class="mt-2 text-lg font-semibold text-slate-900">{{ paperPoolSummary?.challenger_count ?? 0 }}</p>
+            </div>
+          </div>
+          <div class="mt-4 rounded-lg border border-sky-200/80 bg-white px-3 py-3 text-sm text-slate-700">
+            <template v-if="strongestChallenger?.proposal">
+              最强 challenger：{{ localizeStrategyTitle(strongestChallenger.proposal.title, 'zh-CN') }}
+              · {{ strongestChallenger.proposal.symbol }}
+              · 分差 {{ paperPoolSummary?.primary_vs_strongest_score_delta ?? '--' }}
+            </template>
+            <template v-else>
+              当前 challenger 席位尚未形成有效候选。
+            </template>
           </div>
         </Card>
       </div>

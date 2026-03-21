@@ -597,3 +597,78 @@ def test_bootstrap_paper_trade_skips_outside_session(monkeypatch, tmp_path: Path
         assert data["orders"] == []
         assert data["positions"] == []
         assert len(data["nav"]) == 1
+
+
+def test_fetch_paper_data_isolated_by_slot(monkeypatch, tmp_path: Path) -> None:
+    runtime_db = tmp_path / "runtime-paper.db"
+    paper_db = tmp_path / "legacy-paper.db"
+    app_db = tmp_path / "app.db"
+
+    original_settings = get_settings()
+    patched_settings = original_settings.model_copy(
+        deep=True,
+        update={
+            "storage": original_settings.storage.model_copy(
+                update={
+                    "runtime_db_path": str(runtime_db),
+                    "paper_db_path": str(paper_db),
+                    "database_url": f"sqlite:///{app_db}",
+                }
+            )
+        },
+    )
+
+    import openhamster.api.services as services_module
+
+    monkeypatch.setattr(services_module, "get_settings", lambda: patched_settings)
+
+    engine = create_engine(f"sqlite:///{app_db}", future=True)
+    TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    Base.metadata.create_all(bind=engine)
+
+    current_time = datetime(2026, 3, 13, 10, 0, tzinfo=ZoneInfo(patched_settings.timezone))
+    with TestingSession() as db:
+        proposal = StrategyProposal(
+            run_id="test-run-paper-slot",
+            title="Paper Slot Seed",
+            symbol="2800.HK",
+            market_scope="HK",
+            thesis="Seed slot-specific paper NAV.",
+            source_kind="minimax",
+            provider_status="ready",
+            provider_model="MiniMax-M2.5",
+            provider_message="ok",
+            market_snapshot_hash="snapshot-hash",
+            event_digest_hash="digest-hash",
+            strategy_dsl={"params": {"base_strategy": "rsi"}},
+            debate_report={},
+            evidence_pack={},
+            features_used=["RSI"],
+            deterministic_score=78.0,
+            llm_score=80.0,
+            final_score=78.6,
+            status=ProposalStatus.CANDIDATE,
+            created_at=current_time,
+            updated_at=current_time,
+            promoted_at=None,
+            archived_at=None,
+        )
+        db.add(proposal)
+        db.flush()
+
+        inserted = _initialize_paper_snapshot_for_proposal(
+            db,
+            proposal=proposal,
+            current_time=current_time,
+            decision_id="decision-paper-slot",
+            reason="candidate_slot_seed",
+            slot_id="candidate-1",
+        )
+        assert inserted is True
+        db.commit()
+
+    primary = fetch_paper_data(limit=10, slot_id="primary")
+    challenger = fetch_paper_data(limit=10, slot_id="candidate-1")
+    assert primary["nav"] == []
+    assert len(challenger["nav"]) == 1
+    assert challenger["nav"][0]["slot_id"] == "candidate-1"
