@@ -2,7 +2,9 @@
 
 [English README](README.md) · [项目主页](https://nullwuwu.github.io/openhamster/)
 
-![OpenHamster hero](site/assets/openhamster-pixel.svg)
+<p align="center">
+  <img src="site/assets/openhamster-pixel.svg" alt="OpenHamster hamster icon" width="240" />
+</p>
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-0f766e?style=flat-square)](https://www.python.org/)
 [![Vue](https://img.shields.io/badge/Web-Vue%203-0f766e?style=flat-square)](https://vuejs.org/)
