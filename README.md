@@ -146,7 +146,3 @@ Primary references:
 - Finish the backtest and experiment surfaces exposed under `/api/v1`
 - Improve operator-facing evidence packs and daily event digest quality
 - Keep live-trading admission strictly separate from paper-trading success
-
-## Acknowledgements
-
-The open-source presentation direction for this repository was refreshed with reference to the public structure and positioning style of [TraderAlice/OpenAlice](https://github.com/TraderAlice/OpenAlice).

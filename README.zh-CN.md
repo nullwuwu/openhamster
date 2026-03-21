@@ -146,7 +146,3 @@ defaults < config/base.yaml < config/local.yaml < .env < .env.local < environmen
 - 补完整 `/api/v1` 下的回测与实验暴露面
 - 提升 operator 视角下的证据包和日摘要质量
 - 严格把“模拟盘成功”与“可进实盘”分开
-
-## 参考
-
-本次仓库对外展示层的重构，参考了公开项目 [TraderAlice/OpenAlice](https://github.com/TraderAlice/OpenAlice) 的 README 组织方式与开源入口设计。
