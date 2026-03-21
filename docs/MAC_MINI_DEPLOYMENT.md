@@ -41,6 +41,8 @@ bash scripts/start_local_daemon.sh
 
 这个脚本会：
 - 重新构建前端
+- 同步一份可由 `launchd` 访问的 runtime bundle 到 `~/.openhamster/local-runtime/current`
+- 把数据库、缓存、日志保存在 `~/.openhamster/local-runtime/state`
 - 重新渲染 `launchd` 配置
 - 覆盖安装到 `~/Library/LaunchAgents`
 - 重启 `com.openhamster.api`
@@ -71,12 +73,12 @@ launchctl print gui/$(id -u)/com.openhamster.api
 ```
 
 ## 日志位置
-- `logs/openhamster-api.out.log`
-- `logs/openhamster-api.err.log`
+- `~/.openhamster/local-runtime/state/logs/openhamster-api.out.log`
+- `~/.openhamster/local-runtime/state/logs/openhamster-api.err.log`
 
 推荐同时观察：
 ```bash
-tail -f logs/openhamster-api.out.log logs/openhamster-api.err.log
+tail -f ~/.openhamster/local-runtime/state/logs/openhamster-api.out.log ~/.openhamster/local-runtime/state/logs/openhamster-api.err.log
 ```
 
 ## 更新流程
@@ -101,7 +103,7 @@ npm run test:e2e --prefix apps/web -- --reporter=line
 - Mac mini 进入“永不自动睡眠”模式
 - 不要长期跑 `vite dev`
 - 把 `.env.local` 作为唯一密钥入口
-- 保持 `logs/` 和 `var/db/` 在本机磁盘上
+- 保持 `~/.openhamster/local-runtime/state` 在本机磁盘上
 
 ## 当前边界
 - 当前运行底座仍是 SQLite + runtime state SQLite

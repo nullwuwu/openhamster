@@ -32,6 +32,24 @@
     <string>1</string>
     <key>OPENHAMSTER_STARTUP_MODE</key>
     <string>launchd</string>
+    <key>DATABASE_URL</key>
+    <string>sqlite:///__STATE_ROOT__/var/db/openhamster.db</string>
+    <key>RUNTIME_DB_PATH</key>
+    <string>__STATE_ROOT__/var/db/trading.db</string>
+    <key>PAPER_DB_PATH</key>
+    <string>__STATE_ROOT__/var/db/paper_trading.db</string>
+    <key>RUNTIME_STATE_DB_PATH</key>
+    <string>__STATE_ROOT__/var/db/runtime_state.db</string>
+    <key>MARKET_CACHE_PATH</key>
+    <string>__STATE_ROOT__/var/cache/market_data_cache.db</string>
+    <key>APP_LOG_PATH</key>
+    <string>__STATE_ROOT__/var/logs/openhamster.log</string>
+    <key>OPENHAMSTER_LOG_DIR</key>
+    <string>__LOG_DIR__</string>
+    <key>OPENHAMSTER_STDOUT_LOG_PATH</key>
+    <string>__LOG_DIR__/openhamster-api.out.log</string>
+    <key>OPENHAMSTER_STDERR_LOG_PATH</key>
+    <string>__LOG_DIR__/openhamster-api.err.log</string>
   </dict>
 </dict>
 </plist>

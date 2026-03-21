@@ -114,10 +114,10 @@ router = APIRouter(prefix="/api/v1")
 logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FRONTEND_DIST_DIR = REPO_ROOT / "apps" / "web" / "dist"
-LOG_DIR = REPO_ROOT / "logs"
+LOG_DIR = Path(os.environ.get("OPENHAMSTER_LOG_DIR", REPO_ROOT / "logs"))
 RUNTIME_LOG_PATHS = {
-    "out": LOG_DIR / "openhamster-api.out.log",
-    "err": LOG_DIR / "openhamster-api.err.log",
+    "out": Path(os.environ.get("OPENHAMSTER_STDOUT_LOG_PATH", LOG_DIR / "openhamster-api.out.log")),
+    "err": Path(os.environ.get("OPENHAMSTER_STDERR_LOG_PATH", LOG_DIR / "openhamster-api.err.log")),
 }
 PROCESS_STARTED_AT: datetime | None = None
 
