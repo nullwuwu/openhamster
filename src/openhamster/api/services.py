@@ -746,7 +746,8 @@ def get_pipeline_runtime_status(db: Session) -> dict[str, object]:
         'last_trigger': None,
         'degraded': False,
     }
-    current_state = str(status.get('current_state', 'idle'))
+    raw_state = str(status.get('current_state', 'idle'))
+    current_state = raw_state
     stalled = False
     expected_next_run_at = status.get('expected_next_run_at')
     last_run_at = status.get('last_run_at')
@@ -764,6 +765,14 @@ def get_pipeline_runtime_status(db: Session) -> dict[str, object]:
             stalled = False
     if stalled and current_state not in {'failed', 'degraded'}:
         current_state = 'stalled'
+    elif (
+        current_state == 'idle'
+        and isinstance(status.get('last_success_at'), str)
+        and isinstance(expected_next_run_at, str)
+        and expected_next_run_at
+        and not stalled
+    ):
+        current_state = 'scheduled'
     return {
         'current_state': current_state,
         'status_message': str(status.get('status_message', 'Pipeline status unavailable.')),

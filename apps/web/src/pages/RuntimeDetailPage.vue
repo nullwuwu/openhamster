@@ -111,6 +111,7 @@ function runtimeVariant(state?: string, degraded?: boolean, stalled?: boolean): 
   if (state === 'failed') return 'danger'
   if (state === 'stalled' || stalled) return 'warning'
   if (state === 'degraded' || degraded) return 'warning'
+  if (state === 'scheduled') return 'success'
   if (state === 'idle') return 'success'
   return 'neutral'
 }

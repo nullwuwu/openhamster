@@ -56,6 +56,7 @@ const messages = {
       },
       runtimeState: {
         idle: '空闲',
+        scheduled: '等待下一轮',
         running: '运行中',
         degraded: '已降级',
         stalled: '已卡住',
@@ -818,6 +819,7 @@ const messages = {
       },
       runtimeState: {
         idle: 'Idle',
+        scheduled: 'Waiting for Next Run',
         running: 'Running',
         degraded: 'Degraded',
         stalled: 'Stalled',

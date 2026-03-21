@@ -212,7 +212,7 @@ def test_command_center_includes_llm_status() -> None:
         assert isinstance(data['live_readiness']['dimensions'], dict)
         assert isinstance(data['live_readiness_history'], list)
         assert 'live_readiness_change' in data
-        assert data['runtime_status']['current_state'] in {'idle', 'running', 'degraded', 'stalled', 'failed'}
+        assert data['runtime_status']['current_state'] in {'idle', 'scheduled', 'running', 'degraded', 'stalled', 'failed'}
         assert 'consecutive_failures' in data['runtime_status']
         assert 'current_stage' in data['runtime_status']
         assert 'stage_durations_ms' in data['runtime_status']
