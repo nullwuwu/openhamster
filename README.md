@@ -1,108 +1,69 @@
-# GobyShrimp
+# OpenHamster
 
-[中文说明](README.zh-CN.md)
+[中文 README](README.zh-CN.md) · [Project Site](https://nullwuwu.github.io/openhamster/)
 
-> An auditable HK strategy factory for market-aware LLM research, deterministic governance, and local paper trading.
+![OpenHamster hero](site/assets/openhamster-pixel.svg)
 
-## Overview
+[![Python](https://img.shields.io/badge/Python-3.10%2B-0f766e?style=flat-square)](https://www.python.org/)
+[![Vue](https://img.shields.io/badge/Web-Vue%203-0f766e?style=flat-square)](https://vuejs.org/)
+[![License](https://img.shields.io/badge/License-MIT-0f766e?style=flat-square)](LICENSE)
+[![Pages](https://img.shields.io/badge/GitHub%20Pages-enabled-0f766e?style=flat-square)](https://nullwuwu.github.io/openhamster/)
 
-GobyShrimp is not a generic trading bot. It is a controlled research-and-paper-trading system designed to answer operational questions before any real-capital path exists.
+> A background strategy lab that keeps the wheel turning: market-aware LLM research, deterministic governance, and audit-first paper trading.
 
-Current scope:
-- HK-only market scope
-- dynamic HK universe selection
-- MiniMax as the default live LLM provider
-- macro-only context pipeline
-- local paper ledger with audit trail
+## Why This Exists
 
-## Why GobyShrimp
+Most agent-trading demos optimize for novelty. OpenHamster optimizes for controlled persistence.
 
-Most agent trading demos optimize for novelty. GobyShrimp optimizes for control.
-
-It is built to answer:
+It is built to answer operational questions before any real-capital path exists:
 - What symbol is being researched right now, and why?
-- What strategy was proposed, by which provider, under which prompt contract?
-- Why was a proposal rejected, kept as candidate, or promoted to paper?
-- If paper NAV is flat, was that because price did not move, no rebalance was needed, or execution stalled?
+- Which provider and prompt contract produced the current proposal?
+- Why was a proposal rejected, kept as a candidate, or promoted to paper?
+- If paper NAV is flat, was that caused by price, rebalance logic, or runtime failure?
 - Is the macro pipeline healthy, degraded, or running on last known context?
 
-## What It Does Today
+## What OpenHamster Does
 
-### 1. HK universe selection
+- Dynamic HK universe selection instead of one hardcoded symbol
+- Market-aware strategy generation through a single `LLM Gateway`
+- Deterministic governance with clear promotion and rejection reasons
+- Local paper ledger for orders, positions, and NAV
+- Audit-first dashboard for runtime, research, paper, and decision history
 
-The system no longer runs on one hardcoded instrument. It uses `dynamic_hk` universe selection:
-1. load HK spot candidates
-2. filter for valid symbols and minimum turnover
-3. rank by liquidity, momentum, stability, and price quality
-4. enrich top candidates with multi-day factors
-5. penalize missing history windows
-6. select the top-ranked symbol as the research target
-
-### 2. Market-aware snapshot
-
-GobyShrimp builds a `market_snapshot` with:
-- HK market profile
-- selected symbol and universe rationale
-- macro digest
-- regime and volatility context
-- preferred and discouraged strategy tags
-
-### 3. MiniMax live strategy generation
-
-All LLM calls go through a single `LLM Gateway`.
 Current runtime providers:
 - `minimax`
 - `mock`
 
-Prompt contracts live under `src/goby_shrimp/prompts`:
-- `market_analyst`
-- `strategy_agent`
-- `research_debate`
-- `risk_manager_llm`
+Current market/data scope:
+- HK-only market flow
+- price routing via `tencent`, `akshare`, `yfinance`, `stooq`
+- macro routing via `FRED`, `World Bank`, and last known context
 
-The model produces structured strategy proposals, not arbitrary executable code.
+Explicitly out of scope:
+- broker execution
+- automatic live trading
+- legacy MCP / orchestrator paths
+- news-driven production trading flows
 
-### 4. Deterministic governance
+## Product Shape
 
-A proposal must clear:
-- hard risk gates
-- score thresholds
-- challenger delta rules
-- cooldown rules
-- macro lane health requirements
-- paper acceptance rules
-
-Governance outputs include:
-- `phase`
-- `next_step`
-- `resume_conditions`
-- promotion ETA
-- blocked reasons
-
-### 5. Local paper ledger
-
-When a proposal is promoted to paper, GobyShrimp:
-- initializes NAV
-- boots the first paper trade with live market price
-- records orders, positions, and NAV locally
-- keeps evaluating the active strategy on each runtime cycle
-
-Important boundary:
-- prices come from live market data providers
-- orders, positions, and NAV are simulated locally
-- this is not broker execution
-
-## Architecture
+```text
+Backend API      src/openhamster/api
+Frontend         apps/web
+LLM gateway      src/openhamster/llm_gateway.py
+Event pipeline   src/openhamster/events
+Runtime storage  var/db, var/logs, var/cache
+```
 
 ```mermaid
 flowchart TD
     A["HK Universe Selection"] --> B["Market Snapshot"]
-    M["Macro Chain\nFRED -> World Bank -> Last Known Context"] --> B
-    B --> C["StrategyAgent\nMiniMax via LLM Gateway"]
-    C --> D["ResearchDebateAgent"]
-    D --> E["Risk Governance"]
+    M["Macro Chain"] --> B
+    B --> C["Strategy Agent via LLM Gateway"]
+    C --> D["Research Debate"]
+    D --> E["Deterministic Governance"]
     E -->|"keep_candidate"| F["Candidate Pool"]
-    E -->|"promote_to_paper"| G["Active Strategy"]
+    E -->|"promote_to_paper"| G["Paper Strategy"]
     G --> H["Paper Execution Cycle"]
     H --> I["Orders / Positions / NAV"]
     E --> J["Audit Trail"]
@@ -113,120 +74,38 @@ flowchart TD
 
 ## Dashboard Views
 
-### `/command`
-- runtime heartbeat and pipeline stage
-- active strategy and latest execution result
-- current HK universe selection and factor breakdown
-- macro lane health
-- candidate pool distribution
-- baseline strategy catalog
-
-### `/candidates`
-- candidate ranking
-- governance phase
-- cooldown state
-- promotion eligibility
-- pool comparison
-
-### `/research`
-- market understanding
-- universe rationale
-- baseline fit
-- strategy DSL
-- debate
-- evidence pack
-- quality report
-- blockers
-
-### `/paper`
-- NAV curve
-- positions
-- orders
-- active strategy
-- operational acceptance
-- price freshness
-- rebalance explanation
-
-### `/audit`
-- decision timeline
-- universe selection history
-- macro degradation / recovery
-- provider fallback events
-- governance cause chain
-
-## Runtime Status
-
-The command center exposes:
-- `current_state`
-- `current_stage`
-- `stage_started_at`
-- `stage_durations_ms`
-- `last_run_at`
-- `last_success_at`
-- `last_failure_at`
-- `consecutive_failures`
-- `expected_next_run_at`
-- `last_trigger`
-
-Current stage coverage:
-- event sync
-- digest sync
-- market snapshot build
-- market analyst
-- strategy generation
-- decision materialization
-- paper execution
-
-## Market and Data Scope
-
-### Current scope
-- HK-only
-- market-aware
-- dynamic universe selection
-
-### Price data routing
-- `tencent`
-- `akshare`
-- `yfinance`
-- `stooq`
-
-### Macro routing
-- `FRED`
-- `World Bank`
-- `last known context`
-
-### Intentionally excluded
-- news and announcement pipelines
-- broker execution
-- multi-market live trading
-- automatic production trading
+- `/command`: runtime heartbeat, slot focus, blockers, paper summary
+- `/candidates`: challenger ranking, cooldown, promotion eligibility
+- `/research`: proposal evidence, market rationale, debate and quality report
+- `/paper`: active strategy, holdings, NAV curve, execution explanation
+- `/audit`: decision timeline, universe changes, provider and macro events
 
 ## Quick Start
 
 ### Backend
+
 ```bash
 pip install -e .[dev]
 alembic upgrade head
-gobyshrimp-api
+openhamster-api
 ```
 
 ### Frontend
+
 ```bash
 npm install --prefix apps/web
 npm run dev --prefix apps/web
 ```
 
 Default local endpoints:
-- Frontend: `http://127.0.0.1:5173`
-- Backend: `http://127.0.0.1:8000`
+- frontend: `http://127.0.0.1:5173`
+- backend: `http://127.0.0.1:8000`
 
 Production-style local run on a Mac mini:
+
 ```bash
 bash scripts/start_local_daemon.sh
 ```
-
-Production-style local endpoint:
-- Dashboard + API: `http://127.0.0.1:8000`
 
 ## Configuration
 
@@ -236,109 +115,36 @@ Configuration precedence:
 defaults < config/base.yaml < config/local.yaml < .env < .env.local < environment variables
 ```
 
-Recommended secrets in `.env.local`:
-- `MINIMAX_API_KEY`
-- `FRED_API_KEY`
+Recommended secret placement:
+- non-secret local overrides: `config/local.yaml`
+- secrets: `.env.local`
+- runtime switches: database-backed runtime overrides
 
-Useful runtime overrides:
-- `LLM_PROVIDER=minimax`
-- `LLM_MODEL=MiniMax-M2.5`
-- `LLM_TEMPERATURE=0.3`
-- `DATABASE_URL=sqlite:///var/db/gobyshrimp.db`
+Primary references:
+- [docs/configuration.md](docs/configuration.md)
+- [docs/CONFIG_BOUNDARIES.md](docs/CONFIG_BOUNDARIES.md)
+- [docs/RUNBOOK.md](docs/RUNBOOK.md)
 
-Reference files:
-- `config/base.yaml`
-- `config/local.yaml`
-- `.env.example`
-- `docs/configuration.md`
+## Open Source Guide
 
-## Manual Operations
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [SECURITY.md](SECURITY.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [docs/README.md](docs/README.md)
 
-### Trigger research immediately
-- API: `POST /api/v1/runtime/sync`
-- Dashboard: `Run Now`
+## Release
 
-### Runtime LLM status
-- API: `GET /api/v1/runtime/llm`
-
-### Acceptance report
-- API: `GET /api/v1/ops/acceptance-report?window_days=30`
-- Script:
-  - `python scripts/generate_acceptance_report.py`
-  - `python scripts/generate_acceptance_report.py --window-days 30 --format json`
-
-## Mac mini Deployment
-- Long-running single-node deployment is documented in:
-  - `docs/MAC_MINI_DEPLOYMENT.md`
-- Recommended production-style shape:
-  - run `bash scripts/start_local_daemon.sh`
-  - let FastAPI serve `apps/web/dist`
-  - keep the API alive with `launchd`
-
-## Validation Baseline
-
-- `pytest tests -q` -> `122 passed, 8 skipped`
-- `npm run build --prefix apps/web` -> passed
-
-## Release Status
-
-Current implementation status:
-- engineering refactor: `92%`
-- product readiness: `98%`
-- auditable strategy factory target: `94%`
-
-Already true:
-- HK-only market-aware research path is active
-- MiniMax live path is integrated
-- runtime scheduler is real
-- paper ledger records orders, positions, and NAV
-- governance, ETA, and audit trail are visible
-
-Still needs time:
-- longer live operating history
-- thicker long-horizon quality statistics
-- more mature provider health history
-
-## Project Layout
-
-```text
-apps/web/                 Vue dashboard
-config/                   tracked system config
-src/goby_shrimp/api/      FastAPI app, DTOs, services
-src/goby_shrimp/data/     market data providers and universe logic
-src/goby_shrimp/events/   macro provider chain
-src/goby_shrimp/prompts/  agent prompt contracts
-src/goby_shrimp/risk/     risk models and review helpers
-src/goby_shrimp/runtime/  scheduler and runtime control
-src/goby_shrimp/strategy/ strategy registry and plugins
-var/db/                   local business DB + runtime state DB
-```
-
-## Documentation
-- `docs/ARCHITECTURE.md`
-- `docs/PROJECT_OVERVIEW.md`
-- `docs/IMPLEMENTATION_STATUS.md`
-- `docs/DECISIONS.md`
-- `docs/configuration.md`
-- `docs/RUNBOOK.md`
-- `docs/RELEASE_CHECKLIST.md`
-- `docs/releases/v0.1.0.md`
-
-## Known Limits
-- SQLite is still the delivery default, not the final operating database
-- paper execution is simulated, not broker-connected
-- macro context intentionally excludes news and announcements
-- long-horizon validation still depends on accumulating more live history
+- Current public milestone: `0.2.0`
+- GitHub repository: [nullwuwu/openhamster](https://github.com/nullwuwu/openhamster)
+- GitHub Pages: [nullwuwu.github.io/openhamster](https://nullwuwu.github.io/openhamster/)
 
 ## Roadmap
 
-### Near term
-- accumulate longer operating history
-- improve long-horizon quality statistics
-- harden provider health history and recovery semantics
-- tighten paper execution explanations and audit drill-down
+- Harden the strategy factory and audit chain around the current HK scope
+- Finish the backtest and experiment surfaces exposed under `/api/v1`
+- Improve operator-facing evidence packs and daily event digest quality
+- Keep live-trading admission strictly separate from paper-trading success
 
-### Later
-- PostgreSQL migration when operating load justifies it
-- richer market-aware strategy catalog
-- stronger runtime operations history and reporting
+## Acknowledgements
+
+The open-source presentation direction for this repository was refreshed with reference to the public structure and positioning style of [TraderAlice/OpenAlice](https://github.com/TraderAlice/OpenAlice).

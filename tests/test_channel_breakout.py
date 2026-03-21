@@ -5,7 +5,7 @@ import pytest
 import pandas as pd
 import numpy as np
 
-from goby_shrimp.strategy.channel_breakout import ChannelBreakoutStrategy, create_channel_breakout_strategy
+from openhamster.strategy.channel_breakout import ChannelBreakoutStrategy, create_channel_breakout_strategy
 
 
 class TestChannelBreakoutStrategy:

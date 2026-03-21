@@ -1,6 +1,6 @@
 import { createI18n } from 'vue-i18n'
 
-export const LOCALE_STORAGE_KEY = 'GobyShrimp.locale'
+export const LOCALE_STORAGE_KEY = 'OpenHamster.locale'
 
 export type SupportedLocale = 'zh-CN' | 'en-US'
 
@@ -268,7 +268,7 @@ const messages = {
       },
     },
     shell: {
-      appTitle: 'GobyShrimp',
+      appTitle: 'OpenHamster',
       appTagline: '可审计策略工厂',
       consoleTitle: 'Pipeline Review Board',
       reviewResearch: '查看研究',
@@ -1030,7 +1030,7 @@ const messages = {
       },
     },
     shell: {
-      appTitle: 'GobyShrimp',
+      appTitle: 'OpenHamster',
       appTagline: 'Auditable Strategy Factory',
       consoleTitle: 'Pipeline Review Board',
       reviewResearch: 'Review Research',

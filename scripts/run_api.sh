@@ -19,6 +19,6 @@ if [[ -f "$REPO_ROOT/.env.local" ]]; then
 fi
 
 export PYTHONPATH="$REPO_ROOT/src"
-export GOBYSHRIMP_STARTUP_MODE="${GOBYSHRIMP_STARTUP_MODE:-script}"
+export OPENHAMSTER_STARTUP_MODE="${OPENHAMSTER_STARTUP_MODE:-script}"
 
-exec "$VENV_PYTHON" -m goby_shrimp.api.main
+exec "$VENV_PYTHON" -m openhamster.api.main

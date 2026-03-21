@@ -2,9 +2,9 @@
 
 当前仍在使用的仓库配置文件只有：
 
-- [`base.yaml`](/Users/a1/.openclaw/workspace/projects/quant-trader/config/base.yaml)
+- [`base.yaml`](base.yaml)
   - 仓库级默认配置
-- [`local.yaml`](/Users/a1/.openclaw/workspace/projects/quant-trader/config/local.yaml)
+- [`local.yaml`](local.yaml)
   - 本地开发覆盖配置，仅保留与 `base.yaml` 不同的非敏感项
 
 不应放在 `config/` 里的内容：

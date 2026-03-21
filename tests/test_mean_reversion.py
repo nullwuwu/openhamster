@@ -5,7 +5,7 @@ import pytest
 import pandas as pd
 import numpy as np
 
-from goby_shrimp.strategy.mean_reversion import MeanReversionStrategy, create_mean_reversion_strategy
+from openhamster.strategy.mean_reversion import MeanReversionStrategy, create_mean_reversion_strategy
 
 
 class TestMeanReversionStrategy:

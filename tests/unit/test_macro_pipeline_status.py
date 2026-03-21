@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 
-from goby_shrimp.api.db import SessionLocal, init_database
-from goby_shrimp.api.models import AuditRecord, EventRecord, EventType
-from goby_shrimp.api.services import (
+from openhamster.api.db import SessionLocal, engine, init_database
+from openhamster.api.models import AuditRecord, EventRecord, EventType
+from openhamster.api.services import (
     _set_pipeline_runtime_stage,
     _set_pipeline_runtime_status,
     get_macro_pipeline_status,
@@ -15,7 +15,7 @@ from goby_shrimp.api.services import (
     now_tz,
     sync_event_stream,
 )
-from goby_shrimp.runtime_state import delete_runtime_state_keys
+from openhamster.runtime_state import delete_runtime_state_keys
 
 
 class _BrokenMacroProvider:
@@ -27,7 +27,7 @@ class _BrokenMacroProvider:
 
 def test_sync_event_stream_marks_macro_provider_degraded(monkeypatch) -> None:
     init_database()
-    monkeypatch.setattr('goby_shrimp.api.services.get_event_providers', lambda: [_BrokenMacroProvider()])
+    monkeypatch.setattr('openhamster.api.services.get_event_providers', lambda: [_BrokenMacroProvider()])
 
     with SessionLocal() as db:
         sync_event_stream(db)
@@ -46,7 +46,7 @@ def test_sync_event_stream_marks_macro_provider_degraded(monkeypatch) -> None:
 
 def test_sync_event_stream_reuses_last_known_macro_context(monkeypatch) -> None:
     init_database()
-    monkeypatch.setattr('goby_shrimp.api.services.get_event_providers', lambda: [_BrokenMacroProvider()])
+    monkeypatch.setattr('openhamster.api.services.get_event_providers', lambda: [_BrokenMacroProvider()])
 
     with SessionLocal() as db:
         current_time = now_tz()
@@ -149,7 +149,7 @@ def test_pipeline_stage_durations_reset_for_new_run() -> None:
 def test_dynamic_hk_universe_selection_picks_hk_symbol(monkeypatch) -> None:
     init_database()
     monkeypatch.setattr(
-        'goby_shrimp.api.services.fetch_hk_universe_candidates',
+        'openhamster.api.services.fetch_hk_universe_candidates',
         lambda **kwargs: [
             {
                 'symbol': '0700.HK',
@@ -189,3 +189,96 @@ def test_dynamic_hk_universe_selection_picks_hk_symbol(monkeypatch) -> None:
         assert len(selection['candidates']) == 2
         assert selection['selection_reason']
         assert selection['top_factors']
+
+
+def test_macro_pipeline_health_history_aggregates_recent_audits() -> None:
+    init_database()
+    with SessionLocal() as db:
+        baseline = get_macro_pipeline_status(db)
+        current_time = now_tz()
+        stale_time = current_time - timedelta(days=40)
+        db.add_all(
+            [
+                AuditRecord(
+                    run_id='system-governance',
+                    decision_id='macro-health-1',
+                    event_type='macro_provider_degraded',
+                    entity_type='macro_pipeline',
+                    entity_id='fred',
+                    payload={},
+                    created_at=current_time - timedelta(days=1),
+                ),
+                AuditRecord(
+                    run_id='system-governance',
+                    decision_id='macro-health-2',
+                    event_type='macro_provider_degraded',
+                    entity_type='macro_pipeline',
+                    entity_id='fred',
+                    payload={},
+                    created_at=current_time - timedelta(days=2),
+                ),
+                AuditRecord(
+                    run_id='system-governance',
+                    decision_id='macro-health-3',
+                    event_type='macro_provider_fallback_applied',
+                    entity_type='macro_pipeline',
+                    entity_id='fred',
+                    payload={},
+                    created_at=current_time - timedelta(hours=12),
+                ),
+                AuditRecord(
+                    run_id='system-governance',
+                    decision_id='macro-health-4',
+                    event_type='macro_provider_recovered',
+                    entity_type='macro_pipeline',
+                    entity_id='fred',
+                    payload={},
+                    created_at=current_time - timedelta(hours=6),
+                ),
+                AuditRecord(
+                    run_id='system-governance',
+                    decision_id='macro-health-stale',
+                    event_type='macro_provider_degraded',
+                    entity_type='macro_pipeline',
+                    entity_id='fred',
+                    payload={},
+                    created_at=stale_time,
+                ),
+            ]
+        )
+        db.commit()
+
+        status = get_macro_pipeline_status(db)
+
+    assert status['degraded_count_30d'] - baseline['degraded_count_30d'] == 2
+    assert status['fallback_count_30d'] - baseline['fallback_count_30d'] == 1
+    assert status['recovery_count_30d'] - baseline['recovery_count_30d'] == 1
+    expected_score = round(
+        max(
+            0.1,
+            min(
+                1.0,
+                1.0
+                - status['degraded_count_30d'] * 0.12
+                - status['fallback_count_30d'] * 0.06
+                + status['recovery_count_30d'] * 0.02,
+            ),
+        ),
+        2,
+    )
+    assert status['health_score_30d'] == expected_score
+
+
+def test_init_database_repairs_runtime_indexes() -> None:
+    init_database()
+    inspector = inspect(engine)
+
+    audit_indexes = {item['name'] for item in inspector.get_indexes('audit_records')}
+    event_indexes = {item['name'] for item in inspector.get_indexes('event_records')}
+    digest_indexes = {item['name'] for item in inspector.get_indexes('daily_event_digests')}
+
+    assert 'ix_audit_records_event_created_at' in audit_indexes
+    assert 'ix_audit_records_entity_event_created_at' in audit_indexes
+    assert 'ix_audit_records_decision_created_at' in audit_indexes
+    assert 'ix_event_records_market_published_at' in event_indexes
+    assert 'ix_daily_event_digests_scope_trade_date' in digest_indexes

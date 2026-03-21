@@ -20,7 +20,7 @@ jobs:
       - name: Lint
         run: ruff check src tests
       - name: Type check
-        run: mypy src/goby_shrimp/api src/goby_shrimp/config
+        run: mypy src/openhamster/api src/openhamster/config
       - name: Tests
         run: pytest tests/unit tests/integration
       - name: Alembic migrate

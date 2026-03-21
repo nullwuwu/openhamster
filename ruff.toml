@@ -26,4 +26,4 @@ indent-style = "space"
 line-ending = "auto"
 
 [lint.isort]
-known-first-party = ["goby_shrimp"]
+known-first-party = ["openhamster"]

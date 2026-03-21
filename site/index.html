@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenHamster</title>
+    <meta
+      name="description"
+      content="An auditable strategy factory for market-aware LLM research, deterministic governance, and local paper trading."
+    />
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <nav class="topbar">
+          <div>
+            <p class="eyebrow">OpenHamster</p>
+            <h1>A tiny hamster running in the background, researching all the time.</h1>
+          </div>
+          <div class="topbar-actions">
+            <a class="button ghost" href="https://github.com/nullwuwu/openhamster">GitHub</a>
+            <a class="button" href="https://github.com/nullwuwu/openhamster/blob/main/README.zh-CN.md">中文说明</a>
+          </div>
+        </nav>
+
+        <div class="hero-grid">
+          <section class="hero-copy">
+            <p class="lede">
+              OpenHamster keeps the wheel turning in the background: symbol selection, prompt contracts,
+              governance gates, paper-trading state, and audit history stay reviewable instead of hidden.
+            </p>
+            <div class="actions">
+              <a class="button" href="https://github.com/nullwuwu/openhamster">View Repository</a>
+              <a class="button ghost" href="https://github.com/nullwuwu/openhamster/blob/main/docs/README.md">Read Docs</a>
+            </div>
+            <ul class="signals">
+              <li>HK-only scope</li>
+              <li>MiniMax or mock provider</li>
+              <li>Deterministic governance</li>
+              <li>Local paper ledger</li>
+            </ul>
+          </section>
+
+          <section class="hero-card">
+            <img src="./assets/openhamster-pixel.svg" alt="OpenHamster pixel hamster icon" />
+          </section>
+        </div>
+      </header>
+
+      <main>
+        <section class="section">
+          <div class="section-head">
+            <p class="eyebrow">Why</p>
+            <h2>Built for evidence before capital.</h2>
+          </div>
+          <div class="grid three">
+            <article class="card">
+              <h3>Research With Context</h3>
+              <p>Universe selection, macro context, and strategy prompts feed one reviewable market snapshot.</p>
+            </article>
+            <article class="card">
+              <h3>Governance With Reasons</h3>
+              <p>Promotion and rejection are explicit outputs, not hidden side effects of an opaque agent loop.</p>
+            </article>
+            <article class="card">
+              <h3>Paper Trading With Audit</h3>
+              <p>Orders, positions, NAV, and runtime events remain inspectable from the dashboard and event trail.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <p class="eyebrow">Flow</p>
+            <h2>One controlled loop from research to paper execution.</h2>
+          </div>
+          <div class="flow card wide">
+            <img src="./assets/audit-loop.svg" alt="Flow diagram for OpenHamster" />
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <p class="eyebrow">Surface</p>
+            <h2>Operator-facing dashboard views.</h2>
+          </div>
+          <div class="grid two">
+            <article class="card">
+              <h3>/command</h3>
+              <p>Runtime heartbeat, slot focus, blockers, and paper summary.</p>
+            </article>
+            <article class="card">
+              <h3>/research</h3>
+              <p>Proposal evidence pack, market rationale, debate, and quality report.</p>
+            </article>
+            <article class="card">
+              <h3>/paper</h3>
+              <p>Active strategy, holdings, NAV curve, and execution explanations.</p>
+            </article>
+            <article class="card">
+              <h3>/audit</h3>
+              <p>Decision timeline, universe changes, provider fallback events, and cause chain.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <p class="eyebrow">Start</p>
+            <h2>Quick start.</h2>
+          </div>
+          <div class="grid two">
+            <article class="card code-card">
+              <h3>Backend</h3>
+              <pre><code>pip install -e .[dev]
+alembic upgrade head
+openhamster-api</code></pre>
+            </article>
+            <article class="card code-card">
+              <h3>Frontend</h3>
+              <pre><code>npm install --prefix apps/web
+npm run dev --prefix apps/web</code></pre>
+            </article>
+          </div>
+        </section>
+
+        <section class="section callout">
+          <div>
+            <p class="eyebrow">Boundary</p>
+            <h2>No broker execution. No auto live trading.</h2>
+            <p>
+              OpenHamster is intentionally constrained. Paper-trading success does not imply live-trading readiness,
+              and old legacy runtime paths are not part of the public roadmap.
+            </p>
+          </div>
+          <div class="actions">
+            <a class="button" href="https://github.com/nullwuwu/openhamster/blob/main/docs/PROJECT_OVERVIEW.md">Architecture Notes</a>
+            <a class="button ghost" href="https://github.com/nullwuwu/openhamster/blob/main/CONTRIBUTING.md">Contributing</a>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

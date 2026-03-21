@@ -1,7 +1,7 @@
-# GobyShrimp 实盘准入标准
+# OpenHamster 实盘准入标准
 
 ## 目标
-这份文档定义 GobyShrimp 从 `paper` 进入 `live` 之前必须满足的最低条件。
+这份文档定义 OpenHamster 从 `paper` 进入 `live` 之前必须满足的最低条件。
 
 目的不是“尽快上实盘”，而是避免把一个只在短期看起来可用的系统，过早推向真实资金。
 
@@ -151,7 +151,7 @@
 - 当前没有真正的 broker execution 层
 
 ## 结论
-当前 GobyShrimp 的定位应当是：
+当前 OpenHamster 的定位应当是：
 - 值得持续运行的 `paper-first` 策略工厂
 
 而不是：

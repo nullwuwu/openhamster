@@ -427,8 +427,8 @@ wheels = [
 ]
 
 [[package]]
-name = "gobyshrimp"
-version = "0.1.0"
+name = "openhamster"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "akshare" },

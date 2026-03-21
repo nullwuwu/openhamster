@@ -5,9 +5,9 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from goby_shrimp.api.db import Base
-from goby_shrimp.api import models  # noqa: F401
-from goby_shrimp.config import get_settings
+from openhamster.api.db import Base
+from openhamster.api import models  # noqa: F401
+from openhamster.config import get_settings
 
 config = context.config
 

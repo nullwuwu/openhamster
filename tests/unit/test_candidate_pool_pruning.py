@@ -7,10 +7,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from goby_shrimp.api.db import Base
-from goby_shrimp.api.models import ProposalStatus, StrategyProposal
-from goby_shrimp.api.services import prune_strategy_proposals
-from goby_shrimp.config import get_settings
+from openhamster.api.db import Base
+from openhamster.api.models import ProposalStatus, StrategyProposal
+from openhamster.api.services import prune_strategy_proposals
+from openhamster.config import get_settings
 
 
 def _make_proposal(
@@ -67,7 +67,7 @@ def test_prune_strategy_proposals_archives_old_rejected_and_candidate_overflow(m
         },
     )
 
-    import goby_shrimp.api.services as services_module
+    import openhamster.api.services as services_module
 
     monkeypatch.setattr(services_module, "get_settings", lambda: patched_settings)
 

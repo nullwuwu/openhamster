@@ -1,9 +1,10 @@
-# GobyShrimp 文档索引
+# OpenHamster 文档索引
 
 - `ARCHITECTURE.md`：系统架构、Agent 团队、状态流与审计链
 - `PROJECT_OVERVIEW.md`：项目目标、阶段定义、B 级自治边界
 - `PROJECT_CONTEXT.md`：项目背景、运行假设、语言规范、Mac mini 长期运行基线与当前产品边界
 - `STRATEGY_KNOWLEDGE_LAYER.md`：第一版策略知识层的来源、边界、知识家族、治理接入点与第二阶段留口
+- `JOINQUANT_STRATEGY_RESEARCH.md`：聚宽优秀开源策略的结构化研究，重点提炼可迁移的方法模式与 OpenHamster 落地方式
 - `TUSHARE_PURCHASE_PLAN.md`：Tushare 港股权限购买顺序与分阶段建议
 - `NEW_THREAD_HANDOFF.md`：新线程接力说明，适合在新的 Codex 会话开头直接贴给模型
 - `IMPLEMENTATION_STATUS.md`：当前已交付能力与未完成项
@@ -17,4 +18,4 @@
 - `LLM_PROVIDER_MIGRATION.md`：未来切换 LLM provider 时的历史保留、对照窗口与审计原则
 - `DESKTOP_PACKAGING_PROPOSAL.md`：Mac-only 轻壳本地控制台方案，不改变当前后端主线
 - `RELEASE_CHECKLIST.md`：发布前检查清单
-- `releases/v0.1.0.md`：`v0.1.0` 发布说明草稿
+- `releases/v0.2.0.md`：`v0.2.0` 公开发布说明

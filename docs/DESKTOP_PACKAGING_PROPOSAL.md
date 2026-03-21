@@ -1,12 +1,12 @@
 # Desktop App Packaging Proposal
 
 ## 目标
-把 GobyShrimp 从“本地服务 + 浏览器”包装成一个 **Mac-only、本地控制台式桌面应用**，但不改变当前后端主线。
+把 OpenHamster 从“本地服务 + 浏览器”包装成一个 **Mac-only、本地控制台式桌面应用**，但不改变当前后端主线。
 
 这份文档定义的是 **产品与系统方案**，不是本轮立刻实现的桌面壳。
 
 ## 结论先行
-GobyShrimp Desktop 的正确方向不是“重写成桌面软件”，而是：
+OpenHamster Desktop 的正确方向不是“重写成桌面软件”，而是：
 - 保留现有 FastAPI 后端
 - 保留现有 Vue dashboard
 - 保留本地 SQLite / runtime state
@@ -26,7 +26,7 @@ GobyShrimp Desktop 的正确方向不是“重写成桌面软件”，而是：
 
 ## 目标产品形态
 名称建议：
-- `GobyShrimp Desktop`
+- `OpenHamster Desktop`
 
 启动后应该发生的事情：
 1. 检查本地后端服务是否已运行
@@ -56,7 +56,7 @@ GobyShrimp Desktop 的正确方向不是“重写成桌面软件”，而是：
 ## 推荐架构
 ```mermaid
 flowchart TD
-    A["GobyShrimp Desktop"] --> B["Local Control Layer"]
+    A["OpenHamster Desktop"] --> B["Local Control Layer"]
     B --> C["Start / Stop / Restart / Status / Logs"]
     B --> D["Open Local Dashboard"]
     D --> E["FastAPI API"]

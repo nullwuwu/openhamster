@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LAUNCHD_LABEL="com.gobyshrimp.api"
+LAUNCHD_LABEL="com.openhamster.api"
 LAUNCHD_TARGET="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 RENDERED_PLIST="$REPO_ROOT/var/launchd/${LAUNCHD_LABEL}.plist"
 HEALTH_URL="http://127.0.0.1:8000/healthz"
@@ -36,16 +36,16 @@ launchctl kickstart -k "gui/$(id -u)/${LAUNCHD_LABEL}" >/dev/null 2>&1 || true
 echo "[5/5] Waiting for health check"
 for _ in {1..30}; do
   if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
-    echo "GobyShrimp is running at http://127.0.0.1:8000/"
+    echo "OpenHamster is running at http://127.0.0.1:8000/"
     echo "Logs:"
-    echo "  $REPO_ROOT/logs/gobyshrimp-api.out.log"
-    echo "  $REPO_ROOT/logs/gobyshrimp-api.err.log"
+    echo "  $REPO_ROOT/logs/openhamster-api.out.log"
+    echo "  $REPO_ROOT/logs/openhamster-api.err.log"
     exit 0
   fi
   sleep 1
 done
 
 echo "Service did not become healthy in time. Check logs:" >&2
-echo "  $REPO_ROOT/logs/gobyshrimp-api.out.log" >&2
-echo "  $REPO_ROOT/logs/gobyshrimp-api.err.log" >&2
+echo "  $REPO_ROOT/logs/openhamster-api.out.log" >&2
+echo "  $REPO_ROOT/logs/openhamster-api.err.log" >&2
 exit 1

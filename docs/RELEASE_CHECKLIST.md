@@ -1,6 +1,6 @@
-# GobyShrimp 发布前检查清单
+# OpenHamster 发布前检查清单
 
-当前适用目标：`v0.1.0`
+当前适用目标：`v0.2.0`
 
 ## 1. 产品边界确认
 - 仓库首页和文档明确写出当前边界：
@@ -24,7 +24,7 @@
 ## 3. 后端基线
 - `alembic upgrade head` 可成功执行
 - 后端可正常启动：
-  - `gobyshrimp-api`
+  - `openhamster-api`
 - 关键 API 可用：
   - `GET /api/v1/command`
   - `GET /api/v1/runtime/llm`
@@ -76,8 +76,8 @@
 - 仓库名与定位一致
 - GitHub Description 已更新
 - 选择发布 tag：
-  - 建议 `v0.1.0`
-- Release Notes 使用 `docs/releases/v0.1.0.md`
+  - 建议 `v0.2.0`
+- Release Notes 使用 `docs/releases/v0.2.0.md`
 
 ## 9. 已知限制需在发布时明确
 - SQLite 仍是当前默认交付路径，不是最终运行底座

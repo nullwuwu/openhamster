@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from goby_shrimp.data import StooqProvider, get_provider
+from openhamster.data import StooqProvider, get_provider
 
 
 NETWORK_TESTS_ENABLED = os.getenv("RUN_NETWORK_TESTS") == "1"
@@ -31,7 +31,7 @@ class TestStooqProvider:
         assert isinstance(provider, StooqProvider)
         assert provider.name == "stooq"
 
-    @patch("goby_shrimp.data.stooq_provider._fetch_stooq_data")
+    @patch("openhamster.data.stooq_provider._fetch_stooq_data")
     def test_hk_ticker_format(self, mock_fetch):
         dates = pd.date_range("2025-01-01", periods=3, freq="D", name="Date")
         mock_fetch.return_value = pd.DataFrame(
@@ -71,7 +71,7 @@ class TestStooqProviderIntegration:
 
 
 class TestStooqMock:
-    @patch("goby_shrimp.data.stooq_provider._fetch_stooq_data")
+    @patch("openhamster.data.stooq_provider._fetch_stooq_data")
     def test_fetch_ohlcv_success(self, mock_fetch):
         dates = pd.date_range("2024-01-01", "2024-01-10", freq="D", name="Date")
         mock_fetch.return_value = pd.DataFrame(
@@ -92,14 +92,14 @@ class TestStooqMock:
         assert "close" in data.columns
         assert isinstance(data.index, pd.DatetimeIndex)
 
-    @patch("goby_shrimp.data.stooq_provider._fetch_stooq_data")
+    @patch("openhamster.data.stooq_provider._fetch_stooq_data")
     def test_fetch_ohlcv_empty(self, mock_fetch):
         mock_fetch.return_value = pd.DataFrame()
 
         with pytest.raises(RuntimeError, match="failed after"):
             StooqProvider(max_retries=1).fetch_ohlcv("INVALID", "2024-01-01", "2024-01-10")
 
-    @patch("goby_shrimp.data.stooq_provider.requests.get")
+    @patch("openhamster.data.stooq_provider.requests.get")
     def test_fetch_stooq_data_accepts_lowercase_date_column(self, mock_get):
         response = Mock()
         response.raise_for_status.return_value = None

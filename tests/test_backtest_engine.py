@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from goby_shrimp.backtest.backtest_engine import BacktestEngine
+from openhamster.backtest.backtest_engine import BacktestEngine
 
 
 class DummyProvider:

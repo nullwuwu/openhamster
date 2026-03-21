@@ -9,7 +9,7 @@
 这份文档定义的是 **迁移治理规则**，不是单次切换操作手册。
 
 ## 适用范围
-适用于 GobyShrimp 中所有直接影响研究结论或治理结论的 LLM 阶段：
+适用于 OpenHamster 中所有直接影响研究结论或治理结论的 LLM 阶段：
 - `market_analyst`
 - `strategy_agent`
 - `research_debate`

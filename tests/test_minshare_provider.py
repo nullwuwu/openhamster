@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from goby_shrimp.data.minshare_provider import MinShareProvider
+from openhamster.data.minshare_provider import MinShareProvider
 
 
 def test_requires_hk_daily_token():
@@ -42,7 +42,7 @@ def test_fetch_ohlcv_normalizes_minishare_payload(monkeypatch):
             return frame
 
     fake_module = types.SimpleNamespace(pro_api=lambda token: _FakePro(token))
-    monkeypatch.setattr("goby_shrimp.data.minshare_provider.importlib.import_module", lambda name: fake_module)
+    monkeypatch.setattr("openhamster.data.minshare_provider.importlib.import_module", lambda name: fake_module)
 
     provider = MinShareProvider(hk_daily_token="daily-token")
     data = provider.fetch_ohlcv("2800.HK", "2026-03-01", "2026-03-17")
@@ -69,7 +69,7 @@ def test_fetch_latest_quote_uses_rt_payload(monkeypatch):
             return frame
 
     fake_module = types.SimpleNamespace(pro_api=lambda token: _FakePro(token))
-    monkeypatch.setattr("goby_shrimp.data.minshare_provider.importlib.import_module", lambda name: fake_module)
+    monkeypatch.setattr("openhamster.data.minshare_provider.importlib.import_module", lambda name: fake_module)
 
     provider = MinShareProvider(hk_rt_token="rt-token")
     quote = provider.fetch_latest_quote("2800.HK")
@@ -99,7 +99,7 @@ def test_fetch_latest_quote_falls_back_to_wildcard_and_filters(monkeypatch):
             return wildcard_frame
 
     fake_module = types.SimpleNamespace(pro_api=lambda token: _FakePro(token))
-    monkeypatch.setattr("goby_shrimp.data.minshare_provider.importlib.import_module", lambda name: fake_module)
+    monkeypatch.setattr("openhamster.data.minshare_provider.importlib.import_module", lambda name: fake_module)
 
     provider = MinShareProvider(hk_rt_token="rt-token")
     quote = provider.fetch_latest_quote("2800.HK")

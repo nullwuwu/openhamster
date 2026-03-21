@@ -1,0 +1,24 @@
+<svg width="1200" height="420" viewBox="0 0 1200 420" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="420" rx="28" fill="#FFFDF7"/>
+  <rect x="40" y="130" width="180" height="110" rx="20" fill="#D6F0EB"/>
+  <text x="76" y="176" fill="#0F766E" font-family="Georgia, serif" font-size="18">1</text>
+  <text x="76" y="214" fill="#15211C" font-family="Georgia, serif" font-size="28">Universe</text>
+  <rect x="274" y="130" width="180" height="110" rx="20" fill="#FFFFFF" stroke="#D6EDE9"/>
+  <text x="310" y="176" fill="#0F766E" font-family="Georgia, serif" font-size="18">2</text>
+  <text x="310" y="214" fill="#15211C" font-family="Georgia, serif" font-size="28">Snapshot</text>
+  <rect x="508" y="130" width="180" height="110" rx="20" fill="#FFFFFF" stroke="#D6EDE9"/>
+  <text x="544" y="176" fill="#0F766E" font-family="Georgia, serif" font-size="18">3</text>
+  <text x="544" y="214" fill="#15211C" font-family="Georgia, serif" font-size="28">Proposal</text>
+  <rect x="742" y="130" width="180" height="110" rx="20" fill="#FFF7ED" stroke="#F3D4B4"/>
+  <text x="778" y="176" fill="#B45309" font-family="Georgia, serif" font-size="18">4</text>
+  <text x="778" y="214" fill="#15211C" font-family="Georgia, serif" font-size="28">Governance</text>
+  <rect x="976" y="130" width="180" height="110" rx="20" fill="#E7F2FF"/>
+  <text x="1012" y="176" fill="#1D4ED8" font-family="Georgia, serif" font-size="18">5</text>
+  <text x="1012" y="214" fill="#15211C" font-family="Georgia, serif" font-size="28">Paper</text>
+  <path d="M220 186H274" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M454 186H508" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M688 186H742" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M922 186H976" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M1068 260C1054 318 994 356 920 356H220C146 356 94 324 80 260" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <text x="470" y="336" fill="#53625A" font-family="Georgia, serif" font-size="22">Audit trail stays attached across the whole loop.</text>
+</svg>

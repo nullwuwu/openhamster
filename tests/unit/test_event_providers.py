@@ -4,8 +4,8 @@ from datetime import datetime
 
 import pytest
 
-from goby_shrimp.config import get_settings
-from goby_shrimp.events.providers import ChainedMacroProvider, FREDMacroProvider, WorldBankMacroProvider
+from openhamster.config import get_settings
+from openhamster.events.providers import ChainedMacroProvider, FREDMacroProvider, WorldBankMacroProvider
 
 
 class _FakeResponse:
@@ -63,14 +63,14 @@ def test_fred_macro_provider_requires_key(monkeypatch) -> None:
         deep=True,
         update={"integrations": settings.integrations.model_copy(update={"fred_api_key": ""})},
     )
-    monkeypatch.setattr("goby_shrimp.events.providers.get_settings", lambda: patched)
+    monkeypatch.setattr("openhamster.events.providers.get_settings", lambda: patched)
     provider = FREDMacroProvider(api_key="")
     with pytest.raises(ValueError, match="FRED_API_KEY"):
         provider.fetch(datetime(2026, 3, 11))
 
 
 def test_fred_macro_provider_normalizes_events(monkeypatch) -> None:
-    monkeypatch.setattr("goby_shrimp.events.providers.httpx.Client", _FakeClient)
+    monkeypatch.setattr("openhamster.events.providers.httpx.Client", _FakeClient)
     provider = FREDMacroProvider(api_key="fred-test")
 
     events = provider.fetch(datetime(2026, 3, 11))
@@ -82,7 +82,7 @@ def test_fred_macro_provider_normalizes_events(monkeypatch) -> None:
 
 
 def test_worldbank_macro_provider_normalizes_events(monkeypatch) -> None:
-    monkeypatch.setattr("goby_shrimp.events.providers.httpx.Client", _FakeClient)
+    monkeypatch.setattr("openhamster.events.providers.httpx.Client", _FakeClient)
     provider = WorldBankMacroProvider()
 
     events = provider.fetch(datetime(2026, 3, 11))
@@ -98,7 +98,7 @@ def test_chained_macro_provider_uses_secondary_when_primary_fails(monkeypatch) -
         def fetch(self, now: datetime, symbol_scope: str = '2800.HK', market_scope: str = 'HK'):
             raise RuntimeError("fred down")
 
-    monkeypatch.setattr("goby_shrimp.events.providers.httpx.Client", _FakeClient)
+    monkeypatch.setattr("openhamster.events.providers.httpx.Client", _FakeClient)
     provider = ChainedMacroProvider([_FailingFRED(api_key="fred-test"), WorldBankMacroProvider()])
 
     events = provider.fetch(datetime(2026, 3, 11))

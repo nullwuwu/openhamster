@@ -2,8 +2,8 @@
 Walk-forward 验证测试
 """
 import pytest
-from goby_shrimp.backtest.backtest_engine import DualMAStrategy
-from goby_shrimp.models import WalkForwardResult
+from openhamster.backtest.backtest_engine import DualMAStrategy
+from openhamster.models import WalkForwardResult
 
 
 class TestWalkForwardValidation:

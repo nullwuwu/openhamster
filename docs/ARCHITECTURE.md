@@ -1,7 +1,7 @@
-# GobyShrimp 架构
+# OpenHamster 架构
 
 ## 系统定位
-GobyShrimp 不是固定策略回测器，而是一个可审计的策略工厂。系统目标是让 LLM 参与市场感知与策略生成，同时把放行、执行、回滚与证据链固定为可追溯流程。
+OpenHamster 不是固定策略回测器，而是一个可审计的策略工厂。系统目标是让 LLM 参与市场感知与策略生成，同时把放行、执行、回滚与证据链固定为可追溯流程。
 
 ## Agent 团队
 - `MarketAnalystAgent`
@@ -30,7 +30,7 @@ GobyShrimp 不是固定策略回测器，而是一个可审计的策略工厂。
 `proposal -> backtest -> walk-forward -> debate -> risk review -> promote`
 
 后台周期调度已独立为运行模块：
-- `src/goby_shrimp/runtime/scheduler.py`
+- `src/openhamster/runtime/scheduler.py`
 - `app.py` 只负责在 lifespan 中启动和停止调度器
 
 系统也支持手动触发一次完整研究同步：
@@ -70,7 +70,7 @@ GobyShrimp 不是固定策略回测器，而是一个可审计的策略工厂。
 - `ActiveStrategy`
 
 ## 策略插件
-- 内置基线策略由 `src/goby_shrimp/strategy/plugins.py` 统一声明
+- 内置基线策略由 `src/openhamster/strategy/plugins.py` 统一声明
 - `StrategyRegistry` 从插件目录构建，不再在工厂文件内硬编码注册清单
 - `StrategyAgent` prompt 也直接读取同一份插件名列表，避免 prompt 与执行层漂移
 

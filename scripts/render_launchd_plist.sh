@@ -2,9 +2,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEMPLATE="$REPO_ROOT/deploy/launchd/com.gobyshrimp.api.plist"
+TEMPLATE="$REPO_ROOT/deploy/launchd/com.openhamster.api.plist"
 OUTPUT_DIR="$REPO_ROOT/var/launchd"
-OUTPUT_FILE="$OUTPUT_DIR/com.gobyshrimp.api.plist"
+OUTPUT_FILE="$OUTPUT_DIR/com.openhamster.api.plist"
 LOG_DIR="$REPO_ROOT/logs"
 
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from goby_shrimp.config.settings import load_app_settings
+from openhamster.config.settings import load_app_settings
 
 
 def test_settings_source_priority(tmp_path: Path, monkeypatch) -> None:
@@ -11,7 +11,7 @@ def test_settings_source_priority(tmp_path: Path, monkeypatch) -> None:
 
     base.write_text(
         """
-app_name: GobyShrimp
+app_name: OpenHamster
 storage:
   database_url: sqlite:///base.db
 data_source:
@@ -42,7 +42,7 @@ def test_settings_load_env_file_before_process_env(tmp_path: Path, monkeypatch) 
     env_file = tmp_path / ".env"
     env_local_file = tmp_path / ".env.local"
 
-    base.write_text("app_name: GobyShrimp\n", encoding="utf-8")
+    base.write_text("app_name: OpenHamster\n", encoding="utf-8")
     local.write_text("", encoding="utf-8")
     env_file.write_text(
         'MINIMAX_API_KEY="from-dotenv"\nLLM_PROVIDER=mock\n',

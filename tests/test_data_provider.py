@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from goby_shrimp.data import TwelveDataProvider, YFinanceProvider
+from openhamster.data import TwelveDataProvider, YFinanceProvider
 
 
 class TestDataProvider:
@@ -29,7 +29,7 @@ class TestDataProvider:
 
 
 class TestYFinanceProvider:
-    @patch("goby_shrimp.data.yfinance_provider.requests.get")
+    @patch("openhamster.data.yfinance_provider.requests.get")
     def test_fetch_ohlcv_success(self, mock_get):
         mock_response = Mock()
         mock_response.raise_for_status = Mock()
@@ -62,7 +62,7 @@ class TestYFinanceProvider:
         assert list(data.columns) == ["open", "high", "low", "close", "volume"]
         assert isinstance(data.index, pd.DatetimeIndex)
 
-    @patch("goby_shrimp.data.yfinance_provider.requests.get")
+    @patch("openhamster.data.yfinance_provider.requests.get")
     def test_fetch_ohlcv_empty(self, mock_get):
         mock_response = Mock()
         mock_response.raise_for_status = Mock()
@@ -80,7 +80,7 @@ class TestYFinanceProvider:
 
 
 class TestTwelveDataProvider:
-    @patch("goby_shrimp.data.twelve_data_provider.requests.get")
+    @patch("openhamster.data.twelve_data_provider.requests.get")
     def test_fetch_ohlcv_success(self, mock_get):
         mock_response = Mock()
         mock_response.json.return_value = {
@@ -115,7 +115,7 @@ class TestTwelveDataProvider:
         assert "close" in data.columns
         assert isinstance(data.index, pd.DatetimeIndex)
 
-    @patch("goby_shrimp.data.twelve_data_provider.requests.get")
+    @patch("openhamster.data.twelve_data_provider.requests.get")
     def test_fetch_ohlcv_api_error(self, mock_get):
         mock_response = Mock()
         mock_response.json.return_value = {"status": "error", "message": "Invalid symbol"}

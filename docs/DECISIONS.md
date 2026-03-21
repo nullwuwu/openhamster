@@ -1,7 +1,7 @@
 # 关键决策
 
 ## D-001 项目更名
-- 决策：`quant-trader` 更名为 `GobyShrimp`
+- 决策：`openhamster` 更名为 `OpenHamster`
 - 原因：旧名只描述交易执行，新名更适合表达“人类 + LLM 共生协作的策略工厂”
 
 ## D-002 B 级自治
@@ -34,7 +34,7 @@
 
 ## D-009 删除旧执行链路
 - 决策：删除旧 MCP / DecisionGraph / Orchestrator / Scheduler / policy.yaml / notifier 相关链路，不保留归档和兼容层
-- 原因：项目已切到 GobyShrimp 主线，继续保留旧执行叙事只会增加理解噪音和维护风险
+- 原因：项目已切到 OpenHamster 主线，继续保留旧执行叙事只会增加理解噪音和维护风险
 
 ## D-010 删除旁路执行模块
 - 决策：删除未接入当前 API/Dashboard 主线的 `broker` / `storage` / `reconciler` 模块，以及 OpenAI/Longbridge 兼容配置
@@ -57,7 +57,7 @@
 - 原因：先把“未来换模型不失控”的边界定清楚，再包装产品形态，避免桌面壳先落地却把核心治理问题推后
 
 ## D-015 桌面应用只做本地控制面
-- 决策：未来的 `GobyShrimp Desktop` 只负责本地服务启动、停止、重启、状态和日志，不搬迁策略生成、风险决策和 paper 账本逻辑
+- 决策：未来的 `OpenHamster Desktop` 只负责本地服务启动、停止、重启、状态和日志，不搬迁策略生成、风险决策和 paper 账本逻辑
 - 原因：当前 FastAPI + Vue + 本地数据库主线已经成立，桌面壳应该是轻包装，而不是第二套核心执行系统
 
 ## D-016 中文优先与术语配对

@@ -11,8 +11,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from goby_shrimp.risk import RiskManager
-from goby_shrimp.strategy.signals import Signal
+from openhamster.risk import RiskManager
+from openhamster.strategy.signals import Signal
 
 
 NETWORK_TESTS_ENABLED = os.getenv("RUN_NETWORK_TESTS") == "1"
@@ -116,7 +116,7 @@ class TestRiskManager:
 @pytest.mark.skipif(not NETWORK_TESTS_ENABLED, reason="set RUN_NETWORK_TESTS=1 to enable network integration tests")
 class TestResearchIntegration:
     def test_grid_search(self):
-        from goby_shrimp.backtest import GridSearchOptimizer
+        from openhamster.backtest import GridSearchOptimizer
 
         optimizer = GridSearchOptimizer(
             symbol="2800.HK",
@@ -132,7 +132,7 @@ class TestResearchIntegration:
 
     @pytest.mark.slow
     def test_walk_forward(self):
-        from goby_shrimp.backtest import WalkForwardEngine
+        from openhamster.backtest import WalkForwardEngine
 
         engine = WalkForwardEngine(
             symbol="2800.HK",

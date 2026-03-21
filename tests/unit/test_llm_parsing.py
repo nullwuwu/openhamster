@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from goby_shrimp.llm import parse_json_payload
+from openhamster.llm import parse_json_payload
 
 
 def test_parse_json_payload_extracts_wrapped_json_object() -> None:

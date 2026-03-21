@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from goby_shrimp.api.models import ProposalStatus, RiskDecisionAction
-from goby_shrimp.api.services import _governance_action
-from goby_shrimp.config import get_settings
+from openhamster.api.models import ProposalStatus, RiskDecisionAction
+from openhamster.api.services import _governance_action
+from openhamster.config import get_settings
 
 
 def test_real_candidate_can_replace_mock_active_without_delta_threshold() -> None:

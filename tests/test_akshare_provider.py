@@ -14,8 +14,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from goby_shrimp.config import get_settings
-from goby_shrimp.data import AKShareProvider, get_provider
+from openhamster.config import get_settings
+from openhamster.data import AKShareProvider, get_provider
 
 
 NETWORK_TESTS_ENABLED = os.getenv("RUN_NETWORK_TESTS") == "1"
@@ -37,7 +37,7 @@ class TestAKShareProvider:
         assert provider.name == get_settings().data_source.provider
 
     def test_hk_ticker_conversion(self):
-        from goby_shrimp.data.akshare_provider import _convert_hk_ticker
+        from openhamster.data.akshare_provider import _convert_hk_ticker
 
         assert _convert_hk_ticker("2800") == "02800"
         assert _convert_hk_ticker("2800.HK") == "02800"
@@ -61,7 +61,7 @@ class TestAKShareProvider:
         assert list(normalized.columns) == ["open", "high", "low", "close", "volume"]
         assert isinstance(normalized.index, pd.DatetimeIndex)
 
-    @patch("goby_shrimp.data.akshare_provider.ak.stock_hk_hist")
+    @patch("openhamster.data.akshare_provider.ak.stock_hk_hist")
     def test_invalid_ticker(self, mock_stock_hk_hist):
         mock_stock_hk_hist.side_effect = RuntimeError("invalid symbol")
 
@@ -90,7 +90,7 @@ class TestAKShareProviderIntegration:
 
 class TestProviderRegistry:
     def test_list_providers(self):
-        from goby_shrimp.data import _PROVIDERS
+        from openhamster.data import _PROVIDERS
 
         assert "akshare" in _PROVIDERS
         assert "stooq" in _PROVIDERS

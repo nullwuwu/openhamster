@@ -7,21 +7,159 @@ from zoneinfo import ZoneInfo
 import pytest
 from fastapi.testclient import TestClient
 
-from goby_shrimp.api.app import app
-from goby_shrimp.config import get_settings
-from goby_shrimp.runtime_state import delete_runtime_state_keys, get_runtime_state_json, set_runtime_state_json
+from openhamster.api.app import app
+from openhamster.api.db import SessionLocal
+from openhamster.api.models import ProposalStatus, RiskDecision, RiskDecisionAction, StrategyProposal, StrategySnapshot
+from openhamster.config import get_settings
+from openhamster.runtime_state import delete_runtime_state_keys, get_runtime_state_json, set_runtime_state_json
 
 
 @pytest.fixture(autouse=True)
 def reset_runtime_state(monkeypatch) -> None:
     settings = get_settings()
     now = datetime.now(ZoneInfo(settings.timezone))
-    app_module = importlib.import_module("goby_shrimp.api.app")
-    services_module = importlib.import_module("goby_shrimp.api.services")
+    app_module = importlib.import_module("openhamster.api.app")
+    services_module = importlib.import_module("openhamster.api.services")
 
     monkeypatch.setattr(app_module, "sync_strategy_snapshots", lambda db: None)
     monkeypatch.setattr(app_module, "sync_agent_state", lambda db, **kwargs: None)
     monkeypatch.setattr(services_module, "sync_agent_state", lambda db, **kwargs: None)
+
+    with SessionLocal() as db:
+        if not db.query(StrategySnapshot).count():
+            db.add(
+                StrategySnapshot(
+                    strategy_name="ma_cross",
+                    description="Trend-following moving-average crossover baseline.",
+                    default_params={"short_window": 5, "long_window": 20},
+                    enabled=True,
+                    updated_at=now,
+                )
+            )
+
+        proposal = db.query(StrategyProposal).filter(StrategyProposal.run_id == "test-run-openhamster").one_or_none()
+        if proposal is None:
+            proposal = StrategyProposal(
+                run_id="test-run-openhamster",
+                title="Test HK Momentum",
+                symbol="2800.HK",
+                market_scope="HK",
+                thesis="Seeded proposal for integration tests.",
+                source_kind="llm",
+                provider_status="mock",
+                provider_model="mock",
+                provider_message="seeded",
+                market_snapshot_hash="snapshot-seed",
+                event_digest_hash="digest-seed",
+                strategy_dsl={"name": "ma_cross", "params": {"short_window": 5, "long_window": 20}},
+                debate_report={
+                    "stance_for": ["Trend persistence is favorable."],
+                    "stance_against": ["Evidence window is still short."],
+                    "synthesis": "Keep as candidate while collecting more paper evidence.",
+                },
+                evidence_pack={
+                    "governance_report": {
+                        "phase": "candidate",
+                        "next_step": "wait_next_sync",
+                        "lifecycle": {
+                            "eta_kind": "next_sync_window",
+                            "estimated_next_eligible_at": now.isoformat(),
+                        },
+                    },
+                    "quality_report": {
+                        "oos_validation": {"passed_windows": 2, "total_windows": 3},
+                        "track_record": {"trend": "improving", "stable_streak": 2},
+                        "pool_ranking": {"percentile": 90, "median_gap": 3.2},
+                        "backtest_gate": {"eligible_for_paper": True, "summary": "seeded"},
+                        "knowledge_families_used": ["trend_following"],
+                        "baseline_delta_summary": "Improves baseline under HK trend conditions.",
+                        "verdict": {"novelty_assessment": "admissible"},
+                    },
+                },
+                features_used=["macro", "market_profile"],
+                deterministic_score=82.0,
+                llm_score=78.0,
+                final_score=80.0,
+                status=ProposalStatus.CANDIDATE,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(proposal)
+            db.flush()
+        else:
+            proposal.title = "Test HK Momentum"
+            proposal.symbol = "2800.HK"
+            proposal.market_scope = "HK"
+            proposal.thesis = "Seeded proposal for integration tests."
+            proposal.source_kind = "llm"
+            proposal.provider_status = "mock"
+            proposal.provider_model = "mock"
+            proposal.provider_message = "seeded"
+            proposal.market_snapshot_hash = "snapshot-seed"
+            proposal.event_digest_hash = "digest-seed"
+            proposal.strategy_dsl = {"name": "ma_cross", "params": {"short_window": 5, "long_window": 20}}
+            proposal.debate_report = {
+                "stance_for": ["Trend persistence is favorable."],
+                "stance_against": ["Evidence window is still short."],
+                "synthesis": "Keep as candidate while collecting more paper evidence.",
+            }
+            proposal.evidence_pack = {
+                "governance_report": {
+                    "phase": "candidate",
+                    "next_step": "wait_next_sync",
+                    "lifecycle": {
+                        "eta_kind": "next_sync_window",
+                        "estimated_next_eligible_at": now.isoformat(),
+                    },
+                },
+                "quality_report": {
+                    "oos_validation": {"passed_windows": 2, "total_windows": 3},
+                    "track_record": {"trend": "improving", "stable_streak": 2},
+                    "pool_ranking": {"percentile": 90, "median_gap": 3.2},
+                    "backtest_gate": {"eligible_for_paper": True, "summary": "seeded"},
+                    "knowledge_families_used": ["trend_following"],
+                    "baseline_delta_summary": "Improves baseline under HK trend conditions.",
+                    "verdict": {"novelty_assessment": "admissible"},
+                },
+            }
+            proposal.features_used = ["macro", "market_profile"]
+            proposal.deterministic_score = 82.0
+            proposal.llm_score = 78.0
+            proposal.final_score = 80.0
+            proposal.status = ProposalStatus.CANDIDATE
+            proposal.updated_at = now
+
+        decision = db.query(RiskDecision).filter(RiskDecision.decision_id == "test-decision-openhamster").one_or_none()
+        if decision is None:
+            db.add(
+                RiskDecision(
+                    decision_id="test-decision-openhamster",
+                    run_id=proposal.run_id,
+                    proposal_id=proposal.id,
+                    action=RiskDecisionAction.KEEP_CANDIDATE,
+                    deterministic_score=proposal.deterministic_score,
+                    llm_score=proposal.llm_score,
+                    final_score=proposal.final_score,
+                    bottom_line_passed=True,
+                    bottom_line_report={"passed": True},
+                    llm_explanation="seeded",
+                    evidence_pack=proposal.evidence_pack,
+                    created_at=now,
+                )
+            )
+        else:
+            decision.run_id = proposal.run_id
+            decision.proposal_id = proposal.id
+            decision.action = RiskDecisionAction.KEEP_CANDIDATE
+            decision.deterministic_score = proposal.deterministic_score
+            decision.llm_score = proposal.llm_score
+            decision.final_score = proposal.final_score
+            decision.bottom_line_passed = True
+            decision.bottom_line_report = {"passed": True}
+            decision.llm_explanation = "seeded"
+            decision.evidence_pack = proposal.evidence_pack
+            decision.created_at = now
+        db.commit()
 
     runtime_keys = ["llm.provider", "llm.status", "pipeline.runtime.status"]
     previous_records = {
@@ -208,7 +346,7 @@ def test_strategy_payloads_include_knowledge_fields() -> None:
 
 
 def test_runtime_llm_switch_queues_background_sync(monkeypatch) -> None:
-    app_module = importlib.import_module("goby_shrimp.api.app")
+    app_module = importlib.import_module("openhamster.api.app")
     calls: list[str] = []
 
     monkeypatch.setattr(app_module, "_run_runtime_provider_switch_sync_job", lambda: calls.append("runtime_provider_switch"))
@@ -221,7 +359,7 @@ def test_runtime_llm_switch_queues_background_sync(monkeypatch) -> None:
 
 
 def test_runtime_sync_can_be_triggered(monkeypatch) -> None:
-    app_module = importlib.import_module("goby_shrimp.api.app")
+    app_module = importlib.import_module("openhamster.api.app")
     calls: list[str] = []
 
     monkeypatch.setattr(app_module, "_run_manual_sync_job", lambda: calls.append("manual_api"))
@@ -235,7 +373,7 @@ def test_runtime_sync_can_be_triggered(monkeypatch) -> None:
 
 
 def test_runtime_sync_can_be_triggered_when_previous_run_is_stalled(monkeypatch) -> None:
-    app_module = importlib.import_module("goby_shrimp.api.app")
+    app_module = importlib.import_module("openhamster.api.app")
     calls: list[str] = []
     now = datetime.now(ZoneInfo(get_settings().timezone))
 
@@ -267,8 +405,8 @@ def test_runtime_sync_can_be_triggered_when_previous_run_is_stalled(monkeypatch)
 
 
 def test_runtime_logs_endpoint_returns_tail(monkeypatch, tmp_path) -> None:
-    app_module = importlib.import_module("goby_shrimp.api.app")
-    out_log = tmp_path / "gobyshrimp-api.out.log"
+    app_module = importlib.import_module("openhamster.api.app")
+    out_log = tmp_path / "openhamster-api.out.log"
     out_log.write_text("line-1\nline-2\nline-3\n", encoding="utf-8")
     monkeypatch.setattr(app_module, "RUNTIME_LOG_PATHS", {"out": out_log, "err": tmp_path / "missing.err.log"})
 
@@ -290,7 +428,7 @@ def test_runtime_logs_endpoint_returns_tail(monkeypatch, tmp_path) -> None:
 
 
 def test_runtime_llm_rejects_minimax_without_key(monkeypatch) -> None:
-    gateway_module = importlib.import_module("goby_shrimp.llm_gateway")
+    gateway_module = importlib.import_module("openhamster.llm_gateway")
     original_settings = get_settings()
     patched_settings = original_settings.model_copy(
         deep=True,
@@ -313,7 +451,7 @@ def test_create_backtest_run_queued(monkeypatch) -> None:
     def _noop(run_id: str) -> None:
         return None
 
-    app_module = importlib.import_module("goby_shrimp.api.app")
+    app_module = importlib.import_module("openhamster.api.app")
     monkeypatch.setattr(app_module, "execute_backtest_run", _noop)
 
     with TestClient(app) as client:

@@ -8,15 +8,15 @@ import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from goby_shrimp.api.db import Base
-from goby_shrimp.api.models import ProposalStatus, StrategyProposal
-from goby_shrimp.api.services import (
+from openhamster.api.db import Base
+from openhamster.api.models import ProposalStatus, StrategyProposal
+from openhamster.api.services import (
     _bootstrap_paper_trade_for_proposal,
     execute_active_paper_cycle,
     _initialize_paper_snapshot_for_proposal,
     fetch_paper_data,
 )
-from goby_shrimp.config import get_settings
+from openhamster.config import get_settings
 
 
 def test_initialize_paper_snapshot_is_idempotent(monkeypatch, tmp_path: Path) -> None:
@@ -38,7 +38,7 @@ def test_initialize_paper_snapshot_is_idempotent(monkeypatch, tmp_path: Path) ->
         },
     )
 
-    import goby_shrimp.api.services as services_module
+    import openhamster.api.services as services_module
 
     monkeypatch.setattr(services_module, "get_settings", lambda: patched_settings)
 
@@ -126,7 +126,7 @@ def test_bootstrap_paper_trade_writes_order_and_position(monkeypatch, tmp_path: 
         },
     )
 
-    import goby_shrimp.api.services as services_module
+    import openhamster.api.services as services_module
 
     class DummySourceManager:
         def fetch_latest_price(self, ticker: str) -> float:
@@ -216,7 +216,7 @@ def test_execute_active_paper_cycle_rebalances_and_updates_nav(monkeypatch, tmp_
         },
     )
 
-    import goby_shrimp.api.services as services_module
+    import openhamster.api.services as services_module
 
     class DummySourceManager:
         def __init__(self) -> None:
@@ -347,7 +347,7 @@ def test_bootstrap_paper_trade_skips_non_trading_day(monkeypatch, tmp_path: Path
         },
     )
 
-    import goby_shrimp.api.services as services_module
+    import openhamster.api.services as services_module
 
     class DummySourceManager:
         def fetch_latest_price(self, ticker: str) -> float:
@@ -433,7 +433,7 @@ def test_execute_active_paper_cycle_skips_rebalance_on_non_trading_day(monkeypat
         },
     )
 
-    import goby_shrimp.api.services as services_module
+    import openhamster.api.services as services_module
 
     class DummySourceManager:
         def fetch_ohlcv(self, ticker: str, start: str, end: str | None = None) -> pd.DataFrame:
@@ -532,7 +532,7 @@ def test_bootstrap_paper_trade_skips_outside_session(monkeypatch, tmp_path: Path
         },
     )
 
-    import goby_shrimp.api.services as services_module
+    import openhamster.api.services as services_module
 
     class DummySourceManager:
         def fetch_latest_price(self, ticker: str) -> float:

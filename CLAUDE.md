@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-This repository is `GobyShrimp`, an auditable strategy factory.
+This repository is `OpenHamster`, an auditable strategy factory.
 
 ## Current Product Shape
-- Backend API: `src/goby_shrimp/api`
+- Backend API: `src/openhamster/api`
 - Frontend dashboard: `apps/web`
-- LLM entrypoint: `src/goby_shrimp/llm_gateway.py`
-- Event pipeline: `src/goby_shrimp/events`
+- LLM entrypoint: `src/openhamster/llm_gateway.py`
+- Event pipeline: `src/openhamster/events`
 - Runtime storage: `var/db`, `var/logs`, `var/cache`
 
 ## What Is In Scope
@@ -28,7 +28,7 @@ Those paths have been removed and should not be reintroduced.
 ```bash
 pip install -e .[dev]
 alembic upgrade head
-gobyshrimp-api
+openhamster-api
 npm install --prefix apps/web
 npm run dev --prefix apps/web
 ```

@@ -1,10 +1,10 @@
-# GobyShrimp 运行手册
+# OpenHamster 运行手册
 
 ## 本地启动
 ```bash
 pip install -e .[dev]
 alembic upgrade head
-gobyshrimp-api
+openhamster-api
 npm install --prefix apps/web
 npm run dev --prefix apps/web
 ```

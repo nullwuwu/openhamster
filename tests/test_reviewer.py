@@ -1,6 +1,6 @@
 import pytest
-from goby_shrimp.models import BacktestResult, Verdict
-from goby_shrimp.risk.reviewer import risk_gate_review
+from openhamster.models import BacktestResult, Verdict
+from openhamster.risk.reviewer import risk_gate_review
 
 FULL = ["slippage", "commission", "tax", "dividend_withholding"]
 

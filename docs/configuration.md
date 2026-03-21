@@ -5,14 +5,14 @@
 `默认值 < config/base.yaml < config/local.yaml < .env < .env.local < 环境变量`
 
 ## 配置入口
-统一配置入口为：`goby_shrimp.config.settings.AppSettings`
+统一配置入口为：`openhamster.config.settings.AppSettings`
 
 ## 边界规则
 配置边界单独收敛在：
-- [`CONFIG_BOUNDARIES.md`](/Users/a1/.openclaw/workspace/projects/quant-trader/docs/CONFIG_BOUNDARIES.md)
+- [`CONFIG_BOUNDARIES.md`](CONFIG_BOUNDARIES.md)
 
 `config/` 目录当前只保留主线配置文件，见：
-- [`config/README.md`](/Users/a1/.openclaw/workspace/projects/quant-trader/config/README.md)
+- [`../config/README.md`](../config/README.md)
 
 ## 关键配置块
 - `storage`
@@ -36,8 +36,8 @@
 
 ## 来源追踪
 可以使用以下接口查看字段最终来源：
-- `goby_shrimp.config.get_settings_source_map()`
-- `goby_shrimp.config.get_setting_source("storage.database_url")`
+- `openhamster.config.get_settings_source_map()`
+- `openhamster.config.get_setting_source("storage.database_url")`
 
 来源值目前可能是：
 - `default`
@@ -47,15 +47,15 @@
 - `env`
 
 ## 本地密钥推荐方式
-- 复制 [`.env.example`](/Users/a1/.openclaw/workspace/projects/quant-trader/.env.example) 为 `.env.local`
+- 复制 [`.env.example`](../.env.example) 为 `.env.local`
 - 在 `.env.local` 中配置：
   - `MINIMAX_API_KEY=...`
   - `FRED_API_KEY=...`
 - `.env` 和 `.env.local` 已被 `.gitignore` 忽略，不会入库
 
 ## 当前默认值
-- `storage.database_url = sqlite:///var/db/goby_shrimp.db`
-- `storage.log_path = var/logs/goby_shrimp.log`
+- `storage.database_url = sqlite:///var/db/openhamster.db`
+- `storage.log_path = var/logs/openhamster.log`
 - `hard_gates.max_drawdown = 0.15`
 - `governance.promote_threshold = 75.0`
 - `governance.cooldown_days = 5`
@@ -92,10 +92,10 @@
 
 ## Prompt 契约
 Prompt 文本和结构化输出提示已从业务代码拆出，当前集中在：
-- [`src/goby_shrimp/prompts/market_analyst.py`](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts/market_analyst.py)
-- [`src/goby_shrimp/prompts/strategy_agent.py`](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts/strategy_agent.py)
-- [`src/goby_shrimp/prompts/research_debate.py`](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts/research_debate.py)
-- [`src/goby_shrimp/prompts/risk_manager_llm.py`](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts/risk_manager_llm.py)
+- [`../src/openhamster/prompts/market_analyst.py`](../src/openhamster/prompts/market_analyst.py)
+- [`../src/openhamster/prompts/strategy_agent.py`](../src/openhamster/prompts/strategy_agent.py)
+- [`../src/openhamster/prompts/research_debate.py`](../src/openhamster/prompts/research_debate.py)
+- [`../src/openhamster/prompts/risk_manager_llm.py`](../src/openhamster/prompts/risk_manager_llm.py)
 
 ## Tushare 状态
 Tushare 仍按现有 token 注入方式保留在统一 settings 中，本轮不扩展健康检查或真实 token 集成测试。

@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gobyshrimp"
-version = "0.1.0"
-description = "GobyShrimp auditable strategy factory with agent-driven research and paper trading"
+name = "openhamster"
+version = "0.2.0"
+description = "OpenHamster auditable strategy factory with agent-driven research and paper trading"
 requires-python = ">=3.10"
 dependencies = [
     "alembic>=1.14",
@@ -33,7 +33,7 @@ dev = [
 ]
 
 [project.scripts]
-gobyshrimp-api = "goby_shrimp.api.main:main"
+openhamster-api = "openhamster.api.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

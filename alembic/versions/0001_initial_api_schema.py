@@ -1,4 +1,4 @@
-"""Initial GobyShrimp API schema
+"""Initial OpenHamster API schema
 
 Revision ID: 0001_initial_api_schema
 Revises: None

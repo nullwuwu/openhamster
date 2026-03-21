@@ -10,8 +10,8 @@ from unittest.mock import Mock, patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from goby_shrimp.strategy import MACrossStrategy
-from goby_shrimp.backtest import Backtester, BacktestResult
+from openhamster.strategy import MACrossStrategy
+from openhamster.backtest import Backtester, BacktestResult
 
 
 class TestBacktester:
@@ -32,7 +32,7 @@ class TestBacktester:
         assert backtester.initial_capital == 1_000_000
         assert backtester.strategy == strategy
     
-    @patch('goby_shrimp.backtest.backtester.get_provider')
+    @patch('openhamster.backtest.backtester.get_provider')
     def test_backtest_run_with_mock(self, mock_get_provider):
         """测试回测运行 (Mock)"""
         # Mock 数据

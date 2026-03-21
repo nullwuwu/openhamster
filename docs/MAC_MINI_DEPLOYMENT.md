@@ -1,19 +1,19 @@
 # Mac mini 长期运行方案
 
 ## 目标
-- 让 GobyShrimp 在一台长期在线的 Mac mini 上稳定运行
+- 让 OpenHamster 在一台长期在线的 Mac mini 上稳定运行
 - 只守护一个后端进程
 - 前端使用生产构建后的静态文件，由 FastAPI 直接托管
 
 ## 当前部署形态
-- GobyShrimp API: `http://127.0.0.1:8000`
+- OpenHamster API: `http://127.0.0.1:8000`
 - Dashboard: 由同一个 FastAPI 进程直接托管
 - 前端构建目录: `apps/web/dist`
 - 调度器: 内嵌在 FastAPI lifespan 中，自动启动
 
 ## 首次部署
 ```bash
-cd /Users/a1/.openclaw/workspace/projects/quant-trader
+cd <repo-root>
 python -m venv .venv
 . .venv/bin/activate
 pip install -e .[dev]
@@ -23,7 +23,7 @@ bash scripts/build_frontend.sh
 
 ## 手动启动
 ```bash
-cd /Users/a1/.openclaw/workspace/projects/quant-trader
+cd <repo-root>
 bash scripts/run_api.sh
 ```
 
@@ -35,7 +35,7 @@ bash scripts/run_api.sh
 ## launchd 守护
 一键启动/重启：
 ```bash
-cd /Users/a1/.openclaw/workspace/projects/quant-trader
+cd <repo-root>
 bash scripts/start_local_daemon.sh
 ```
 
@@ -43,7 +43,7 @@ bash scripts/start_local_daemon.sh
 - 重新构建前端
 - 重新渲染 `launchd` 配置
 - 覆盖安装到 `~/Library/LaunchAgents`
-- 重启 `com.gobyshrimp.api`
+- 重启 `com.openhamster.api`
 - 做健康检查
 
 如果服务已经在运行，它会重启到新代码；如果代码有更新，也会在同一次执行里完成重构建和重启。
@@ -51,43 +51,43 @@ bash scripts/start_local_daemon.sh
 手动分步方式：
 1. 渲染本地 plist：
 ```bash
-cd /Users/a1/.openclaw/workspace/projects/quant-trader
+cd <repo-root>
 bash scripts/render_launchd_plist.sh
 ```
 
 2. 安装到用户级 LaunchAgents：
 ```bash
 mkdir -p ~/Library/LaunchAgents
-cp var/launchd/com.gobyshrimp.api.plist ~/Library/LaunchAgents/com.gobyshrimp.api.plist
-launchctl unload ~/Library/LaunchAgents/com.gobyshrimp.api.plist 2>/dev/null || true
-launchctl load ~/Library/LaunchAgents/com.gobyshrimp.api.plist
+cp var/launchd/com.openhamster.api.plist ~/Library/LaunchAgents/com.openhamster.api.plist
+launchctl unload ~/Library/LaunchAgents/com.openhamster.api.plist 2>/dev/null || true
+launchctl load ~/Library/LaunchAgents/com.openhamster.api.plist
 ```
 
 3. 常用命令：
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.gobyshrimp.api
-launchctl unload ~/Library/LaunchAgents/com.gobyshrimp.api.plist
-launchctl print gui/$(id -u)/com.gobyshrimp.api
+launchctl kickstart -k gui/$(id -u)/com.openhamster.api
+launchctl unload ~/Library/LaunchAgents/com.openhamster.api.plist
+launchctl print gui/$(id -u)/com.openhamster.api
 ```
 
 ## 日志位置
-- `logs/gobyshrimp-api.out.log`
-- `logs/gobyshrimp-api.err.log`
+- `logs/openhamster-api.out.log`
+- `logs/openhamster-api.err.log`
 
 推荐同时观察：
 ```bash
-tail -f logs/gobyshrimp-api.out.log logs/gobyshrimp-api.err.log
+tail -f logs/openhamster-api.out.log logs/openhamster-api.err.log
 ```
 
 ## 更新流程
 ```bash
-cd /Users/a1/.openclaw/workspace/projects/quant-trader
+cd <repo-root>
 git pull
 . .venv/bin/activate
 pip install -e .[dev]
 alembic upgrade head
 bash scripts/build_frontend.sh
-launchctl kickstart -k gui/$(id -u)/com.gobyshrimp.api
+launchctl kickstart -k gui/$(id -u)/com.openhamster.api
 ```
 
 ## 发布前本地检查

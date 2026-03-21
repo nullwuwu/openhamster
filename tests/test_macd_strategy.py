@@ -9,8 +9,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from goby_shrimp.strategy import MACDStrategy
-from goby_shrimp.strategy.signals import Signal
+from openhamster.strategy import MACDStrategy
+from openhamster.strategy.signals import Signal
 
 
 class TestMACDStrategy:

@@ -1,7 +1,7 @@
 # Tushare 购买清单
 
 ## 目标
-给 GobyShrimp 当前 `HK-only（仅港股）` 主线确定一个最小、够用、分阶段的 `Tushare（数据权限）` 购买方案。
+给 OpenHamster 当前 `HK-only（仅港股）` 主线确定一个最小、够用、分阶段的 `Tushare（数据权限）` 购买方案。
 
 当前系统重点是：
 - `backtest（回测）`

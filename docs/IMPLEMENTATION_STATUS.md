@@ -9,7 +9,7 @@
 ## 已完成
 - 仓库已收敛到单一主线：`API + Dashboard + MiniMax LLM Gateway + Macro pipeline + Backtest/Experiment + Audit`
 - 旧执行链路、旧通知链路、旧 paper 服务层和历史兼容残留已删除
-- 包名、CLI、文档和前端产品叙事已统一为 `GobyShrimp`
+- 包名、CLI、文档和前端产品叙事已统一为 `OpenHamster`
 - 配置边界已收敛：
   - `.env / .env.local` 仅用于密钥与机器级敏感信息
   - `config/base.yaml / config/local.yaml` 仅用于稳定系统默认行为

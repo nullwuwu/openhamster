@@ -5,8 +5,8 @@ import argparse
 import json
 from typing import Any
 
-from goby_shrimp.api.db import SessionLocal, init_database
-from goby_shrimp.api.services import build_acceptance_report
+from openhamster.api.db import SessionLocal, init_database
+from openhamster.api.services import build_acceptance_report
 
 
 def _render_markdown(report: dict[str, Any]) -> str:
@@ -19,7 +19,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
     pool = dict(quality.get("pool_comparison", {}))
 
     lines = [
-        "# GobyShrimp Acceptance Report",
+        "# OpenHamster Acceptance Report",
         "",
         f"- Generated at: `{report.get('generated_at')}`",
         f"- Window days: `{report.get('window_days')}`",
@@ -99,7 +99,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate a GobyShrimp acceptance report.")
+    parser = argparse.ArgumentParser(description="Generate a OpenHamster acceptance report.")
     parser.add_argument("--window-days", type=int, default=30, help="Rolling report window in days.")
     parser.add_argument(
         "--format",

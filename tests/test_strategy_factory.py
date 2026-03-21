@@ -1,11 +1,13 @@
 import pandas as pd
-from goby_shrimp.strategy import (
+from openhamster.strategy import (
     get_strategy_factory,
+    knowledge_payload_for_market,
+    knowledge_preferences_from_market_profile,
     get_strategy_knowledge_catalog,
     get_strategy_registry,
     strategy_plugin_names,
 )
-from goby_shrimp.strategy.signals import Signal
+from openhamster.strategy.signals import Signal
 
 
 def _mock_df(rows: int = 120) -> pd.DataFrame:
@@ -51,9 +53,41 @@ def test_registry_exposes_plugin_metadata():
 
 def test_strategy_knowledge_catalog_matches_baselines():
     catalog = get_strategy_knowledge_catalog()
-    assert len(catalog) == 5
+    assert len(catalog) == 9
     families = {item.family_key for item in catalog}
-    assert {"trend_following", "mean_reversion", "breakout", "momentum_filter", "volatility_filter"} == families
+    assert {
+        "trend_following",
+        "mean_reversion",
+        "breakout",
+        "momentum_filter",
+        "volatility_filter",
+        "fundamental_growth",
+        "cross_sectional_ranking",
+        "regime_filter",
+        "portfolio_construction_overlay",
+    } == families
     registry = get_strategy_registry()
     assert set(registry.get("ma_cross").knowledge_families) == {"trend_following"}
     assert set(registry.get("channel_breakout").knowledge_families) == {"breakout", "volatility_filter"}
+
+
+def test_knowledge_payload_for_market_includes_new_families():
+    payload = knowledge_payload_for_market("HK")
+    families = {item["family_key"] for item in payload}
+    assert "fundamental_growth" in families
+    assert "cross_sectional_ranking" in families
+    assert "regime_filter" in families
+    assert "portfolio_construction_overlay" in families
+
+
+def test_knowledge_preferences_from_market_profile_maps_extended_tags():
+    preferred, discouraged = knowledge_preferences_from_market_profile(
+        preferred_baseline_tags=["trend", "growth", "portfolio", "macro"],
+        discouraged_baseline_tags=["mean-reversion", "small-cap"],
+    )
+    assert "trend_following" in preferred
+    assert "fundamental_growth" in preferred
+    assert "portfolio_construction_overlay" in preferred
+    assert "regime_filter" in preferred
+    assert "mean_reversion" in discouraged
+    assert "cross_sectional_ranking" in discouraged

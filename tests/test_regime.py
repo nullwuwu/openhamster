@@ -5,7 +5,7 @@ import pytest
 import pandas as pd
 import numpy as np
 
-from goby_shrimp.strategy.regime import RegimeDetector, RegimeConfig, MarketRegime
+from openhamster.strategy.regime import RegimeDetector, RegimeConfig, MarketRegime
 
 
 class TestRegimeDetector:

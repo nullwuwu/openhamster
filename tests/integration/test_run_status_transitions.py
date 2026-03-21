@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 
-from goby_shrimp.api.db import SessionLocal, init_database
-from goby_shrimp.api.models import BacktestRun, RunStatus
-from goby_shrimp.api.services import execute_backtest_run, now_tz
+from openhamster.api.db import SessionLocal, init_database
+from openhamster.api.models import BacktestRun, RunStatus
+from openhamster.api.services import execute_backtest_run, now_tz
 
 
 def _create_run() -> str:
@@ -78,9 +78,9 @@ def test_execute_backtest_run_succeeded(monkeypatch) -> None:
     init_database()
     run_id = _create_run()
 
-    monkeypatch.setattr('goby_shrimp.api.services.BacktestEngine', DummyBacktestEngine)
-    monkeypatch.setattr('goby_shrimp.api.services.get_strategy_factory', lambda: DummyFactory())
-    monkeypatch.setattr('goby_shrimp.api.services.get_provider', lambda _: None)
+    monkeypatch.setattr('openhamster.api.services.BacktestEngine', DummyBacktestEngine)
+    monkeypatch.setattr('openhamster.api.services.get_strategy_factory', lambda: DummyFactory())
+    monkeypatch.setattr('openhamster.api.services.get_provider', lambda _: None)
 
     execute_backtest_run(run_id)
 
@@ -102,9 +102,9 @@ def test_execute_backtest_run_failed(monkeypatch) -> None:
         def run(self, **kwargs):
             raise RuntimeError('boom')
 
-    monkeypatch.setattr('goby_shrimp.api.services.BacktestEngine', BrokenEngine)
-    monkeypatch.setattr('goby_shrimp.api.services.get_strategy_factory', lambda: DummyFactory())
-    monkeypatch.setattr('goby_shrimp.api.services.get_provider', lambda _: None)
+    monkeypatch.setattr('openhamster.api.services.BacktestEngine', BrokenEngine)
+    monkeypatch.setattr('openhamster.api.services.get_strategy_factory', lambda: DummyFactory())
+    monkeypatch.setattr('openhamster.api.services.get_provider', lambda _: None)
 
     execute_backtest_run(run_id)
 

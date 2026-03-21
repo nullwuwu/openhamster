@@ -1,12 +1,12 @@
 # 新线程接力说明
 
 适用场景：
-- 在新的 Codex 线程里继续推进 `GobyShrimp`
+- 在新的 Codex 线程里继续推进 `OpenHamster`
 - 希望快速恢复项目背景、长期规则与当前优先级
 
 ## 建议在新线程开头直接贴的内容
 ```text
-这是 GobyShrimp 项目。
+这是 OpenHamster 项目。
 请先阅读：
 1. docs/PROJECT_CONTEXT.md
 2. docs/PROJECT_OVERVIEW.md
@@ -27,7 +27,7 @@
 ```
 
 ## 新线程应该优先知道的事实
-- 项目名：`GobyShrimp`
+- 项目名：`OpenHamster`
 - 当前市场：`HK-only（仅港股）`
 - 当前路线：`dynamic_hk（动态选股） + MiniMax + backtest admission（回测准入） + paper trading（模拟盘） + live readiness（实盘就绪度）`
 - 当前长期运行基线：`Mac mini + launchd + 本地 FastAPI + 浏览器 dashboard`
@@ -35,7 +35,7 @@
 
 ## 新线程开始后的最低检查项
 1. `git status`
-2. `launchctl list | grep gobyshrimp`
+2. `launchctl list | grep openhamster`
 3. `curl http://127.0.0.1:8000/healthz`
 4. 打开最新的：
    - `docs/PROJECT_CONTEXT.md`

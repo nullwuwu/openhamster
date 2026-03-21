@@ -1,7 +1,7 @@
 # 策略知识层
 
 ## 这是什么
-第一版 `strategy knowledge layer（策略知识层）` 是 GobyShrimp 在 `baseline（基线策略）`、`market profile（市场画像）` 和 `governance（治理规则）` 之上新增的一层结构化策略常识。
+第一版 `strategy knowledge layer（策略知识层）` 是 OpenHamster 在 `baseline（基线策略）`、`market profile（市场画像）` 和 `governance（治理规则）` 之上新增的一层结构化策略常识。
 
 它不是：
 - 外部文章仓库
@@ -145,12 +145,12 @@ proposal 现在需要显式带出：
 
 ## 当前实现文件
 - 核心目录：
-  - [/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/strategy/knowledge.py](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/strategy/knowledge.py)
+  - [`../src/openhamster/strategy/knowledge.py`](../src/openhamster/strategy/knowledge.py)
 - baseline 映射：
-  - [/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/strategy/plugins.py](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/strategy/plugins.py)
-  - [/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/strategy/factory.py](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/strategy/factory.py)
+  - [`../src/openhamster/strategy/plugins.py`](../src/openhamster/strategy/plugins.py)
+  - [`../src/openhamster/strategy/factory.py`](../src/openhamster/strategy/factory.py)
 - 生成与治理接入：
-  - [/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts/strategy_agent.py](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts/strategy_agent.py)
-  - [/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts/research_debate.py](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts/research_debate.py)
-  - [/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts/risk_manager_llm.py](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/prompts/risk_manager_llm.py)
-  - [/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/api/services.py](/Users/a1/.openclaw/workspace/projects/quant-trader/src/goby_shrimp/api/services.py)
+  - [`../src/openhamster/prompts/strategy_agent.py`](../src/openhamster/prompts/strategy_agent.py)
+  - [`../src/openhamster/prompts/research_debate.py`](../src/openhamster/prompts/research_debate.py)
+  - [`../src/openhamster/prompts/risk_manager_llm.py`](../src/openhamster/prompts/risk_manager_llm.py)
+  - [`../src/openhamster/api/services.py`](../src/openhamster/api/services.py)
