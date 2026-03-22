@@ -59,19 +59,40 @@ Runtime storage  var/db, var/logs, var/cache
 
 ```mermaid
 flowchart TD
-    A["港股动态选股"] --> B["市场画像"]
-    M["宏观链"] --> B
-    B --> C["策略生成 via LLM Gateway"]
-    C --> D["研究辩论"]
-    D --> E["确定性治理"]
-    E -->|"keep_candidate"| F["候选池"]
-    E -->|"promote_to_paper"| G["模拟盘策略"]
-    G --> H["模拟盘执行周期"]
-    H --> I["订单 / 持仓 / NAV"]
-    E --> J["审计链"]
-    F --> J
-    G --> J
-    H --> J
+    A["港股动态选股"] --> B["研究批次（多标的）"]
+    M["宏观链"] --> C["市场快照 + 市场分析"]
+    B --> C
+
+    C --> D["策略生成 via LLM Gateway"]
+    D --> E["研究辩论"]
+    E --> F["确定性治理"]
+
+    F -->|"reject / archive"| G["候选历史"]
+    F -->|"keep_candidate"| H["候选池"]
+    F -->|"paper_ready rank"| I["有限模拟盘池（1 个 primary + 多个 challenger）"]
+
+    I --> J["Primary 席位"]
+    I --> K["Challenger 席位"]
+    J --> L["模拟盘执行周期"]
+    K --> L
+    L --> M1["订单 / 持仓 / NAV"]
+
+    C --> N["运行状态"]
+    L --> O["实盘就绪度 + 运营验收"]
+    P["本地 Watchdog"] --> N
+    P --> L
+
+    F --> Q["审计链"]
+    G --> Q
+    H --> Q
+    I --> Q
+    L --> Q
+    O --> Q
+
+    N --> R["Dashboard：/command /research /paper /audit"]
+    M1 --> R
+    O --> R
+    Q --> R
 ```
 
 ## Dashboard 页面
