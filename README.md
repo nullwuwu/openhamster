@@ -59,19 +59,40 @@ Runtime storage  var/db, var/logs, var/cache
 
 ```mermaid
 flowchart TD
-    A["HK Universe Selection"] --> B["Market Snapshot"]
-    M["Macro Chain"] --> B
-    B --> C["Strategy Agent via LLM Gateway"]
-    C --> D["Research Debate"]
-    D --> E["Deterministic Governance"]
-    E -->|"keep_candidate"| F["Candidate Pool"]
-    E -->|"promote_to_paper"| G["Paper Strategy"]
-    G --> H["Paper Execution Cycle"]
-    H --> I["Orders / Positions / NAV"]
-    E --> J["Audit Trail"]
-    F --> J
-    G --> J
-    H --> J
+    A["Dynamic HK Universe"] --> B["Research Batch (multi-symbol)"]
+    M["Macro Chain"] --> C["Market Snapshot + Market Analyst"]
+    B --> C
+
+    C --> D["Strategy Agent via LLM Gateway"]
+    D --> E["Research Debate"]
+    E --> F["Deterministic Governance"]
+
+    F -->|"reject / archive"| G["Candidate History"]
+    F -->|"keep_candidate"| H["Candidate Pool"]
+    F -->|"paper_ready rank"| I["Limited Paper Pool (1 primary + challengers)"]
+
+    I --> J["Primary Slot"]
+    I --> K["Challenger Slots"]
+    J --> L["Paper Execution Cycle"]
+    K --> L
+    L --> M1["Orders / Positions / NAV"]
+
+    C --> N["Runtime Status"]
+    L --> O["Live Readiness + Operational Acceptance"]
+    P["Local Watchdog"] --> N
+    P --> L
+
+    F --> Q["Audit Trail"]
+    G --> Q
+    H --> Q
+    I --> Q
+    L --> Q
+    O --> Q
+
+    N --> R["Dashboard: /command /research /paper /audit"]
+    M1 --> R
+    O --> R
+    Q --> R
 ```
 
 ## Dashboard Views
