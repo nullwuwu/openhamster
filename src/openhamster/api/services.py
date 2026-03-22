@@ -84,6 +84,32 @@ _UNIVERSE_SELECTION_KEY = "universe.selection"
 _PIPELINE_SYNC_LOCK = Lock()
 PRIMARY_PAPER_SLOT_ID = 'primary'
 
+
+def _pipeline_runtime_default_payload() -> dict[str, object]:
+    return {
+        'current_state': 'idle',
+        'status_message': 'Pipeline has not recorded a full sync yet.',
+        'current_stage': None,
+        'stage_started_at': None,
+        'stage_durations_ms': {},
+        'last_run_at': None,
+        'last_success_at': None,
+        'last_failure_at': None,
+        'consecutive_failures': 0,
+        'expected_next_run_at': None,
+        'last_duration_ms': None,
+        'last_trigger': None,
+        'degraded': False,
+        'research_batch_size': 0,
+        'research_symbols': [],
+        'research_symbol_states': [],
+        'current_symbol': None,
+        'current_symbol_stage': None,
+        'batch_progress': {},
+        'current_batch_id': None,
+        'paper_slot_count': int(get_settings().governance.paper_slot_count),
+    }
+
 _EXTERNAL_KNOWLEDGE_SOURCES: tuple[dict[str, object], ...] = (
     {
         "source_id": "quantconnect_lean",
@@ -731,22 +757,12 @@ def get_current_llm_status(db: Session):
 
 def get_pipeline_runtime_status(db: Session) -> dict[str, object]:
     interval_minutes = max(5, get_settings().events.expected_sync_interval_minutes)
-    status = _get_runtime_setting_json(db, _PIPELINE_STATUS_KEY) or {
-        'current_state': 'idle',
-        'status_message': 'Pipeline has not recorded a full sync yet.',
-        'current_stage': None,
-        'stage_started_at': None,
-        'stage_durations_ms': {},
-        'last_run_at': None,
-        'last_success_at': None,
-        'last_failure_at': None,
-        'consecutive_failures': 0,
-        'expected_next_run_at': None,
-        'last_duration_ms': None,
-        'last_trigger': None,
-        'degraded': False,
-    }
-    raw_state = str(status.get('current_state', 'idle'))
+    defaults = _pipeline_runtime_default_payload()
+    stored = _get_runtime_setting_json(db, _PIPELINE_STATUS_KEY)
+    status = dict(defaults)
+    if isinstance(stored, dict):
+        status.update(stored)
+    raw_state = str(status.get('current_state') or defaults['current_state'])
     current_state = raw_state
     stalled = False
     expected_next_run_at = status.get('expected_next_run_at')
@@ -775,7 +791,7 @@ def get_pipeline_runtime_status(db: Session) -> dict[str, object]:
         current_state = 'scheduled'
     return {
         'current_state': current_state,
-        'status_message': str(status.get('status_message', 'Pipeline status unavailable.')),
+        'status_message': str(status.get('status_message') or defaults['status_message']),
         'current_stage': status.get('current_stage'),
         'stage_started_at': status.get('stage_started_at'),
         'stage_durations_ms': dict(status.get('stage_durations_ms', {}) or {}),
@@ -804,6 +820,37 @@ def get_pipeline_runtime_status(db: Session) -> dict[str, object]:
         'current_batch_id': str(status.get('current_batch_id')) if status.get('current_batch_id') is not None else None,
         'paper_slot_count': int(status.get('paper_slot_count', 1) or 1),
     }
+
+
+def ensure_pipeline_runtime_status_baseline(
+    db: Session,
+    *,
+    current_time: datetime,
+    trigger: str,
+) -> None:
+    stored = _get_runtime_setting_json(db, _PIPELINE_STATUS_KEY)
+    defaults = _pipeline_runtime_default_payload()
+    if isinstance(stored, dict) and stored.get('current_state') and stored.get('status_message'):
+        return
+    _set_pipeline_runtime_status(
+        db,
+        current_state='running',
+        status_message='Application started. Waiting for startup sync.',
+        current_time=current_time,
+        last_trigger=trigger,
+        degraded=False,
+        current_stage='startup_bootstrap',
+        extra_payload={
+            'research_batch_size': int(defaults['research_batch_size']),
+            'research_symbols': list(defaults['research_symbols']),
+            'research_symbol_states': list(defaults['research_symbol_states']),
+            'current_symbol': defaults['current_symbol'],
+            'current_symbol_stage': defaults['current_symbol_stage'],
+            'batch_progress': dict(defaults['batch_progress']),
+            'current_batch_id': defaults['current_batch_id'],
+            'paper_slot_count': int(defaults['paper_slot_count']),
+        },
+    )
 
 
 def _set_pipeline_runtime_status(

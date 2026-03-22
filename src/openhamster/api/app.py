@@ -76,6 +76,7 @@ from .services import (
     build_operational_acceptance,
     build_provider_migration_history,
     build_provider_migration_summary,
+    ensure_pipeline_runtime_status_baseline,
     build_runtime_sync_history,
     build_paper_pool,
     build_market_snapshot,
@@ -120,6 +121,10 @@ RUNTIME_LOG_PATHS = {
     "err": Path(os.environ.get("OPENHAMSTER_STDERR_LOG_PATH", LOG_DIR / "openhamster-api.err.log")),
 }
 PROCESS_STARTED_AT: datetime | None = None
+
+
+def _runtime_sync_in_progress(status: dict[str, object]) -> bool:
+    return str(status.get('current_state')) == 'running' and str(status.get('current_stage') or '') != 'startup_bootstrap'
 
 
 def _run_sync_job(*, trigger: str, force_refresh: bool = True) -> None:
@@ -791,7 +796,7 @@ def patch_runtime_llm(
     if not changed:
         raise HTTPException(status_code=400, detail=status.message)
     runtime_status = get_pipeline_runtime_status(db)
-    if runtime_status.get('current_state') != 'running':
+    if not _runtime_sync_in_progress(runtime_status):
         background_tasks.add_task(_run_runtime_provider_switch_sync_job)
     return _to_llm_status_dto(status)
 
@@ -799,7 +804,7 @@ def patch_runtime_llm(
 @router.post("/runtime/sync", response_model=PipelineRuntimeStatusDTO)
 def trigger_runtime_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> PipelineRuntimeStatusDTO:
     status = get_pipeline_runtime_status(db)
-    if str(status.get('current_state')) == 'running':
+    if _runtime_sync_in_progress(status):
         raise HTTPException(status_code=409, detail="Pipeline sync is already running")
     background_tasks.add_task(_run_manual_sync_job)
     return _to_pipeline_runtime_status_dto(status)
@@ -1070,6 +1075,8 @@ async def lifespan(_: FastAPI):
     scheduler = build_pipeline_scheduler()
     with SessionLocal() as db:
         sync_strategy_snapshots(db)
+        ensure_pipeline_runtime_status_baseline(db, current_time=PROCESS_STARTED_AT, trigger='startup')
+        db.commit()
     scheduler.start()
     startup_task = asyncio.create_task(asyncio.to_thread(_run_startup_sync_job))
     try:

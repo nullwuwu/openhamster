@@ -7,6 +7,7 @@ from sqlalchemy import inspect, select
 from openhamster.api.db import SessionLocal, engine, init_database
 from openhamster.api.models import AuditRecord, EventRecord, EventType
 from openhamster.api.services import (
+    ensure_pipeline_runtime_status_baseline,
     _set_pipeline_runtime_stage,
     _set_pipeline_runtime_status,
     get_macro_pipeline_status,
@@ -15,7 +16,7 @@ from openhamster.api.services import (
     now_tz,
     sync_event_stream,
 )
-from openhamster.runtime_state import delete_runtime_state_keys
+from openhamster.runtime_state import delete_runtime_state_keys, set_runtime_state_json
 
 
 class _BrokenMacroProvider:
@@ -99,6 +100,35 @@ def test_pipeline_runtime_status_defaults_to_idle() -> None:
         assert status['current_state'] == 'idle'
         assert status['consecutive_failures'] == 0
         assert status['stalled'] is False
+        assert status['status_message'] == 'Pipeline has not recorded a full sync yet.'
+        assert status['paper_slot_count'] >= 1
+
+
+def test_pipeline_runtime_status_recovers_from_incomplete_payload() -> None:
+    init_database()
+    current_time = now_tz()
+    delete_runtime_state_keys(["pipeline.runtime.status"])
+    set_runtime_state_json("pipeline.runtime.status", {"current_state": None}, updated_at=current_time)
+    with SessionLocal() as db:
+        status = get_pipeline_runtime_status(db)
+        assert status['current_state'] == 'idle'
+        assert status['status_message'] == 'Pipeline has not recorded a full sync yet.'
+        assert status['consecutive_failures'] == 0
+        assert status['research_batch_size'] == 0
+
+
+def test_ensure_pipeline_runtime_status_baseline_writes_startup_state() -> None:
+    init_database()
+    delete_runtime_state_keys(["pipeline.runtime.status"])
+    current_time = now_tz()
+    with SessionLocal() as db:
+        ensure_pipeline_runtime_status_baseline(db, current_time=current_time, trigger='startup')
+        db.commit()
+        status = get_pipeline_runtime_status(db)
+        assert status['current_state'] == 'running'
+        assert status['current_stage'] == 'startup_bootstrap'
+        assert status['status_message'] == 'Application started. Waiting for startup sync.'
+        assert status['last_trigger'] == 'startup'
 
 
 def test_pipeline_stage_durations_reset_for_new_run() -> None:
