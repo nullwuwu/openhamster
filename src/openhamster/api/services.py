@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import inspect
@@ -81,6 +82,8 @@ from .models import (
 _MACRO_STATUS_KEY = "events.macro.status"
 _PIPELINE_STATUS_KEY = "pipeline.runtime.status"
 _UNIVERSE_SELECTION_KEY = "universe.selection"
+_WATCHDOG_LATEST_KEY = "runtime.watchdog.latest"
+_WATCHDOG_HISTORY_KEY = "runtime.watchdog.history"
 _PIPELINE_SYNC_LOCK = Lock()
 PRIMARY_PAPER_SLOT_ID = 'primary'
 
@@ -490,6 +493,7 @@ def _refresh_knowledge_suggestions(db: Session, *, market_scope: str, current_ti
         key = ("internal", family_key, suggestion_type)
         record = existing.get(key)
         confidence = round(min(0.95, 0.45 + proposal_count * 0.05 + paper_count * 0.03 + backtest_count * 0.02), 2)
+        stage2_status = "adopted_candidate" if proposal_count >= 8 and paper_count >= 3 and confidence >= 0.75 else "review_ready" if proposal_count >= 5 or paper_count >= 2 else "proposed"
         if record is None:
             db.add(
                 KnowledgeSuggestion(
@@ -508,7 +512,7 @@ def _refresh_knowledge_suggestions(db: Session, *, market_scope: str, current_ti
                         "paper": paper_count,
                     },
                     linked_source_ids=[],
-                    status="proposed",
+                    status=stage2_status,
                     created_at=current_time,
                     updated_at=current_time,
                 )
@@ -534,6 +538,7 @@ def _refresh_knowledge_suggestions(db: Session, *, market_scope: str, current_ti
                 "backtest": backtest_count,
                 "paper": paper_count,
             }
+            record.status = stage2_status
             record.updated_at = current_time
 
     external_entries = list(
@@ -557,6 +562,7 @@ def _refresh_knowledge_suggestions(db: Session, *, market_scope: str, current_ti
                 "source_refs": list(payload.get("source_refs", [entry.source_id]) or [entry.source_id]),
             }
             rationale = f"外部白名单来源 {entry.source_id} 为 {family_key} 家族补充了稳定方法论摘要。"
+            stage2_status = "adopted_candidate" if str(entry.status) == "adopted_candidate" else "review_ready"
             if record is None:
                 db.add(
                     KnowledgeSuggestion(
@@ -571,7 +577,7 @@ def _refresh_knowledge_suggestions(db: Session, *, market_scope: str, current_ti
                         confidence=0.68,
                         evidence_counts={"external_entries": 1},
                         linked_source_ids=[entry.source_id],
-                        status="proposed",
+                        status=stage2_status,
                         created_at=current_time,
                         updated_at=current_time,
                     )
@@ -594,6 +600,7 @@ def _refresh_knowledge_suggestions(db: Session, *, market_scope: str, current_ti
                 record.rationale_zh = rationale
                 record.confidence = max(record.confidence, 0.68)
                 record.linked_source_ids = sorted(set(list(record.linked_source_ids) + [entry.source_id]))
+                record.status = stage2_status
                 record.updated_at = current_time
     db.flush()
 
@@ -1234,6 +1241,202 @@ def build_runtime_sync_history(db: Session, *, limit: int = 8) -> list[dict[str,
             'degraded': bool(payload.get('degraded', False)),
         })
     return history
+
+
+def build_runtime_watchdog_status() -> dict[str, object]:
+    payload = get_runtime_state_json(_WATCHDOG_LATEST_KEY) or {}
+    return {
+        'checked_at': payload.get('checked_at'),
+        'status': str(payload.get('status', 'unknown') or 'unknown'),
+        'summary': str(payload.get('summary', '') or ''),
+        'service_healthy': bool(payload.get('service_healthy', False)),
+        'command_available': bool(payload.get('command_available', False)),
+        'restart_attempted': bool(payload.get('restart_attempted', False)),
+        'restart_reason': str(payload.get('restart_reason')) if payload.get('restart_reason') is not None else None,
+        'current_state': str(payload.get('current_state')) if payload.get('current_state') is not None else None,
+        'current_stage': str(payload.get('current_stage')) if payload.get('current_stage') is not None else None,
+        'detected_issues': [str(item) for item in list(payload.get('detected_issues', []) or [])],
+        'fallback_detected': bool(payload.get('fallback_detected', False)),
+        'macro_degraded': bool(payload.get('macro_degraded', False)),
+        'llm_using_mock_fallback': bool(payload.get('llm_using_mock_fallback', False)),
+        'stalled_detected': bool(payload.get('stalled_detected', False)),
+        'error_log_signal_count': int(payload.get('error_log_signal_count', 0) or 0),
+        'error_log_excerpt': [str(item) for item in list(payload.get('error_log_excerpt', []) or [])],
+    }
+
+
+def build_runtime_watchdog_history(*, limit: int = 12) -> list[dict[str, object]]:
+    payload = get_runtime_state_json(_WATCHDOG_HISTORY_KEY) or {}
+    entries = list(payload.get('entries', []) or [])
+    normalized: list[dict[str, object]] = []
+    for item in entries[-max(1, limit):]:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                'checked_at': item.get('checked_at'),
+                'status': str(item.get('status', 'unknown') or 'unknown'),
+                'summary': str(item.get('summary', '') or ''),
+                'service_healthy': bool(item.get('service_healthy', False)),
+                'command_available': bool(item.get('command_available', False)),
+                'restart_attempted': bool(item.get('restart_attempted', False)),
+                'restart_reason': str(item.get('restart_reason')) if item.get('restart_reason') is not None else None,
+                'current_state': str(item.get('current_state')) if item.get('current_state') is not None else None,
+                'current_stage': str(item.get('current_stage')) if item.get('current_stage') is not None else None,
+                'detected_issues': [str(issue) for issue in list(item.get('detected_issues', []) or [])],
+                'fallback_detected': bool(item.get('fallback_detected', False)),
+                'macro_degraded': bool(item.get('macro_degraded', False)),
+                'llm_using_mock_fallback': bool(item.get('llm_using_mock_fallback', False)),
+                'stalled_detected': bool(item.get('stalled_detected', False)),
+                'error_log_signal_count': int(item.get('error_log_signal_count', 0) or 0),
+                'error_log_excerpt': [str(line) for line in list(item.get('error_log_excerpt', []) or [])],
+            }
+        )
+    return list(reversed(normalized))
+
+
+def build_runtime_long_horizon_stats(db: Session, *, window_days: int = 30) -> dict[str, object]:
+    history = build_runtime_sync_history(db, limit=max(30, window_days * 4))
+    recent = history[: max(8, window_days)]
+    total = len(recent)
+    success_runs = sum(1 for item in recent if str(item.get('state')) not in {'failed'})
+    durations = [int(item['total_duration_ms']) for item in recent if item.get('total_duration_ms') is not None]
+    watchdog_history = build_runtime_watchdog_history(limit=max(24, window_days * 3))
+    watchdog_issue_count = sum(1 for item in watchdog_history if list(item.get('detected_issues', []) or []))
+    watchdog_restart_count = sum(1 for item in watchdog_history if bool(item.get('restart_attempted', False)))
+    return {
+        'window_days': window_days,
+        'total_sync_runs': total,
+        'success_rate': round((success_runs / total), 3) if total else 0.0,
+        'avg_duration_ms': round(sum(durations) / len(durations), 1) if durations else None,
+        'degraded_runs': sum(1 for item in recent if bool(item.get('degraded', False))),
+        'failed_runs': sum(1 for item in recent if str(item.get('state')) == 'failed'),
+        'stalled_runs': sum(1 for item in recent if str(item.get('state')) == 'stalled'),
+        'watchdog_issue_count': watchdog_issue_count,
+        'watchdog_restart_count': watchdog_restart_count,
+    }
+
+
+def build_provider_long_horizon_stats(db: Session, *, window_days: int = 30) -> dict[str, object]:
+    summary = build_provider_migration_summary(db, window_days=window_days)
+    history = build_provider_migration_history(db, window_days=max(window_days, 90))
+    current = dict(summary.get('current', {}) or {})
+    previous = dict(summary.get('previous', {}) or {}) if summary.get('previous') is not None else {}
+    return {
+        'window_days': window_days,
+        'current_provider': str(summary.get('current_provider', get_current_llm_status(db).provider)),
+        'current_avg_final_score': current.get('avg_final_score'),
+        'current_promotion_rate': float(current.get('promotion_rate', 0.0) or 0.0),
+        'current_fallback_rate': float(current.get('fallback_rate', 0.0) or 0.0),
+        'current_real_proposal_count': int(current.get('real_proposal_count', 0) or 0),
+        'cohort_count': len(history),
+        'fallback_rate_delta': summary.get('deltas', {}).get('fallback_rate') if isinstance(summary.get('deltas'), dict) else None,
+        'promotion_rate_delta': summary.get('deltas', {}).get('promotion_rate') if isinstance(summary.get('deltas'), dict) else None,
+    }
+
+
+def build_readiness_long_horizon_stats(db: Session, *, window_days: int = 30) -> dict[str, object]:
+    history = build_live_readiness_history(db, limit=max(12, window_days))
+    if not history:
+        return {
+            'window_days': window_days,
+            'latest_score': None,
+            'avg_score': None,
+            'best_score': None,
+            'score_change': None,
+            'dominant_blockers': [],
+            'status_counts': {},
+        }
+    latest = history[0]
+    oldest = history[-1]
+    scores = [int(item.get('score', 0) or 0) for item in history]
+    blocker_counter: Counter[str] = Counter()
+    status_counter: Counter[str] = Counter()
+    for item in history:
+        status_counter[str(item.get('status', 'not_ready'))] += 1
+        blocker_counter.update(str(blocker) for blocker in list(item.get('blockers', []) or []))
+    return {
+        'window_days': window_days,
+        'latest_score': int(latest.get('score', 0) or 0),
+        'avg_score': round(sum(scores) / len(scores), 1) if scores else None,
+        'best_score': max(scores) if scores else None,
+        'score_change': float(latest.get('score', 0) or 0) - float(oldest.get('score', 0) or 0),
+        'dominant_blockers': [item for item, _count in blocker_counter.most_common(4)],
+        'status_counts': dict(status_counter),
+    }
+
+
+def build_paper_long_horizon_stats(db: Session, *, window_days: int = 30) -> dict[str, object]:
+    slots = build_paper_pool(db).get('slots', [])
+    occupied = [slot for slot in slots if slot.get('proposal_id')]
+    drawdowns: list[float] = []
+    equity_changes: list[float] = []
+    total_execution_count = 0
+    executed_count = 0
+    skipped_count = 0
+    incident_count = 0
+    fill_numerator = 0
+    fill_denominator = 0
+    for slot in occupied:
+        slot_id = str(slot.get('slot_id', PRIMARY_PAPER_SLOT_ID))
+        data = fetch_paper_data(limit=max(30, window_days * 8), slot_id=slot_id)
+        orders = list(data.get('orders', []) or [])
+        nav_rows = list(data.get('nav', []) or [])
+        total_execution_count += len(orders)
+        executed_count += sum(1 for order in orders if str(order.get('status', '')).lower() == 'filled')
+        skipped_count += sum(1 for order in orders if str(order.get('status', '')).lower() == 'skipped')
+        fill_numerator += sum(1 for order in orders if str(order.get('status', '')).lower() == 'filled')
+        fill_denominator += len(orders)
+        if nav_rows:
+            drawdowns.append(_paper_nav_drawdown(nav_rows))
+            first = nav_rows[0]
+            last = nav_rows[-1]
+            if first.get('total_equity') is not None and last.get('total_equity') is not None:
+                equity_changes.append(float(last['total_equity']) - float(first['total_equity']))
+        incident_count += int(slot.get('paper_pool_evidence', {}).get('incident_count_30d', 0) or 0)
+    return {
+        'window_days': window_days,
+        'slot_count': len(slots),
+        'occupied_slot_count': len(occupied),
+        'challenger_count': max(0, len(occupied) - 1) if occupied else 0,
+        'total_execution_count': total_execution_count,
+        'executed_count': executed_count,
+        'skipped_count': skipped_count,
+        'fill_rate': round(fill_numerator / fill_denominator, 3) if fill_denominator else None,
+        'max_drawdown': round(max(drawdowns), 4) if drawdowns else None,
+        'aggregate_equity_change': round(sum(equity_changes), 2) if equity_changes else None,
+        'incident_count': incident_count,
+    }
+
+
+def build_knowledge_phase2_stats(db: Session) -> dict[str, object]:
+    _seed_external_knowledge(db)
+    source_count = int(db.execute(select(func.count()).select_from(KnowledgeSource)).scalar_one())
+    external_entry_count = int(db.execute(select(func.count()).select_from(ExternalKnowledgeEntry)).scalar_one())
+    suggestions = list(db.execute(select(KnowledgeSuggestion)).scalars())
+    status_counter: Counter[str] = Counter()
+    family_counter: Counter[str] = Counter()
+    for item in suggestions:
+        status_counter[str(item.status)] += 1
+        family_counter[str(item.family_key)] += 1
+    return {
+        'source_count': source_count,
+        'external_entry_count': external_entry_count,
+        'suggestion_status_counts': dict(status_counter),
+        'review_ready_count': int(status_counter.get('review_ready', 0)),
+        'adopted_candidate_count': int(status_counter.get('adopted_candidate', 0)),
+        'top_families': [family for family, _count in family_counter.most_common(5)],
+    }
+
+
+def build_long_horizon_stats(db: Session) -> dict[str, object]:
+    return {
+        'runtime': build_runtime_long_horizon_stats(db),
+        'readiness': build_readiness_long_horizon_stats(db),
+        'provider': build_provider_long_horizon_stats(db),
+        'paper': build_paper_long_horizon_stats(db),
+        'knowledge': build_knowledge_phase2_stats(db),
+    }
 
 
 def sync_strategy_snapshots(db: Session) -> None:

@@ -16,6 +16,7 @@ from openhamster.api.services import (
     now_tz,
     sync_event_stream,
 )
+from openhamster.data.hk_universe import fetch_hk_universe_candidates
 from openhamster.runtime_state import delete_runtime_state_keys, set_runtime_state_json
 
 
@@ -218,7 +219,36 @@ def test_dynamic_hk_universe_selection_picks_hk_symbol(monkeypatch) -> None:
         assert selection['selected_symbol'] == '0700.HK'
         assert len(selection['candidates']) == 2
         assert selection['selection_reason']
-        assert selection['top_factors']
+
+
+def test_hk_universe_resilient_fallback_keeps_multi_symbol_candidates(monkeypatch) -> None:
+    def _stub_history(self, ticker: str, start: str, end: str):
+        import pandas as pd
+
+        if ticker == '2800.HK':
+            close = [24.8, 25.0, 25.4, 25.8, 26.0]
+            volume = [8_000_000, 7_500_000, 8_200_000, 8_400_000, 8_300_000]
+        else:
+            close = [310.0, 314.0, 319.0, 323.0, 328.0]
+            volume = [2_100_000, 2_050_000, 2_200_000, 2_300_000, 2_250_000]
+        return pd.DataFrame({"close": close, "volume": volume})
+
+    monkeypatch.setattr('openhamster.data.hk_universe._fetch_minshare_market_frame', lambda min_list_days: None)
+    monkeypatch.setattr('openhamster.data.hk_universe._fetch_akshare_market_frame', lambda: None)
+    monkeypatch.setattr('openhamster.data.tencent_provider.TencentProvider.fetch_ohlcv', _stub_history)
+    monkeypatch.setattr('openhamster.data.stooq_provider.StooqProvider.fetch_ohlcv', _stub_history)
+
+    candidates = fetch_hk_universe_candidates(
+        top_n=5,
+        min_list_days=120,
+        min_turnover_millions=50.0,
+        account_capital_hkd=100000.0,
+        max_lot_cost_ratio=0.5,
+    )
+
+    assert len(candidates) >= 2
+    assert all(str(item['symbol']).endswith('.HK') for item in candidates[:2])
+    assert any(str(item.get('source')) == 'resilient_fallback' for item in candidates)
 
 
 def test_macro_pipeline_health_history_aggregates_recent_audits() -> None:

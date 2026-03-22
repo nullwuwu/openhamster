@@ -25,6 +25,8 @@ const paperPoolSlots = computed(() => command.value?.paper_pool?.slots ?? [])
 const liveReadiness = computed(() => command.value?.live_readiness ?? null)
 const runtimeStatus = computed(() => command.value?.runtime_status ?? null)
 const llmStatus = computed(() => command.value?.llm_status ?? null)
+const runtimeWatchdog = computed(() => command.value?.runtime_watchdog ?? null)
+const longHorizon = computed(() => command.value?.long_horizon_stats ?? null)
 
 const focusLink = computed(() => {
   if (!slotFocus.value?.proposal_id) return null
@@ -280,5 +282,69 @@ function formatDelta(value?: number | null): string {
         </Card>
       </div>
     </div>
+
+    <Card class="border border-slate-200/80 bg-white">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Long-Horizon Stats</p>
+          <h3 class="mt-2 text-lg font-semibold text-slate-900">长期运行与证据厚度</h3>
+          <p class="mt-2 text-sm text-slate-600">
+            这组指标用来看系统是不是只会“能跑”，还是已经在持续积累 readiness、provider、paper 和知识层证据。
+          </p>
+        </div>
+        <Badge :variant="runtimeWatchdog?.status === 'healthy' ? 'success' : runtimeWatchdog?.status === 'critical' ? 'danger' : 'warning'">
+          Watchdog {{ runtimeWatchdog?.status ?? '--' }}
+        </Badge>
+      </div>
+
+      <div class="mt-4 grid gap-3 lg:grid-cols-5">
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">Runtime</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.runtime.success_rate ?? '--' }}</p>
+          <p class="mt-1 text-sm text-slate-600">30d 成功率 · 异常 {{ longHorizon?.runtime.watchdog_issue_count ?? 0 }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">Readiness</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.readiness.avg_score ?? '--' }}</p>
+          <p class="mt-1 text-sm text-slate-600">30d 平均分 · 最新 {{ longHorizon?.readiness.latest_score ?? '--' }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">Provider</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.provider.current_provider ?? '--' }}</p>
+          <p class="mt-1 text-sm text-slate-600">fallback {{ longHorizon?.provider.current_fallback_rate ?? '--' }} · cohort {{ longHorizon?.provider.cohort_count ?? 0 }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">Paper</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.paper.executed_count ?? 0 }}</p>
+          <p class="mt-1 text-sm text-slate-600">30d 执行笔数 · slot {{ longHorizon?.paper.occupied_slot_count ?? 0 }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">Knowledge v2</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.knowledge.review_ready_count ?? 0 }}</p>
+          <p class="mt-1 text-sm text-slate-600">review-ready · adopted {{ longHorizon?.knowledge.adopted_candidate_count ?? 0 }}</p>
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-3 xl:grid-cols-2">
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-4 py-4 text-sm text-slate-700">
+          <p class="font-semibold text-slate-900">Watchdog 摘要</p>
+          <p class="mt-2">{{ runtimeWatchdog?.summary ?? 'Watchdog 还没有历史样本。' }}</p>
+          <p class="mt-2 text-xs text-slate-500">
+            issues:
+            {{ (runtimeWatchdog?.detected_issues ?? []).join(' / ') || 'none' }}
+          </p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/70 px-4 py-4 text-sm text-slate-700">
+          <p class="font-semibold text-slate-900">Readiness 主要阻断</p>
+          <p class="mt-2">
+            {{ (longHorizon?.readiness.dominant_blockers ?? []).join(' / ') || '当前没有形成集中阻断。' }}
+          </p>
+          <p class="mt-2 text-xs text-slate-500">
+            top families:
+            {{ (longHorizon?.knowledge.top_families ?? []).join(' / ') || '--' }}
+          </p>
+        </div>
+      </div>
+    </Card>
   </div>
 </template>

@@ -32,10 +32,13 @@ const runtimeLogsQuery = useQuery({
 
 const command = computed(() => commandQuery.data.value)
 const runtimeStatus = computed(() => command.value?.runtime_status)
+const runtimeWatchdog = computed(() => command.value?.runtime_watchdog)
+const runtimeWatchdogHistory = computed(() => command.value?.runtime_watchdog_history ?? [])
 const runtimeSyncHistory = computed(() => command.value?.runtime_sync_history ?? [])
 const llmStatus = computed(() => command.value?.llm_status)
 const macroStatus = computed(() => command.value?.market_snapshot.macro_status)
 const runtimeLogs = computed(() => runtimeLogsQuery.data.value)
+const longHorizon = computed(() => command.value?.long_horizon_stats)
 
 const sortedRuntimeHistory = computed(() =>
   [...runtimeSyncHistory.value].sort((left, right) => left.created_at.localeCompare(right.created_at)),
@@ -192,6 +195,84 @@ function formatDurationMs(value?: number): string {
       <Card>
         <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('runtimeDetail.latestSyncTrigger') }}</p>
         <p class="mt-2 text-lg font-semibold text-slate-900">{{ latestRuntimeHistoryItem?.trigger ?? '--' }}</p>
+      </Card>
+    </div>
+
+    <div class="grid gap-4 xl:grid-cols-[1fr,0.9fr]">
+      <Card class="space-y-4">
+        <div>
+          <h3 class="text-sm font-semibold">Local Watchdog</h3>
+          <p class="mt-1 text-sm text-slate-600">独立于 API 的本地巡检进程，定时检查健康页、command payload、fallback 污染、调度卡顿和错误日志信号。</p>
+        </div>
+        <div class="grid gap-2 text-sm sm:grid-cols-2">
+          <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+            <span class="text-slate-500">状态</span>
+            <Badge :variant="runtimeVariant(runtimeWatchdog?.status, runtimeWatchdog?.status === 'warning', runtimeWatchdog?.status === 'critical')">
+              {{ runtimeWatchdog?.status ?? '--' }}
+            </Badge>
+          </div>
+          <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+            <span class="text-slate-500">最近检查</span>
+            <span class="font-semibold text-slate-900">{{ formatDateTime(runtimeWatchdog?.checked_at) }}</span>
+          </div>
+          <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+            <span class="text-slate-500">自动重启次数</span>
+            <span class="font-semibold text-slate-900">{{ longHorizon?.runtime.watchdog_restart_count ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between rounded-lg border border-slate-200/80 bg-white/70 px-3 py-2">
+            <span class="text-slate-500">错误日志信号</span>
+            <span class="font-semibold text-slate-900">{{ runtimeWatchdog?.error_log_signal_count ?? 0 }}</span>
+          </div>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-4 py-4 text-sm text-slate-700">
+          {{ runtimeWatchdog?.summary ?? 'Watchdog 还没有生成巡检摘要。' }}
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-950 p-0.5">
+          <div class="rounded-[11px] bg-slate-950 px-4 py-3 font-mono text-xs leading-6 text-slate-100">
+            <div v-for="line in runtimeWatchdog?.error_log_excerpt ?? []" :key="line" class="whitespace-pre-wrap break-all">
+              {{ line }}
+            </div>
+            <p v-if="!(runtimeWatchdog?.error_log_excerpt?.length)" class="text-slate-400">当前没有高优先级错误日志信号。</p>
+          </div>
+        </div>
+      </Card>
+
+      <Card class="space-y-4">
+        <div>
+          <h3 class="text-sm font-semibold">30d Runtime Stats</h3>
+          <p class="mt-1 text-sm text-slate-600">把同步成功率、降级次数、卡顿次数和 watchdog 异常拉到同一层看。</p>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3">
+            <p class="text-xs uppercase tracking-widest text-slate-500">成功率</p>
+            <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.runtime.success_rate ?? '--' }}</p>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3">
+            <p class="text-xs uppercase tracking-widest text-slate-500">平均耗时</p>
+            <p class="mt-2 text-lg font-semibold text-slate-900">{{ formatDurationMs(longHorizon?.runtime.avg_duration_ms ?? undefined) }}</p>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3">
+            <p class="text-xs uppercase tracking-widest text-slate-500">卡顿 / 失败</p>
+            <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.runtime.stalled_runs ?? 0 }} / {{ longHorizon?.runtime.failed_runs ?? 0 }}</p>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-white/70 px-3 py-3">
+            <p class="text-xs uppercase tracking-widest text-slate-500">Watchdog 异常</p>
+            <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.runtime.watchdog_issue_count ?? 0 }}</p>
+          </div>
+        </div>
+        <div class="space-y-2">
+          <div
+            v-for="item in runtimeWatchdogHistory.slice(0, 6)"
+            :key="`${item.checked_at}-${item.status}`"
+            class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-3 text-sm text-slate-700"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span>{{ formatDateTime(item.checked_at) }}</span>
+              <Badge :variant="runtimeVariant(item.status, item.status === 'warning', item.status === 'critical')">{{ item.status }}</Badge>
+            </div>
+            <p class="mt-2">{{ item.summary }}</p>
+          </div>
+        </div>
       </Card>
     </div>
 

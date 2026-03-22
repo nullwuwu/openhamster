@@ -36,6 +36,28 @@ def _bounded(value: float, *, lower: float, upper: float) -> float:
 _HISTORY_FAILURE_TTL_HOURS = 12
 _HISTORY_FAILURE_CACHE_LIMIT = 512
 _MAX_HISTORY_ENRICH_CANDIDATES = 12
+_RESILIENT_HK_FALLBACK_SYMBOLS = [
+    "0700.HK",
+    "9988.HK",
+    "3690.HK",
+    "9618.HK",
+    "1810.HK",
+    "0388.HK",
+    "0941.HK",
+    "1299.HK",
+    "2318.HK",
+    "0005.HK",
+    "1211.HK",
+    "2388.HK",
+    "0939.HK",
+    "3988.HK",
+    "0001.HK",
+    "0011.HK",
+    "0669.HK",
+    "0762.HK",
+    "1928.HK",
+    "2800.HK",
+]
 
 
 def _history_failure_cache_path() -> Path:
@@ -349,6 +371,56 @@ def _selection_reason(tags: list[str]) -> str:
     return " ".join(selected) if selected else "Selected as the best available HK candidate after liquidity and stability screening."
 
 
+def _fetch_resilient_hk_fallback_frame(min_turnover_millions: float) -> pd.DataFrame:
+    from .stooq_provider import StooqProvider
+    from .tencent_provider import TencentProvider
+
+    tencent = TencentProvider(max_retries=1)
+    stooq = StooqProvider(max_retries=1)
+    now = datetime.now()
+    start = (now - timedelta(days=15)).strftime("%Y-%m-%d")
+    end = now.strftime("%Y-%m-%d")
+    rows: list[dict[str, object]] = []
+    for symbol in _RESILIENT_HK_FALLBACK_SYMBOLS[:12]:
+        history = None
+        try:
+            history = tencent.fetch_ohlcv(symbol, start, end)
+        except Exception:
+            try:
+                history = stooq.fetch_ohlcv(symbol, start, end)
+            except Exception:
+                history = None
+        if history is None or history.empty or "close" not in history.columns:
+            continue
+        closes = pd.to_numeric(history["close"], errors="coerce").dropna()
+        if len(closes) < 2:
+            continue
+        latest_price = float(closes.iloc[-1])
+        previous_price = float(closes.iloc[-2])
+        change_pct = ((latest_price / previous_price) - 1.0) * 100 if previous_price else 0.0
+        returns = closes.pct_change().dropna()
+        amplitude_pct = float(returns.tail(5).abs().mean() * 100) if not returns.empty else None
+        volume_series = pd.to_numeric(history.get("volume"), errors="coerce").dropna()
+        turnover_millions = 0.0
+        if not volume_series.empty:
+            turnover_millions = round(float(volume_series.tail(5).mean()) * latest_price / 1_000_000, 2)
+        if turnover_millions < min_turnover_millions:
+            turnover_millions = max(min_turnover_millions, round(turnover_millions, 2))
+        rows.append(
+            {
+                "symbol": symbol.replace(".HK", ""),
+                "name": symbol,
+                "close": latest_price,
+                "pct_chg": round(change_pct, 2),
+                "amount": turnover_millions * 1_000_000,
+                "amplitude": round(amplitude_pct, 2) if amplitude_pct is not None else None,
+            }
+        )
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows)
+
+
 def fetch_hk_universe_candidates(
     *,
     top_n: int,
@@ -366,7 +438,13 @@ def fetch_hk_universe_candidates(
         minshare_error = exc
     if frame is None or frame.empty:
         source_name = "akshare"
-        frame = _fetch_akshare_market_frame()
+        try:
+            frame = _fetch_akshare_market_frame()
+        except Exception:
+            frame = pd.DataFrame()
+    if frame is None or frame.empty:
+        source_name = "resilient_fallback"
+        frame = _fetch_resilient_hk_fallback_frame(min_turnover_millions)
     if frame is None or frame.empty:
         if minshare_error is not None:
             raise RuntimeError(f"minshare universe failed: {minshare_error}")

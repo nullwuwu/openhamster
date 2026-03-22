@@ -36,9 +36,11 @@ from .schemas import (
     LLMStatusDTO,
     KnowledgeSourceDTO,
     KnowledgeSuggestionDTO,
+    KnowledgeOpsStatsDTO,
     LiveReadinessChangeDTO,
     LiveReadinessDTO,
     LiveReadinessHistoryItemDTO,
+    LongHorizonStatsDTO,
     MacroPipelineStatusDTO,
     MarketProfileDTO,
     MarketSnapshotDTO,
@@ -53,10 +55,15 @@ from .schemas import (
     PaperPositionDTO,
     PaperTradingDTO,
     PipelineRuntimeStatusDTO,
+    ProviderStatsDTO,
     RuntimeSyncHistoryItemDTO,
+    RuntimeStatsDTO,
+    RuntimeWatchdogSnapshotDTO,
     ProviderCohortDTO,
     ProviderCohortHistoryItemDTO,
     ProviderMigrationSummaryDTO,
+    ReadinessStatsDTO,
+    PaperStatsDTO,
     ResearchBatchDTO,
     RiskDecisionDTO,
     RuntimeLogDTO,
@@ -74,8 +81,11 @@ from .services import (
     build_live_readiness_change,
     build_live_readiness_history,
     build_operational_acceptance,
+    build_long_horizon_stats,
     build_provider_migration_history,
     build_provider_migration_summary,
+    build_runtime_watchdog_history,
+    build_runtime_watchdog_status,
     ensure_pipeline_runtime_status_baseline,
     build_runtime_sync_history,
     build_paper_pool,
@@ -681,10 +691,13 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
     latest_digest = snapshot["event_digest"]
     provider_migration = build_provider_migration_summary(db)
     runtime_sync_history = build_runtime_sync_history(db)
+    runtime_watchdog = build_runtime_watchdog_status()
+    runtime_watchdog_history = build_runtime_watchdog_history(limit=12)
     provider_migration_history = build_provider_migration_history(db)
     live_readiness = build_live_readiness(db)
     live_readiness_history = build_live_readiness_history(db, limit=8)
     live_readiness_change = build_live_readiness_change(db, live_readiness_history)
+    long_horizon_stats = build_long_horizon_stats(db)
     slot_focus = _resolve_slot_focus(
         db,
         active=active,
@@ -699,6 +712,8 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
         timezone="Asia/Shanghai",
         llm_status=_to_llm_status_dto(get_current_llm_status(db)),
         runtime_status=_to_pipeline_runtime_status_dto(runtime_status),
+        runtime_watchdog=RuntimeWatchdogSnapshotDTO(**runtime_watchdog),
+        runtime_watchdog_history=[RuntimeWatchdogSnapshotDTO(**item) for item in runtime_watchdog_history],
         runtime_sync_history=_to_runtime_sync_history_dto(runtime_sync_history),
         provider_migration=_to_provider_migration_summary_dto(provider_migration),
         provider_migration_history=_to_provider_migration_history_dto(provider_migration_history),
@@ -751,6 +766,13 @@ def get_command_center(db: Session = Depends(get_db)) -> CommandCenterDTO:
         paper_pool=PaperPoolDTO(
             slots=[_to_paper_slot_dto(item) for item in list(paper_pool.get('slots', []) or [])],
             summary=PaperPoolSummaryDTO(**dict(paper_pool.get('summary', {}) or {})),
+        ),
+        long_horizon_stats=LongHorizonStatsDTO(
+            runtime=RuntimeStatsDTO(**dict(long_horizon_stats.get('runtime', {}) or {})),
+            readiness=ReadinessStatsDTO(**dict(long_horizon_stats.get('readiness', {}) or {})),
+            provider=ProviderStatsDTO(**dict(long_horizon_stats.get('provider', {}) or {})),
+            paper=PaperStatsDTO(**dict(long_horizon_stats.get('paper', {}) or {})),
+            knowledge=KnowledgeOpsStatsDTO(**dict(long_horizon_stats.get('knowledge', {}) or {})),
         ),
         active_strategy=ActiveStrategyDTO(
             proposal=_to_proposal_dto(active) if active else None,

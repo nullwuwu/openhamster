@@ -44,6 +44,7 @@ const proposal = computed(() => proposalQuery.data.value ?? null)
 const command = computed(() => commandQuery.data.value)
 const strategyCatalog = computed(() => strategiesQuery.data.value ?? [])
 const universeSelection = computed(() => command.value?.market_snapshot.universe_selection)
+const knowledgeOps = computed(() => command.value?.long_horizon_stats.knowledge ?? null)
 const selectedUniverseCandidate = computed(() =>
   universeSelection.value?.candidates?.find((candidate) => candidate.symbol === universeSelection.value?.selected_symbol) ?? null,
 )
@@ -327,12 +328,34 @@ function strategyTitle(value?: string | null): string {
               >
                 <div class="flex items-center justify-between gap-2">
                   <p class="font-semibold text-slate-900">{{ knowledgeFamilyLabel(item.family_key) }}</p>
-                  <Badge :variant="item.origin === 'external' ? 'info' : 'neutral'">{{ item.origin }}</Badge>
+                  <div class="flex gap-2">
+                    <Badge :variant="item.origin === 'external' ? 'info' : 'neutral'">{{ item.origin }}</Badge>
+                    <Badge :variant="item.status === 'adopted_candidate' ? 'success' : item.status === 'review_ready' ? 'warning' : 'neutral'">
+                      {{ item.status }}
+                    </Badge>
+                  </div>
                 </div>
                 <p class="mt-2 text-slate-700">{{ item.rationale_zh }}</p>
-                <p class="mt-2 text-xs text-slate-500">confidence: {{ item.confidence }}</p>
+                <p class="mt-2 text-xs text-slate-500">
+                  confidence: {{ item.confidence }}
+                  · proposal {{ item.evidence_counts.proposal ?? 0 }}
+                  · paper {{ item.evidence_counts.paper ?? 0 }}
+                  · sources {{ item.linked_source_ids.join(' / ') || '--' }}
+                </p>
               </div>
             </div>
+          </div>
+          <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 p-4">
+            <p class="text-xs uppercase tracking-widest text-slate-500">Knowledge Phase 2</p>
+            <p class="mt-2 text-sm font-semibold text-slate-900">
+              review-ready {{ knowledgeOps?.review_ready_count ?? 0 }} · adopted {{ knowledgeOps?.adopted_candidate_count ?? 0 }}
+            </p>
+            <p class="mt-2 text-sm text-slate-700">
+              外部来源 {{ knowledgeOps?.source_count ?? 0 }} 个，外部条目 {{ knowledgeOps?.external_entry_count ?? 0 }} 个。
+            </p>
+            <p class="mt-2 text-xs text-slate-500">
+              top families: {{ (knowledgeOps?.top_families ?? []).join(' / ') || '--' }}
+            </p>
           </div>
           <div v-if="externalKnowledgeSources.length" class="rounded-lg border border-slate-200/80 bg-slate-50/80 p-4">
             <p class="text-xs uppercase tracking-widest text-slate-500">{{ t('researchDetail.externalKnowledgeSources') }}</p>

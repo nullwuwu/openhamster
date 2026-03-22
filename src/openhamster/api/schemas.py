@@ -472,6 +472,90 @@ class RuntimeLogDTO(BaseModel):
     lines: list[str] = Field(default_factory=list)
 
 
+class RuntimeWatchdogSnapshotDTO(BaseModel):
+    checked_at: datetime | None = None
+    status: str = "unknown"
+    summary: str = ""
+    service_healthy: bool = False
+    command_available: bool = False
+    restart_attempted: bool = False
+    restart_reason: str | None = None
+    current_state: str | None = None
+    current_stage: str | None = None
+    detected_issues: list[str] = Field(default_factory=list)
+    fallback_detected: bool = False
+    macro_degraded: bool = False
+    llm_using_mock_fallback: bool = False
+    stalled_detected: bool = False
+    error_log_signal_count: int = 0
+    error_log_excerpt: list[str] = Field(default_factory=list)
+
+
+class RuntimeStatsDTO(BaseModel):
+    window_days: int = 30
+    total_sync_runs: int = 0
+    success_rate: float = 0.0
+    avg_duration_ms: float | None = None
+    degraded_runs: int = 0
+    failed_runs: int = 0
+    stalled_runs: int = 0
+    watchdog_issue_count: int = 0
+    watchdog_restart_count: int = 0
+
+
+class ReadinessStatsDTO(BaseModel):
+    window_days: int = 30
+    latest_score: int | None = None
+    avg_score: float | None = None
+    best_score: int | None = None
+    score_change: float | None = None
+    dominant_blockers: list[str] = Field(default_factory=list)
+    status_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class ProviderStatsDTO(BaseModel):
+    window_days: int = 30
+    current_provider: str
+    current_avg_final_score: float | None = None
+    current_promotion_rate: float = 0.0
+    current_fallback_rate: float = 0.0
+    current_real_proposal_count: int = 0
+    cohort_count: int = 0
+    fallback_rate_delta: float | None = None
+    promotion_rate_delta: float | None = None
+
+
+class PaperStatsDTO(BaseModel):
+    window_days: int = 30
+    slot_count: int = 0
+    occupied_slot_count: int = 0
+    challenger_count: int = 0
+    total_execution_count: int = 0
+    executed_count: int = 0
+    skipped_count: int = 0
+    fill_rate: float | None = None
+    max_drawdown: float | None = None
+    aggregate_equity_change: float | None = None
+    incident_count: int = 0
+
+
+class KnowledgeOpsStatsDTO(BaseModel):
+    source_count: int = 0
+    external_entry_count: int = 0
+    suggestion_status_counts: dict[str, int] = Field(default_factory=dict)
+    review_ready_count: int = 0
+    adopted_candidate_count: int = 0
+    top_families: list[str] = Field(default_factory=list)
+
+
+class LongHorizonStatsDTO(BaseModel):
+    runtime: RuntimeStatsDTO
+    readiness: ReadinessStatsDTO
+    provider: ProviderStatsDTO
+    paper: PaperStatsDTO
+    knowledge: KnowledgeOpsStatsDTO
+
+
 class ResearchBatchDTO(BaseModel):
     batch_id: str
     market_scope: str
@@ -587,6 +671,8 @@ class CommandCenterDTO(BaseModel):
     timezone: str
     llm_status: LLMStatusDTO
     runtime_status: PipelineRuntimeStatusDTO
+    runtime_watchdog: RuntimeWatchdogSnapshotDTO
+    runtime_watchdog_history: list[RuntimeWatchdogSnapshotDTO] = Field(default_factory=list)
     runtime_sync_history: list[RuntimeSyncHistoryItemDTO] = Field(default_factory=list)
     provider_migration: ProviderMigrationSummaryDTO
     provider_migration_history: list[ProviderCohortHistoryItemDTO] = Field(default_factory=list)
@@ -598,6 +684,7 @@ class CommandCenterDTO(BaseModel):
     paper_summary: PaperSummaryDTO
     paper_pool_summary: PaperPoolSummaryDTO
     paper_pool: PaperPoolDTO
+    long_horizon_stats: LongHorizonStatsDTO
     active_strategy: ActiveStrategyDTO
     candidate_count: int
     latest_risk_decision: RiskDecisionDTO | None = None

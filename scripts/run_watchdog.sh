@@ -20,7 +20,6 @@ if [[ -f "$REPO_ROOT/.env.local" ]]; then
 fi
 
 export PYTHONPATH="$REPO_ROOT/src"
-export OPENHAMSTER_STARTUP_MODE="${OPENHAMSTER_STARTUP_MODE:-script}"
 export OPENHAMSTER_LOG_DIR="${OPENHAMSTER_LOG_DIR:-$STATE_ROOT/logs}"
 export RUNTIME_STATE_DB_PATH="${RUNTIME_STATE_DB_PATH:-$STATE_ROOT/var/db/runtime_state.db}"
 export RUNTIME_DB_PATH="${RUNTIME_DB_PATH:-$STATE_ROOT/var/db/trading.db}"
@@ -31,4 +30,4 @@ export APP_LOG_PATH="${APP_LOG_PATH:-$STATE_ROOT/var/logs/openhamster.log}"
 export OPENHAMSTER_STDOUT_LOG_PATH="${OPENHAMSTER_STDOUT_LOG_PATH:-$STATE_ROOT/logs/openhamster-api.out.log}"
 export OPENHAMSTER_STDERR_LOG_PATH="${OPENHAMSTER_STDERR_LOG_PATH:-$STATE_ROOT/logs/openhamster-api.err.log}"
 
-exec "$VENV_PYTHON" -m openhamster.api.main
+exec "$VENV_PYTHON" -m openhamster.watchdog.local_watchdog

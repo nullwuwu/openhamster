@@ -563,6 +563,90 @@ export interface RuntimeLog {
   lines: string[]
 }
 
+export interface RuntimeWatchdogSnapshot {
+  checked_at?: string | null
+  status: string
+  summary: string
+  service_healthy: boolean
+  command_available: boolean
+  restart_attempted: boolean
+  restart_reason?: string | null
+  current_state?: string | null
+  current_stage?: string | null
+  detected_issues: string[]
+  fallback_detected: boolean
+  macro_degraded: boolean
+  llm_using_mock_fallback: boolean
+  stalled_detected: boolean
+  error_log_signal_count: number
+  error_log_excerpt: string[]
+}
+
+export interface RuntimeStats {
+  window_days: number
+  total_sync_runs: number
+  success_rate: number
+  avg_duration_ms?: number | null
+  degraded_runs: number
+  failed_runs: number
+  stalled_runs: number
+  watchdog_issue_count: number
+  watchdog_restart_count: number
+}
+
+export interface ReadinessStats {
+  window_days: number
+  latest_score?: number | null
+  avg_score?: number | null
+  best_score?: number | null
+  score_change?: number | null
+  dominant_blockers: string[]
+  status_counts: Record<string, number>
+}
+
+export interface ProviderStats {
+  window_days: number
+  current_provider: string
+  current_avg_final_score?: number | null
+  current_promotion_rate: number
+  current_fallback_rate: number
+  current_real_proposal_count: number
+  cohort_count: number
+  fallback_rate_delta?: number | null
+  promotion_rate_delta?: number | null
+}
+
+export interface PaperStats {
+  window_days: number
+  slot_count: number
+  occupied_slot_count: number
+  challenger_count: number
+  total_execution_count: number
+  executed_count: number
+  skipped_count: number
+  fill_rate?: number | null
+  max_drawdown?: number | null
+  aggregate_equity_change?: number | null
+  incident_count: number
+}
+
+export interface KnowledgeOpsStats {
+  source_count: number
+  external_entry_count: number
+  suggestion_status_counts: Record<string, number>
+  review_ready_count: number
+  adopted_candidate_count: number
+  top_families: string[]
+}
+
+export interface LongHorizonStats {
+  runtime: RuntimeStats
+  readiness: ReadinessStats
+  provider: ProviderStats
+  paper: PaperStats
+  knowledge: KnowledgeOpsStats
+}
+
 export interface ResearchBatch {
   batch_id: string
   market_scope: string
@@ -678,6 +762,8 @@ export interface CommandCenter {
   timezone: string
   llm_status: LLMStatus
   runtime_status: PipelineRuntimeStatus
+  runtime_watchdog: RuntimeWatchdogSnapshot
+  runtime_watchdog_history: RuntimeWatchdogSnapshot[]
   runtime_sync_history: RuntimeSyncHistoryItem[]
   provider_migration: ProviderMigrationSummary
   provider_migration_history: ProviderCohortHistoryItem[]
@@ -689,6 +775,7 @@ export interface CommandCenter {
   paper_summary: PaperSummary
   paper_pool_summary: PaperPoolSummary
   paper_pool: PaperPool
+  long_horizon_stats: LongHorizonStats
   active_strategy: ActiveStrategy
   candidate_count: number
   latest_risk_decision: RiskDecision | null

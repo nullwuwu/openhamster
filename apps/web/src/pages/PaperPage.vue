@@ -33,6 +33,12 @@ const paperSlotsQuery = useQuery({
 const active = computed(() => activeStrategyQuery.data.value)
 const paperSlots = computed(() => paperSlotsQuery.data.value ?? [])
 const challengerSlots = computed(() => paperSlots.value.filter((item) => item.slot_id !== 'primary'))
+const commandQuery = useQuery({
+  queryKey: ['paper-command-context'],
+  queryFn: api.getCommandCenter,
+  refetchInterval: 10_000,
+})
+const longHorizon = computed(() => commandQuery.data.value?.long_horizon_stats)
 const navRows = computed(() => active.value?.paper_trading.nav ?? [])
 const orders = computed(() => active.value?.paper_trading.orders ?? [])
 const positions = computed(() => active.value?.paper_trading.positions ?? [])
@@ -329,6 +335,37 @@ function actionVariant(action?: string): 'neutral' | 'success' | 'warning' | 'da
 
 <template>
   <div class="space-y-4">
+    <Card class="border border-slate-200/80 bg-white">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h3 class="text-sm font-semibold text-slate-900">Paper Long-Horizon View</h3>
+          <p class="mt-1 text-sm text-slate-600">这里聚焦多席位的长期执行厚度，不只看单次净值截图。</p>
+        </div>
+      </div>
+      <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">Slot</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.paper.occupied_slot_count ?? 0 }} / {{ longHorizon?.paper.slot_count ?? 0 }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">30d 执行</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.paper.executed_count ?? 0 }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">Fill Rate</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ formatPercent(longHorizon?.paper.fill_rate) }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">Max DD</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ formatPercent(longHorizon?.paper.max_drawdown) }}</p>
+        </div>
+        <div class="rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-3">
+          <p class="text-xs uppercase tracking-widest text-slate-500">30d Incident</p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">{{ longHorizon?.paper.incident_count ?? 0 }}</p>
+        </div>
+      </div>
+    </Card>
+
     <Card>
       <h3 class="text-sm font-semibold">{{ t('paper.title') }}</h3>
       <p class="mt-1 text-sm text-slate-600">{{ t('paper.subtitle') }}</p>

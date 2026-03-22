@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.openhamster.watchdog</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO_ROOT__/scripts/run_watchdog.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO_ROOT__</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StartInterval</key>
+  <integer>300</integer>
+
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/openhamster-watchdog.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/openhamster-watchdog.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>DATABASE_URL</key>
+    <string>sqlite:///__STATE_ROOT__/var/db/openhamster.db</string>
+    <key>RUNTIME_DB_PATH</key>
+    <string>__STATE_ROOT__/var/db/trading.db</string>
+    <key>PAPER_DB_PATH</key>
+    <string>__STATE_ROOT__/var/db/paper_trading.db</string>
+    <key>RUNTIME_STATE_DB_PATH</key>
+    <string>__STATE_ROOT__/var/db/runtime_state.db</string>
+    <key>MARKET_CACHE_PATH</key>
+    <string>__STATE_ROOT__/var/cache/market_data_cache.db</string>
+    <key>APP_LOG_PATH</key>
+    <string>__STATE_ROOT__/var/logs/openhamster.log</string>
+    <key>OPENHAMSTER_LOG_DIR</key>
+    <string>__LOG_DIR__</string>
+    <key>OPENHAMSTER_STDOUT_LOG_PATH</key>
+    <string>__LOG_DIR__/openhamster-api.out.log</string>
+    <key>OPENHAMSTER_STDERR_LOG_PATH</key>
+    <string>__LOG_DIR__/openhamster-api.err.log</string>
+    <key>OPENHAMSTER_WATCHDOG_TARGET_LABEL</key>
+    <string>com.openhamster.api</string>
+    <key>OPENHAMSTER_WATCHDOG_HEALTH_URL</key>
+    <string>http://127.0.0.1:8000/healthz</string>
+    <key>OPENHAMSTER_WATCHDOG_COMMAND_URL</key>
+    <string>http://127.0.0.1:8000/api/v1/command</string>
+  </dict>
+</dict>
+</plist>

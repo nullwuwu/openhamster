@@ -222,12 +222,21 @@ def test_command_center_includes_llm_status() -> None:
         assert 'local_logs_available' in data['runtime_status']
         assert 'runtime_sync_history' in data
         assert isinstance(data['runtime_sync_history'], list)
+        assert 'runtime_watchdog' in data
+        assert 'runtime_watchdog_history' in data
+        assert isinstance(data['runtime_watchdog']['detected_issues'], list)
+        assert isinstance(data['runtime_watchdog']['error_log_excerpt'], list)
+        assert isinstance(data['runtime_watchdog_history'], list)
         assert 'provider_migration' in data
         assert 'provider_migration_history' in data
         assert data['provider_migration']['current_provider'] in {'minimax', 'mock'}
         assert 'summary' in data['provider_migration']
         assert 'current' in data['provider_migration']
         assert isinstance(data['provider_migration_history'], list)
+        assert 'long_horizon_stats' in data
+        assert data['long_horizon_stats']['runtime']['window_days'] == 30
+        assert data['long_horizon_stats']['paper']['slot_count'] >= 1
+        assert 'top_families' in data['long_horizon_stats']['knowledge']
         assert data['llm_status']['provider'] in {'minimax', 'mock'}
         assert 'event_lane_sources' in data['market_snapshot']
         assert set(data['market_snapshot']['event_lane_sources']) == {'macro'}

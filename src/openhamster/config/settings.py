@@ -43,7 +43,7 @@ class StrategySettings(BaseModel):
 class UniverseSettings(BaseModel):
     mode: str = "dynamic_hk"
     top_n: int = 20
-    research_batch_size: int = 3
+    research_batch_size: int = 5
     min_list_days: int = 120
     exclude_st: bool = True
     include_gem: bool = True
@@ -89,7 +89,7 @@ class GovernanceSettings(BaseModel):
     promote_threshold: float = 75.0
     keep_threshold: float = 68.0
     challenger_min_delta: float = 3.0
-    paper_slot_count: int = 1
+    paper_slot_count: int = 3
     cooldown_days: int = 5
     require_backtest_before_paper: bool = True
     candidate_retention_limit: int = 24

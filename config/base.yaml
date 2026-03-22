@@ -78,7 +78,7 @@ strategy:
 universe:
   mode: dynamic_hk
   top_n: 20
-  research_batch_size: 3
+  research_batch_size: 5
   min_list_days: 120
   exclude_st: true
   include_gem: true
@@ -133,7 +133,7 @@ governance:
   promote_threshold: 75.0
   keep_threshold: 68.0
   challenger_min_delta: 3.0
-  paper_slot_count: 1
+  paper_slot_count: 3
   cooldown_days: 5
   require_backtest_before_paper: true
   candidate_retention_limit: 24
