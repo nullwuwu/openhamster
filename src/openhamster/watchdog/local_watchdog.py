@@ -31,6 +31,14 @@ def _command_url() -> str:
     return os.environ.get("OPENHAMSTER_WATCHDOG_COMMAND_URL", "http://127.0.0.1:8000/api/v1/command")
 
 
+def _command_timeout_seconds() -> float:
+    raw = os.environ.get("OPENHAMSTER_WATCHDOG_COMMAND_TIMEOUT_SECONDS", "15")
+    try:
+        return max(5.0, float(raw))
+    except ValueError:
+        return 15.0
+
+
 def _service_label() -> str:
     return os.environ.get("OPENHAMSTER_WATCHDOG_TARGET_LABEL", "com.openhamster.api")
 
@@ -102,7 +110,7 @@ def run_watchdog() -> dict[str, Any]:
         issues.append("healthz_unreachable")
 
     try:
-        command = _json_get(_command_url())
+        command = _json_get(_command_url(), timeout=_command_timeout_seconds())
         if command is not None:
             command_available = True
             runtime_status = dict(command.get("runtime_status", {}) or {})

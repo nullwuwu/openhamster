@@ -5,11 +5,12 @@ from datetime import datetime, timedelta
 from sqlalchemy import inspect, select
 
 from openhamster.api.db import SessionLocal, engine, init_database
-from openhamster.api.models import AuditRecord, EventRecord, EventType
+from openhamster.api.models import AuditRecord, EventRecord, EventType, ExternalKnowledgeEntry, KnowledgeSource, KnowledgeSuggestion
 from openhamster.api.services import (
     ensure_pipeline_runtime_status_baseline,
     _set_pipeline_runtime_stage,
     _set_pipeline_runtime_status,
+    build_knowledge_phase2_stats,
     get_macro_pipeline_status,
     get_pipeline_runtime_status,
     get_universe_selection,
@@ -249,6 +250,77 @@ def test_hk_universe_resilient_fallback_keeps_multi_symbol_candidates(monkeypatc
     assert len(candidates) >= 2
     assert all(str(item['symbol']).endswith('.HK') for item in candidates[:2])
     assert any(str(item.get('source')) == 'resilient_fallback' for item in candidates)
+
+
+def test_build_knowledge_phase2_stats_is_read_only(monkeypatch) -> None:
+    init_database()
+    current_time = now_tz()
+    monkeypatch.setattr(
+        'openhamster.api.services._seed_external_knowledge',
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('should not seed during read')),
+    )
+
+    with SessionLocal() as db:
+        source_id = f'source-{int(current_time.timestamp())}'
+        entry_id = f'entry-{int(current_time.timestamp())}'
+        suggestion_id = f'suggestion-{int(current_time.timestamp())}'
+        db.add(
+            KnowledgeSource(
+                source_id=source_id,
+                source_name='Source 1',
+                source_kind='curated',
+                publisher='OpenHamster',
+                url='https://example.com/1',
+                license_note='public',
+                trust_tier='high',
+                enabled=True,
+                last_reviewed_at=current_time,
+                created_at=current_time,
+                updated_at=current_time,
+            )
+        )
+        db.add(
+            ExternalKnowledgeEntry(
+                entry_id=entry_id,
+                source_id=source_id,
+                title='Entry 1',
+                summary_zh='summary',
+                family_keys=['trend_following'],
+                market_scope='HK',
+                content_type='note',
+                source_excerpt_ref='ref',
+                structured_payload={},
+                status='proposed',
+                created_at=current_time,
+                updated_at=current_time,
+            )
+        )
+        db.add(
+            KnowledgeSuggestion(
+                suggestion_id=suggestion_id,
+                market_scope='HK',
+                family_key='trend_following',
+                suggestion_type='internal_pattern',
+                origin='internal',
+                current_value={'family': 'trend_following'},
+                suggested_value={'status': 'review_ready'},
+                rationale_zh='rationale',
+                confidence=0.72,
+                evidence_counts={'proposal': 3},
+                linked_source_ids=[source_id],
+                status='review_ready',
+                created_at=current_time,
+                updated_at=current_time,
+            )
+        )
+        db.commit()
+
+        stats = build_knowledge_phase2_stats(db)
+
+    assert stats['source_count'] >= 1
+    assert stats['external_entry_count'] >= 1
+    assert stats['review_ready_count'] >= 1
+    assert 'trend_following' in stats['top_families']
 
 
 def test_macro_pipeline_health_history_aggregates_recent_audits() -> None:

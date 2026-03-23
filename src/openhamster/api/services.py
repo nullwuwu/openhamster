@@ -366,7 +366,6 @@ def _seed_external_knowledge(db: Session, *, current_time: datetime | None = Non
 
 
 def _external_knowledge_payload_for_market(db: Session, market_scope: str) -> list[dict[str, object]]:
-    _seed_external_knowledge(db)
     records = list(
         db.execute(
             select(ExternalKnowledgeEntry)
@@ -1410,7 +1409,6 @@ def build_paper_long_horizon_stats(db: Session, *, window_days: int = 30) -> dic
 
 
 def build_knowledge_phase2_stats(db: Session) -> dict[str, object]:
-    _seed_external_knowledge(db)
     source_count = int(db.execute(select(func.count()).select_from(KnowledgeSource)).scalar_one())
     external_entry_count = int(db.execute(select(func.count()).select_from(ExternalKnowledgeEntry)).scalar_one())
     suggestions = list(db.execute(select(KnowledgeSuggestion)).scalars())
@@ -7420,16 +7418,12 @@ def list_candidate_strategies(db: Session) -> list[StrategyProposal]:
 
 
 def list_knowledge_sources(db: Session) -> list[KnowledgeSource]:
-    _seed_external_knowledge(db)
-    db.commit()
     return list(
         db.execute(select(KnowledgeSource).order_by(KnowledgeSource.source_name.asc())).scalars()
     )
 
 
 def list_knowledge_suggestions(db: Session, limit: int = 100) -> list[KnowledgeSuggestion]:
-    _refresh_knowledge_suggestions(db, market_scope='HK', current_time=now_tz())
-    db.commit()
     return list(
         db.execute(
             select(KnowledgeSuggestion)
@@ -7440,8 +7434,6 @@ def list_knowledge_suggestions(db: Session, limit: int = 100) -> list[KnowledgeS
 
 
 def get_knowledge_suggestion(db: Session, suggestion_id: str) -> KnowledgeSuggestion | None:
-    _refresh_knowledge_suggestions(db, market_scope='HK', current_time=now_tz())
-    db.commit()
     return db.execute(
         select(KnowledgeSuggestion).where(KnowledgeSuggestion.suggestion_id == suggestion_id)
     ).scalars().first()
